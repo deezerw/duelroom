@@ -1,84 +1,86 @@
 # Stage 5 — Optimizer
 
-## Goal
+**Rewritten after Stage 2.** ygorl ships deck tuning and MAP-Elites evolution
+(`tools/tune_deck.py`, `tools/evolve_decks.py`, pyribs, a synergy graph, a surrogate
+model). **Both tuners require `--checkpoint`: a trained policy network.** We do not have
+one and cannot train one — the published agents took 32 GPUs for days and this box is
+CPU-only with no discrete GPU.
 
-Turn the measurements into decisions: which flex slots to change in the main deck, and
-what the side deck should be for each matchup.
+So the tuner path is closed, and the plan reverts to what it always was: hill climb the
+flex slots, judged by the checkpoint-free solver metrics from Stages 3 and 4.
 
-## Why this is tractable
+This is fine. It may even be better — the solver is a stronger pilot on turn 1 than any
+policy we could have trained, and turn 1 is what decides modern Yu-Gi-Oh.
+
+## Why this is affordable
 
 Stage 1's inclusion analysis already cut the problem down. You are not searching 40
-cards against a 13,000-card pool — you are searching roughly 8 flex slots against about
-30 cards that real players actually run. That is three orders of magnitude off the
-search space, and it is the only reason this stage is cheap.
+cards against a 13,000-card pool — you are searching ~8 flex slots against about 30
+cards real players run. Three orders of magnitude off the search space, and the only
+reason this stage is cheap.
 
 ## Build — `skills/optimizer.py`
 
 ### Candidate pool
-- Flex + fringe cards from `inclusion` for your archetype
-- Plus cards matching your deck's mechanical requirements (type / attribute / level /
-  archetype overlap with your existing extenders)
-- Filter by banlist legality
-
-A plain text and attribute filter gets ~90% of useful pruning. Only reach for Ollama
-card tagging if the pool is genuinely still too wide — it is a nice-to-have, not a
-dependency.
+- Flex and fringe cards from `inclusion` for your archetype
+- Plus cards matching your deck's mechanical requirements (type / attribute / level
+  overlap with existing extenders)
+- Minus anything Stage 3's per-card liveliness flags as a garnet
+- Filter by banlist legality (`deck.validate`)
 
 ### Main deck search
 Hill climb over 1–3 card swaps:
 
 1. Propose a swap within the flex slots
-2. Re-run Stage 3 consistency and Stage 4 scenarios
+2. Re-run Stage 3 consistency and the Stage 4 scenarios
 3. Accept if the weighted objective improves
 4. Repeat until no single swap improves
 
-**Paired seeds are mandatory.** Both variants must see identical shuffle seeds (common
-random numbers). This is the single biggest variance reduction available — without it
-you need thousands of trials to see a real 2-point difference; with it, a fraction of
-that.
+**Paired seeds are mandatory and already built in** — `funnel_eval` uses the same
+shuffle permutations across decks by construction. Use `--max-rollouts` so runs are
+reproducible rather than load-dependent.
 
-Objective function, weighted and configurable:
-- Brick rate (minimize)
-- Combo completion (maximize)
-- Handtrap survival, weighted by `LOCALS_WEIGHTS`
-- Board-break rate, weighted by board frequency and `LOCALS_WEIGHTS`
+Objective, weighted and configurable:
+- Real brick rate (minimize)
+- Solve rate and mean interruptions (maximize)
+- Handtrap survival, weighted by `locals.toml`
+- Board-break rate, weighted by board frequency and `locals.toml`
 - Floodgate resilience
 
 ### Side deck search
-Same loop, different objective. For each archetype in the gauntlet:
-- Which candidate cards most raise the **going-second break rate** against that
-  archetype's board distribution?
-- What is the minimum swap set that achieves it, and does the deck still function after
-  the swap? A side card that fixes a matchup but bricks the deck is a trap.
-- Output a per-matchup side plan: cards in, cards out.
+Same loop, different objective. Per archetype in the gauntlet:
+- Which candidates most raise the going-second break rate against that archetype's
+  board distribution?
+- What is the minimum swap set, and does the deck still function after it?
+- Output a per-matchup plan: cards in, cards out.
 
-15 slots against 8-ish matchups is a small combinatorial problem — a greedy pass
-followed by a local search is plenty. Do not over-engineer this.
+15 slots over ~8 matchups is small. Greedy then local search is plenty.
 
-### Optional: MAP-Elites
-[ygorl](https://github.com/n0tevi1/ygorl) ships MAP-Elites deck evolution via `pyribs`.
-If Stage 2 landed on ygorl, this is close to free and gives you a diverse archive of
-viable builds rather than one local optimum. Worth trying after plain hill climbing
-works — not before.
+### Worth stealing from ygorl even without a checkpoint
+- `tools/build_synergy_graph.py` — card co-occurrence from real lists (upstream reports
+  0.935 recall against the real meta). A better candidate generator than text filtering.
+- `funnel_eval`'s verdict logic — `--max-brick-rate` / `--min-survival` early stopping
+  kills bad candidates before spending a full budget on them.
 
 ## Deliverables
 
-1. Ranked list of main deck swaps with measured deltas and confidence intervals.
-2. A per-matchup side deck plan: cards in, cards out, measured break-rate improvement.
-3. A diff report against the scraped consensus list — where your build departs from the
-   meta, and whether the numbers justify it.
+1. Ranked main deck swaps with measured deltas and confidence intervals.
+2. Per-matchup side deck plan with measured break-rate improvement.
+3. A diff against the scraped consensus list — where your build departs from the meta,
+   and whether the numbers justify it.
 
 ## Gotchas
 
-- **Report confidence intervals on every delta.** A 1-point improvement inside a 4-point
-  CI is not an improvement, and hill climbing on noise will happily converge to garbage.
-- Hill climbing finds local optima. Run from several random restarts and compare.
-- Guard against overfitting to the board library. Hold out a few archetypes, optimize on
-  the rest, then check the result still holds on the held-out set.
-- The optimizer's objective encodes your assumptions about your locals. When results
-  look strange, suspect `LOCALS_WEIGHTS` and the scoring weights before the search.
-- Re-run after every banlist. The flex-slot analysis shifts, and so does everything
-  built on it.
+- **Confidence intervals on every delta.** A 1-point gain inside a 4-point CI is not a
+  gain, and hill climbing on noise converges to garbage. `stats.wilson` exists.
+- Budget: at ~20 s/hand, each candidate evaluation at 100 hands is ~35 minutes on 6
+  workers. The flex-slot narrowing and early stopping are what make this finish.
+- Hill climbing finds local optima. Several random restarts, then compare.
+- Hold out a few archetypes, optimize on the rest, check the result holds on the
+  held-out set. Otherwise you fit the board library rather than the game.
+- When results look strange, suspect `locals.toml` and the objective weights before the
+  search.
+- Re-run after every banlist: the flex-slot analysis shifts and everything rests on it.
 
 ---
 Delete this file when the stage is complete and verified.

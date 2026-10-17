@@ -143,14 +143,19 @@ Work through these in order. Each stage is in its own file — delete the file o
 stage is complete and verified.
 
 1. ~~Meta ingestion & card database~~ — **done** (card_db, meta_scrape, deck, stats, daemon)
-2. `STAGE2.md` — Engine harness (`engine.py`)
-3. `STAGE3.md` — Solitaire solver + validation gate (`solver.py`, `scoring.py`)
-4. `STAGE4.md` — Scenario suite (`scenarios.py`)
-5. `STAGE5.md` — Optimizer (`optimizer.py`)
+2. ~~Engine harness~~ — **done** (`engine.py` drives ygorl + ygo-combo-solver)
+3. `STAGE3.md` — Validation gate, scale, storage *(rewritten: the solver exists)*
+4. `STAGE4.md` — Scenario suite *(rewritten: handtraps exist, board breaking is open)*
+5. `STAGE5.md` — Optimizer *(rewritten: ygorl's tuners need a policy checkpoint we
+   cannot train, so the flex-slot hill climb stands)*
 
-Stage 1 deliberately came first: it needs no C++ build, produces real output on day one,
-and de-risks the project while Stage 2 is being fought. **Stage 2 is next, and is the
-whole risk of the project** -- time-box each engine option before trying the next.
+Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
+builds clean on Python 3.12 and already provides the engine, determinism patches,
+snapshot/branch, paired seeds, replay export and a wrapped combo solver. Stages 3-5 were
+rewritten against what actually exists rather than what was planned.
+
+**Stage 3 is next, and the validation gate is the real gate** -- the solver must
+reproduce a known published combo line before any downstream number can be trusted.
 
 **Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
 detail yet — see "Why No Duel AI (Yet)" above for the trade.

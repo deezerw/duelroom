@@ -1,71 +1,82 @@
 # Stage 4 — Scenario Suite
 
-## Goal
+**Rewritten after Stage 2.** The handtrap machinery exists upstream. Board breaking is
+the open question and is the real work of this stage.
 
-Stop asking "is my deck good" and start asking the three questions that decide locals:
-can it play through interruption, can it break what it will face, and does it fold to a
-floodgate.
+## 1. Handtrap matrix — mostly built
 
-All of this is the Stage 3 solver run from different starting conditions. No new engine
-work, no opponent AI.
+`tools/funnel_eval.py` takes `--fire PASSWORD` (repeatable) and re-runs every solved
+hand with each handtrap fired, reporting survival. That is the handtrap matrix.
 
-## Build — `skills/scenarios.py`
-
-### 1. Handtrap injection (going first)
-Replay your line with a handtrap fired at **every** decision point, and take the worst
-case — assume a competent opponent.
-
-Cover at minimum: Ash Blossom, Infinite Impermanence, Maxx "C", Nibiru, Droll & Lock
-Bird, Ghost Ogre, Effect Veiler.
-
-Output per handtrap: does the line survive, and what does the end board degrade to.
-
-### 2. The handtrap matrix
-Run the above against every **meta** deck's line as well, using the Stage 3 board
-library. The result is a table:
+Run it for your deck and for every meta deck in the Stage 3 board library, over at
+minimum: Ash Blossom, Infinite Impermanence, Maxx "C", Nibiru, Droll & Lock Bird,
+Ghost Ogre, Effect Veiler.
 
 | Deck | Ash | Imperm | Droll | Nibiru | Veiler |
 |---|---|---|---|---|---|
 | … | 60% stopped | 25% | 80% | 15% | 30% |
 
-Weight the columns by `LOCALS_WEIGHTS` and you have a direct answer to **which handtraps
-to main deck** — arguably the most actionable output in the whole system, and nobody
-does it systematically.
+Weight the columns by `locals.toml` and you have a direct answer to **which handtraps to
+main deck**. This is the most actionable output in the project and nobody does it
+systematically.
 
-### 3. Board breaking (going second)
-For each board in the `boards` library: construct it via `engine.set_board()`, deal
-yourself a going-second opening hand, and search for a win or a meaningful break.
+Two things duelroom must add:
+- `funnel_eval` wants a per-deck `--targets` JSON. `solve_blocking` plans targets
+  automatically from card scripts instead. Either generate a targets file from a
+  `solve_blocking` pass, or add `--fire` handling to the blocking path.
+- Test the common **pairs** (Ash + Imperm), not only singles. Handtraps compound and
+  locals players hold more than one.
+
+Nibiru counts and Maxx "C" cost fall out of the solver's special-summon tracking for
+free — emit them alongside.
+
+## 2. Board breaking — the open item
+
+**This is the one Stage 2 deliverable not yet verified: constructing an arbitrary board
+and querying it back.** ygorl has arena snapshot/restore and `ygorl branch`, so the
+capability is almost certainly there, but duelroom has not exercised it.
+
+Verify that first, then: for each board in the Stage 3 library, construct it, deal a
+going-second hand, and search for a break.
 
 Report per archetype:
-- Break rate, with Wilson CI
-- Which of your cards did the breaking (this feeds Stage 5's side deck search)
-- Which boards you simply cannot beat — equally valuable to know
+- Break rate with Wilson CI (`stats.wilson`)
+- Which of your cards did the breaking — this feeds Stage 5's side deck search
+- Which boards you simply cannot beat; equally worth knowing
 
-### 4. Floodgate check
-Cheap static test: set up Skill Drain, Dimensional Barrier, Rivalry of Warlords,
-There Can Be Only One, Summon Limit, and check whether your deck still functions.
+Weight break rates by board *frequency*. The library is a distribution, and optimizing
+against a board they rarely assemble is wasted effort.
 
-**Locals run floodgates far more than top tables do.** This test costs almost nothing
-and catches a real way to lose.
+If arbitrary board construction turns out to be unavailable, the fallback is to start
+from a replay of the opponent's solved turn-1 line (`ygorl branch` forks a replay at a
+decision point) and take over from there. Slower, but it uses only verified machinery.
+
+## 3. Floodgate check
+
+Cheap static test using the same board-construction path: Skill Drain, Dimensional
+Barrier, Rivalry of Warlords, There Can Be Only One, Summon Limit. Does the deck still
+function?
+
+**Locals run floodgates far more than top tables do.** Costs almost nothing and catches
+a real way to lose.
 
 ## Deliverables
 
-1. Per-handtrap survival rates for your deck, going first.
-2. The full handtrap matrix across the meta, weighted by your locals config.
-3. Board-break rates against every archetype in the library, with CIs.
+1. Per-handtrap survival for your deck, going first, singles and common pairs.
+2. The full handtrap matrix across the meta, weighted by `locals.toml`.
+3. Board-break rates per archetype with CIs — or a documented finding that arbitrary
+   board construction is unavailable and the replay-fork fallback in its place.
 4. Floodgate vulnerability report.
-5. Everything split **going first vs going second**. The die roll dominates modern
-   Yu-Gi-Oh; an averaged number hides the answer.
+5. Everything split going first vs going second.
 
 ## Gotchas
 
-- Worst-case handtrap timing is the honest assumption, but also report best-case — the
-  gap between them tells you how much the matchup rides on opponent skill.
-- Multiple handtraps compound. Test the common pairs (Ash + Imperm), not just singles.
-- The board library is a distribution, not one board. Weight break rates by board
-  frequency or you will optimize against a board they rarely assemble.
-- Going-second hands should assume the opponent's turn happened — adjust hand size and
-  available draws accordingly.
+- Worst-case handtrap timing is the honest default, but report best-case too: the gap
+  tells you how much the matchup rides on opponent skill.
+- Going-second hands must assume the opponent's turn happened — hand size and draws
+  differ from going first.
+- A side card that fixes a matchup but bricks the deck is a trap. Always re-run Stage 3
+  consistency on a sided configuration.
 
 ---
 Delete this file when the stage is complete and verified.
