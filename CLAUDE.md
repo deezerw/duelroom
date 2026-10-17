@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**goldfish** is a Yu-Gi-Oh! deck laboratory. It scrapes the current meta from YGOPRODeck,
+**duelroom** is a Yu-Gi-Oh! deck laboratory. It scrapes the current meta from YGOPRODeck,
 runs a solitaire search over the real rules engine to find the best line from any given
 hand, and uses that to answer the questions that actually win locals: is my deck
 consistent, can it play through handtraps, can it break the boards it will face, and
@@ -16,7 +16,7 @@ everything.
 ## Running It
 
 ```bash
-source /home/deezer/goldfish/venv/bin/activate
+source /home/deezer/duelroom/venv/bin/activate
 python daemon.py
 ```
 
@@ -27,7 +27,7 @@ Interactive commands at the prompt:
 - `optimize <deck.ydk>` — flex-slot and side deck search
 - `quit` / `q` — exit
 
-## Why No Duel AI
+## Why No Duel AI (Yet)
 
 Yu-Gi-Oh's open AI (WindBot) is rule-based with a hand-written executor per archetype.
 It cannot pilot a deck nobody wrote an executor for, and it plays combo decks badly even
@@ -44,6 +44,14 @@ Two observations remove the need for an opponent AI entirely:
    the same solver at a meta deck to generate its realistic turn-1 end boards, then deal
    yourself a going-second hand and search for a break. The decks "duel" in the only
    sense that matters, with no opponent AI anywhere.
+
+**Bot-vs-bot is deferred, not rejected.** It is the natural Stage 6 once the solver is
+trusted, and the design deliberately leaves room for it: `engine.py` already drives both
+seats, and a solver good enough to pilot your deck is most of a solver good enough to
+pilot the opponent's. What it would add is interaction the solitaire model cannot see —
+chain fights, grind games, decisions made with incomplete information. What it costs is
+thousands of games per comparison for a couple of points of win rate, on 8 cores. Build
+it when the cheap questions are answered, not before.
 
 ## Architecture & Data Flow
 
@@ -76,7 +84,7 @@ meta deck to build an end-board library → scenarios test your deck against tha
 | `scoring.py` | Board weights: negates, card advantage, ATK, GY resources |
 | `scenarios.py` | `HANDTRAPS`, `FLOODGATES`, `TRIALS_PER_SCENARIO` |
 
-## SQLite Schema (`data/goldfish.db`)
+## SQLite Schema (`data/duelroom.db`)
 
 **`cards`** — `id`, `name`, `type`, `attribute`, `race`, `level`, `atk`, `def`,
 `archetype`, `text`, `banlist_tcg`, `banlist_ocg`, `last_fetched`
@@ -142,3 +150,6 @@ stage is complete and verified.
 
 Stage 1 deliberately comes first: it needs no C++ build, produces real output on day one,
 and de-risks the project while Stage 2 is being fought.
+
+**Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
+detail yet — see "Why No Duel AI (Yet)" above for the trade.
