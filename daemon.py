@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import card_db, db, meta_scrape as ms, stats
+from skills import card_db, db, engine, meta_scrape as ms, stats
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -27,6 +27,9 @@ duelroom — Yu-Gi-Oh! deck laboratory
   hand <deck.ydk>           exact opening-hand math
   check <deck.ydk>          legality and banlist check
   decks                     list .ydk files in assets/decks/
+  export <archetype> [name] write a scraped list out as a .ydk
+  engine                    engine setup status and pinned versions
+  solve <deck> [hands]      turn-1 line search: solve rate + board quality
   help / quit
 """
 
@@ -161,6 +164,69 @@ def cmd_check(conn, args):
         print(f"  ! {p}")
 
 
+def cmd_engine(conn, args):
+    problems = engine.check()
+    if problems:
+        print("engine NOT ready:")
+        for p in problems:
+            print(f"  ! {p}")
+        print(f"\n  setup instructions are in {engine.__name__}'s docstring")
+        return
+    print(f"engine ready ({engine.DEFAULT_WORKERS} workers, "
+          f"{engine.SOLVE_MS/1000:.0f}s solver budget per hand)")
+    for k, v in engine.versions().items():
+        print(f"  {k:14} {v}")
+
+
+def cmd_solve(conn, args):
+    if not args:
+        print("usage: solve <deck.ydk> [hands]")
+        return
+    path = _resolve_deck(args[0])
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    hands = int(args[1]) if len(args) > 1 else 8
+    print(f"solving {hands} opening hands for {path.stem} "
+          f"({engine.DEFAULT_WORKERS} workers, {engine.SOLVE_MS/1000:.0f}s/hand budget)")
+    print("this is CPU-bound and not fast — see STAGE3.md on budgets\n")
+    summary = engine.solve_blocking(path, hands=hands)
+    for row in engine.summarise(summary):
+        print(f"\n  {row['deck']}")
+        print(f"    solve rate        {row['solved']}/{row['hands']} "
+              f"({row['solve_rate']*100:.0f}%)")
+        print(f"    mean interrupts   {row['mean_interruptions']:.2f}")
+        print(f"    per hand          {row['s_per_hand']:.1f}s")
+        print(f"    distribution      {row['interruptions']}")
+
+
+def cmd_export(conn, args):
+    if not args:
+        print("usage: export <archetype> [filename]")
+        return
+    archetype = args[0]
+    row = conn.execute(
+        """SELECT d.id, d.title, d.placement FROM decks d
+             JOIN deck_tags t ON t.deck_id = d.id
+            WHERE t.tag = ? ORDER BY d.id LIMIT 1""",
+        (archetype,),
+    ).fetchone()
+    if not row:
+        print(f"no stored lists tagged {archetype!r}")
+        return
+    secs = {"main": [], "extra": [], "side": []}
+    for r in conn.execute(
+        "SELECT card_id, section, copies FROM deck_cards WHERE deck_id = ?",
+        (row["id"],),
+    ):
+        secs[r["section"]] += [r["card_id"]] * r["copies"]
+    name = args[1] if len(args) > 1 else archetype.lower().replace(" ", "-")
+    d = Deck(name=name, **secs)
+    DECKS.mkdir(parents=True, exist_ok=True)
+    d.write_ydk(DECKS / f"{name}.ydk")
+    print(f"wrote {name}.ydk — {row['title']} ({row['placement']}) {d}")
+
+
 def cmd_decks(conn, args):
     DECKS.mkdir(parents=True, exist_ok=True)
     files = sorted(DECKS.glob("*.ydk"))
@@ -179,6 +245,9 @@ COMMANDS = {
     "hand": cmd_hand,
     "check": cmd_check,
     "decks": cmd_decks,
+    "export": cmd_export,
+    "engine": cmd_engine,
+    "solve": cmd_solve,
 }
 
 
