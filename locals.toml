@@ -1,0 +1,30 @@
+# Who you actually face, not who wins YCS.
+#
+# Top tournament lists are the optimised, funded, fully-teched field. Locals
+# run budget builds, last format's deck, and rogue piles. Every gauntlet and
+# every optimizer objective weights by THIS file, not by global meta share --
+# otherwise you tune perfectly for a room you never sit in.
+#
+# Weights are relative and need not sum to 1. Archetype names must match the
+# tags shown by the `archetypes` command.
+#
+# Edit this by hand after each locals. Guessing is better than defaulting.
+
+[meta]
+format = "Tournament Meta Decks"
+# How far back the scraper looks when refreshing.
+window_days = 120
+
+[weights]
+# --- placeholder: replace with your own room's spread ---
+"Kewl Tune" = 0.20
+"Branded" = 0.15
+"Light and Darkness Ritual" = 0.10
+"Elfnote" = 0.10
+"Azamina" = 0.10
+"Mitsurugi" = 0.05
+
+# Decks that are not tier 1 but show up locally anyway. Keep this honest --
+# if half your room is rogue, say so, or the optimizer will over-tune against
+# boards you rarely see.
+"rogue" = 0.30

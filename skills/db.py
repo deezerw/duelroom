@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS card_aliases (
 
 CREATE TABLE IF NOT EXISTS decks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    archetype   TEXT NOT NULL,
+    archetype   TEXT,          -- longest-match primary; a hint, see deck_tags
     format      TEXT NOT NULL,
     source_url  TEXT,
     title       TEXT,
@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS decks (
     UNIQUE(list_hash, format)
 );
 CREATE INDEX IF NOT EXISTS idx_decks_arch ON decks(archetype, format);
+
+-- Archetype labels, many-to-many. A modern list is a hybrid ("Azamina
+-- Mitsurugi Dark Magician") and legitimately belongs to several archetype
+-- groups at once, so one column on `decks` cannot hold the truth. The
+-- `decks.archetype` column keeps the longest-match primary as a hint only.
+CREATE TABLE IF NOT EXISTS deck_tags (
+    deck_id  INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+    tag      TEXT NOT NULL,
+    PRIMARY KEY (deck_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_deck_tags_tag ON deck_tags(tag);
 
 CREATE TABLE IF NOT EXISTS deck_cards (
     deck_id  INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
