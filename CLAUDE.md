@@ -142,14 +142,15 @@ meta deck to build an end-board library → scenarios test your deck against tha
 Work through these in order. Each stage is in its own file — delete the file once that
 stage is complete and verified.
 
-1. `STAGE1.md` — Meta ingestion & card database (no engine required)
+1. ~~Meta ingestion & card database~~ — **done** (card_db, meta_scrape, deck, stats, daemon)
 2. `STAGE2.md` — Engine harness (`engine.py`)
 3. `STAGE3.md` — Solitaire solver + validation gate (`solver.py`, `scoring.py`)
 4. `STAGE4.md` — Scenario suite (`scenarios.py`)
 5. `STAGE5.md` — Optimizer (`optimizer.py`)
 
-Stage 1 deliberately comes first: it needs no C++ build, produces real output on day one,
-and de-risks the project while Stage 2 is being fought.
+Stage 1 deliberately came first: it needs no C++ build, produces real output on day one,
+and de-risks the project while Stage 2 is being fought. **Stage 2 is next, and is the
+whole risk of the project** -- time-box each engine option before trying the next.
 
 **Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
 detail yet — see "Why No Duel AI (Yet)" above for the trade.
