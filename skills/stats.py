@@ -1,0 +1,111 @@
+"""Exact opening-hand probability and interval estimates.
+
+Pure stdlib -- `math.comb` gives exact integer hypergeometric math, so there
+is no reason to pull in scipy. Anything answerable here should never be
+simulated: these are exact and instant, and the engine's time is better spent
+on questions about lines.
+"""
+
+import math
+from itertools import product
+
+STANDARD_HAND = 5  # going first
+DRAW_HAND = 6      # going second
+
+
+def pmf(N, K, n, k):
+    """P(exactly k successes) drawing n from N with K successes available."""
+    if k > K or k > n or (n - k) > (N - K) or k < 0:
+        return 0.0
+    return math.comb(K, k) * math.comb(N - K, n - k) / math.comb(N, n)
+
+
+def at_least(N, K, n, k):
+    """P(at least k successes)."""
+    if k <= 0:
+        return 1.0
+    return sum(pmf(N, K, n, i) for i in range(k, min(K, n) + 1))
+
+
+def at_most(N, K, n, k):
+    return sum(pmf(N, K, n, i) for i in range(0, min(k, K, n) + 1))
+
+
+def open_chance(deck_size, copies, hand_size=STANDARD_HAND, want=1):
+    """P(opening at least `want` copies of a card run at `copies`)."""
+    return at_least(deck_size, copies, hand_size, want)
+
+
+def group_chance(deck_size, group_size, hand_size=STANDARD_HAND, want=1):
+    """P(opening at least `want` of an interchangeable group.
+
+    `group_size` is the total copies across the group -- e.g. 3 Ash + 3 Imperm
+    + 2 Veiler is a group of 8.
+    """
+    return at_least(deck_size, group_size, hand_size, want)
+
+
+def combo_chance(deck_size, requirements, hand_size=STANDARD_HAND):
+    """P(opening at least r of every group simultaneously.
+
+    `requirements` is [(group_size, needed), ...] over *disjoint* groups.
+    Exact multivariate hypergeometric by enumeration -- fine for the handful
+    of groups a real question ever involves.
+
+        combo_chance(40, [(9, 1), (12, 1)])  # a starter AND a handtrap
+    """
+    sizes = [g for g, _ in requirements]
+    needs = [r for _, r in requirements]
+    rest = deck_size - sum(sizes)
+    if rest < 0:
+        raise ValueError("group sizes exceed deck size (groups must be disjoint)")
+    if sum(needs) > hand_size:
+        return 0.0
+
+    total = math.comb(deck_size, hand_size)
+    acc = 0
+    ranges = [range(need, min(size, hand_size) + 1) for size, need in zip(sizes, needs)]
+    for draw in product(*ranges):
+        spare = hand_size - sum(draw)
+        if spare < 0 or spare > rest:
+            continue
+        ways = math.comb(rest, spare)
+        for size, d in zip(sizes, draw):
+            ways *= math.comb(size, d)
+        acc += ways
+    return acc / total
+
+
+def brick_chance(deck_size, starters, hand_size=STANDARD_HAND):
+    """P(opening zero starters) -- the floor on your brick rate.
+
+    This is a lower bound, not the real brick rate: a hand can hold a starter
+    and still have no line. Stage 3 measures the real number; this one is
+    free and tells you whether the deck can possibly be consistent.
+    """
+    return pmf(deck_size, starters, hand_size, 0)
+
+
+def wilson(successes, trials, z=1.96):
+    """Wilson score interval. Correct at small n and near 0/1, unlike normal.
+
+    Returns (point, low, high).
+    """
+    if trials == 0:
+        return (0.0, 0.0, 1.0)
+    p = successes / trials
+    denom = 1 + z * z / trials
+    centre = (p + z * z / (2 * trials)) / denom
+    half = (z / denom) * math.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials))
+    return (p, max(0.0, centre - half), min(1.0, centre + half))
+
+
+def trials_needed(effect, baseline=0.5, z=1.96, power=0.84):
+    """Rough trials per arm to resolve an absolute `effect` difference.
+
+    With paired seeds (common random numbers) the real requirement is far
+    lower -- this is the unpaired worst case, and the gap is the argument for
+    always pairing.
+    """
+    var = baseline * (1 - baseline)
+    return math.ceil(2 * ((z + power) ** 2) * var / (effect ** 2))
