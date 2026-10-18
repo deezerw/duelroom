@@ -38,11 +38,19 @@ PYTHON = ROOT / "venv" / "bin" / "python"
 # but has no __main__ guard, so -m runs the module and exits silently.
 YGORL_BIN = ROOT / "venv" / "bin" / "ygorl"
 
-# The solver's per-hand time budget. NOT a free knob: upstream measured that
-# 5 s/hand produces systematic false bricks on long-combo decks -- +17 to
-# +19 percentage points of hands wrongly reported unsolvable -- and settled
-# on 10 s. Lowering this does not make runs cheaper, it makes them wrong.
-SOLVE_MS = 10_000
+# The solver's per-hand time budget. NOT a free knob, and NOT upstream's 10 s.
+#
+# Upstream measured false bricks at 5 s (+17 to +19 points on long-combo
+# decks) and settled on 10 s. Measured here, 10 s is still too low: on
+# Snake-Eye into Snake-Eyes Flamberge Dragon it reports 3/12 bricks where
+# 60 s and 120 s both report 2/12. The extra "brick" solves in 9 actions
+# given 28.5 s, and its Ash survival flips from dead to 2/4 -- so the
+# handtrap matrix is budget-sensitive too, not only the brick rate.
+#
+# 60 s is the converged budget for that deck. It is NOT a universal answer:
+# run `gate.budget_ladder` per deck and use where the brick count settles.
+# A cheaper run is a wrong run, not a faster one.
+SOLVE_MS = 60_000
 
 # Leave a core or two for the rest of the machine; the solver is CPU-only
 # and runs one thread per worker.

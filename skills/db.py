@@ -100,7 +100,10 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS trials (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id           INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    seed             INTEGER NOT NULL,
+    -- TEXT, not INTEGER: ygorl's hand seeds are unsigned 64-bit and values
+    -- above 2^63-1 overflow SQLite's signed INTEGER. They are identifiers,
+    -- never arithmetic, so the string form loses nothing.
+    seed             TEXT NOT NULL,
     opening_hand     TEXT NOT NULL,
     completed        INTEGER NOT NULL,
     board_score      REAL,

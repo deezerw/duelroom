@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import card_db, db, engine, meta_scrape as ms, stats
+from skills import card_db, db, engine, gate, meta_scrape as ms, stats
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -30,6 +30,8 @@ duelroom — Yu-Gi-Oh! deck laboratory
   export <archetype> [name] write a scraped list out as a .ydk
   engine                    engine setup status and pinned versions
   solve <deck> [hands]      turn-1 line search: solve rate + board quality
+  ladder <deck> [hands]     calibrate the solver budget (run this first)
+  gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   help / quit
 """
 
@@ -200,6 +202,75 @@ def cmd_solve(conn, args):
         print(f"    distribution      {row['interruptions']}")
 
 
+def cmd_ladder(conn, args):
+    if not args:
+        print("usage: ladder <deck.ydk> [hands]")
+        return
+    path = _resolve_deck(args[0])
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    hands = int(args[1]) if len(args) > 1 else 12
+    print(f"budget ladder for {path.stem}, {hands} hands at "
+          f"{[b//1000 for b in gate.LADDER]} seconds")
+    print("looking for where the brick count stops moving — this takes a while\n")
+    rows, converged = gate.budget_ladder(path, hands=hands)
+    print(f"  {'budget':>7}  {'bricks':>8}  {'solved':>7}  {'false':>6}  {'solver':>8}")
+    for r in rows:
+        mark = " <- converged" if r["solve_ms"] == converged else ""
+        print(f"  {r['solve_ms']//1000:>6}s  {r['bricks']:>3}/{r['hands']:<4} "
+              f"{r['solved']:>7}  {r['false_bricks']:>6}  {r['solver_s']:>7.0f}s{mark}")
+    if converged:
+        print(f"\n  use --solve-ms {converged} for this deck "
+              f"({converged//1000}s); anything lower measures the search, not the deck")
+
+
+def cmd_gate(conn, args):
+    if not args:
+        print("usage: gate <deck.ydk> [hands] [solve_ms]")
+        return
+    path = _resolve_deck(args[0])
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    hands = int(args[1]) if len(args) > 1 else 12
+    ms = int(args[2]) if len(args) > 2 else engine.SOLVE_MS
+    print(f"gate: {path.stem}, {hands} hands, {ms/1000:.0f}s budget\n")
+    rec = gate.run_funnel(path, hands=hands, solve_ms=ms)
+    rep = gate.gate_report(rec, conn)
+
+    lo, hi = rep["solve_rate_ci"]
+    print(f"  solved      {rep['solved']}/{rep['hands']} "
+          f"({rep['solve_rate']*100:.0f}%, 95% CI {lo*100:.0f}-{hi*100:.0f}%)")
+    print(f"  solver time {rep['solver_s']:.0f}s")
+    ca = rep["combo_actions"]
+    if ca:
+        print(f"  line length min {ca.get('min')}, median {ca.get('median')}, "
+              f"max {ca.get('max')}")
+    for code, surv in (rep["survival_given_line"] or {}).items():
+        row = card_db.resolve(conn, int(code))
+        print(f"  survives {row['name'] if row else code}: {surv*100:.0f}% of solved hands")
+
+    print(f"\n  hand classes: {dict(gate.classify_hands(rec))}")
+
+    print("\n  BRICK HANDS — judge these by eye. A brick holding an obvious")
+    print("  starter means the solver failed, whatever the rate says.")
+    for b in rep["brick_hands"]:
+        print(f"\n    hand {b['index']} ({b['solver_s']:.0f}s)")
+        for c in b["cards"]:
+            print(f"      {c}")
+
+    dead = [r for r in gate.card_liveliness(rec, conn) if r["seen"] >= 2][:6]
+    if dead:
+        print("\n  least live cards (seen >=2 hands):")
+        for r in dead:
+            print(f"    {r['solve_rate']*100:3.0f}% solved when held  "
+                  f"({r['in_solved']}/{r['seen']})  {r['name']}")
+
+    run_id = gate.load_funnel(conn, rec)
+    print(f"\n  stored as run {run_id} in data/duelroom.db")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -248,6 +319,8 @@ COMMANDS = {
     "export": cmd_export,
     "engine": cmd_engine,
     "solve": cmd_solve,
+    "ladder": cmd_ladder,
+    "gate": cmd_gate,
 }
 
 
