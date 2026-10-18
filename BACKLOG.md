@@ -34,7 +34,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
       sent to GY, and a plausible-but-wrong number is the failure mode this project
       keeps hitting. Do it properly when CPU is free.
 - [ ] Meta drift: diff inclusion rates across scrapes to surface rising tech cards.
-- [ ] EDOPro `.yrpX` export for a deck's best lines, so they can be drilled.
 - [ ] Push to GitHub (user approved).
 
 ## BLOCKED / WON'T DO
@@ -54,6 +53,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **`drill [deck] [n]`** — exports a deck's best lines as EDOPro `.yrpX` plus a text
+  card-by-card summary (opening hand, end board). Verified the written replay parses
+  back and replays cleanly in the rules core. Caught a silent no-op while writing it:
+  the per-line `interruptions` field in the JSONL is always None (counts live in the
+  companion summary keyed by hand), so "best board first" was scoring every line 0 and
+  returning file order while claiming to be sorted.
 - **`report [deck] [archetype]`** — one view: legality, engine loadability, the solver
   target (with its warning if flagged), measured solve rate with a Wilson interval, a
   small-sample caveat under 20 hands, opening odds, and how the list compares to the

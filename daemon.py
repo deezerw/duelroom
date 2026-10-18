@@ -12,9 +12,9 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import (breaking, card_db, carddb, config, db, engine, gate,
-                    importer, meta_scrape as ms, optimizer, report,
-                    scenarios, stats)
+from skills import (breaking, card_db, carddb, config, db, drill, engine,
+                    gate, importer, meta_scrape as ms, optimizer,
+                    report, scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +34,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   mydeck [name]             show or set the deck commands default to
   ydke <deck>               export a deck as a ydke:// URI to paste elsewhere
   report [deck] [archetype] everything known about a deck, in one view
+  drill [deck] [n]          export best lines as EDOPro replays to practise
   export <archetype> [name] write a scraped list out as a .ydk
   setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
@@ -796,6 +797,37 @@ def cmd_report(conn, args):
     print()
 
 
+def cmd_drill(conn, args):
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print("usage: drill <deck> [count]   (or set one with `mydeck`)")
+        return
+    limit = int(args[1]) if len(args) > 1 else 3
+
+    sources = sorted((ROOT / "results").glob("*.jsonl"),
+                     key=lambda p: -p.stat().st_mtime)
+    written = []
+    for src in sources:
+        try:
+            written = drill.export(conn, src, path.stem, limit=limit)
+        except Exception:
+            continue
+        if written:
+            print(f"  from {src.name}")
+            break
+    if not written:
+        print(f"no solved lines stored for {path.stem} — run `solve` or `gate` first")
+        return
+
+    for yrpx, txt, n in written:
+        print(f"\n  {n} interruptions -> {yrpx.name}")
+        for line in txt.read_text().splitlines():
+            if line.startswith("  ") or line.startswith("ends on"):
+                print(f"  {line}")
+    print(f"\n  open the .yrpX files in EDOPro to watch the line back")
+    print(f"  {written[0][0].parent}")
+
+
 def cmd_decks(conn, args):
     DECKS.mkdir(parents=True, exist_ok=True)
     files = sorted(DECKS.glob("*.ydk"))
@@ -818,6 +850,7 @@ COMMANDS = {
     "mydeck": cmd_mydeck,
     "ydke": cmd_ydke,
     "report": cmd_report,
+    "drill": cmd_drill,
     "export": cmd_export,
     "setup": cmd_setup,
     "engine": cmd_engine,

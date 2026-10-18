@@ -1,0 +1,137 @@
+"""Export a deck's best lines as EDOPro replays, so they can be drilled.
+
+A line the tool found and you cannot execute at the table is worth
+nothing. The solver already verifies every line by replaying it in the
+rules core, and those replays can be written as `.yrpX` -- the format
+EDOPro opens -- so you can watch your own deck's best turn back, step
+through it, and learn the sequence.
+
+Alongside each replay this writes a plain-text card-by-card summary of
+the end board, because scrubbing a replay to remember what a line
+produced is slower than reading six lines of text.
+"""
+
+import json
+from pathlib import Path
+
+from . import card_db, engine
+
+OUT = engine.ROOT / "results" / "drills"
+
+
+def _name(conn, code):
+    row = card_db.resolve(conn, int(code))
+    return row["name"] if row is not None else f"<{code}>"
+
+
+def interruption_counts(jsonl_path):
+    """hand index -> interruption count, read from the run's summary.
+
+    The per-line `interruptions` field in the JSONL is always None; the
+    counts live in the companion `*_summary.json` under each deck's
+    `boards`, keyed by hand. Ranking on the line field silently scored
+    every line 0, so "best board first" returned the records in file
+    order while claiming they were sorted.
+    """
+    summary = Path(str(jsonl_path).replace(".jsonl", "_summary.json"))
+    if not summary.exists():
+        summary = Path(str(jsonl_path).replace(".jsonl", ".json"))
+    if not summary.exists():
+        return {}
+    try:
+        data = json.loads(summary.read_text())
+    except json.JSONDecodeError:
+        return {}
+    counts = {}
+    for deck, d in (data.get("decks") or {}).items():
+        for b in d.get("boards") or []:
+            counts[(deck, b.get("hand"))] = len(b.get("interruptions") or [])
+    return counts
+
+
+def lines_from(jsonl_path, deck_name=None):
+    """Solved records for a deck, best board first."""
+    counts = interruption_counts(jsonl_path)
+    out = []
+    for raw in Path(jsonl_path).read_text().splitlines():
+        if not raw.strip():
+            continue
+        rec = json.loads(raw)
+        if rec.get("status") != "solved":
+            continue
+        d = rec.get("deck")
+        name = d.get("name") if isinstance(d, dict) else str(d)
+        if deck_name and name != deck_name:
+            continue
+        n = counts.get((name, rec.get("hand_index")), 0)
+        for ln in rec.get("lines") or []:
+            out.append((rec, ln, n))
+    out.sort(key=lambda t: -t[2])
+    return out
+
+
+def describe(conn, line):
+    """What the line ended on, as text."""
+    board = line.get("board") or {}
+    players = board.get("players") or []
+    if not players:
+        return []
+    me = players[0]
+    rows = []
+    for zone, label in (("mzone", "monster"), ("szone", "spell/trap")):
+        for c in me.get(zone) or []:
+            pos = c.get("position")
+            # EDOPro position bits: 0x4|0x8 are the face-down ones.
+            facing = " (set)" if pos in (4, 8, 0xA) else ""
+            rows.append(f"{label}: {_name(conn, c['code'])}{facing}")
+    for c in (me.get("hand") or []):
+        rows.append(f"hand: {_name(conn, c)}")
+    return rows
+
+
+def export(conn, jsonl_path, deck_name, limit=3, out_dir=None):
+    """Write the top lines as .yrpX plus a text summary. Returns the files."""
+    from ygorl.engine.replay import Replay
+
+    out_dir = Path(out_dir or (OUT / deck_name))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    found = lines_from(jsonl_path, deck_name)
+    if not found:
+        return []
+
+    written = []
+    for i, (rec, line, interrupts) in enumerate(found[:limit]):
+        start = rec.get("start") or {}
+        decks = start.get("decks") or {}
+        if not decks.get("a"):
+            continue
+        rep = Replay(
+            seed=0, first=0,
+            rule_flags=start.get("rule_flags", 0),
+            player=start.get("player", {}),
+            shuffle_decks=False,
+            decks=decks,
+            responses=[bytes.fromhex(r) for r in line.get("responses") or []],
+            seed_words=start.get("core_seed"),
+        )
+        stem = f"{deck_name}_line{i + 1}_{interrupts}int"
+        yrpx = out_dir / f"{stem}.yrpX"
+        rep.to_yrpx(yrpx, names=(deck_name, "goldfish"))
+
+        hand = [_name(conn, c) for c in rec.get("hand") or []]
+        txt = out_dir / f"{stem}.txt"
+        body = [
+            f"{deck_name} — line {i + 1}",
+            f"{interrupts} interruption(s), {len(line.get('actions') or [])} actions",
+            "",
+            "opening hand:",
+            *(f"  {c}" for c in hand),
+            "",
+            "ends on:",
+            *(f"  {r}" for r in describe(conn, line)),
+            "",
+            f"replay: {yrpx.name}  (open in EDOPro)",
+        ]
+        txt.write_text("\n".join(body) + "\n")
+        written.append((yrpx, txt, interrupts))
+    return written
