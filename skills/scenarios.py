@@ -163,7 +163,15 @@ def trivial_targets(derived):
     for deck, spec in derived.items():
         if deck.startswith("_"):
             continue
-        rank = spec.get("_zone_rank", 3)
+        # Derive the zone from the target itself rather than trusting a
+        # stored key. `_zone_rank` and `_mean_actions` are stripped before
+        # the file is written, so calling this on a SAVED spec silently
+        # defaulted rank to 3 and the zone check could never fire -- half
+        # the function quietly did nothing whenever it was handed data
+        # read back off disk.
+        targets = spec.get("targets") or []
+        rank = (_zone_rank(targets[0]) if targets
+                else spec.get("_zone_rank", 3))
         acts = spec.get("_mean_actions", 99)
         if not spec.get("_extra", 1):
             bad.append((deck, "best target is a main-deck card that must be "

@@ -51,7 +51,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
-## DONE
+- **Bug sweep #2 (systematic).** Added `tools/audit_fields.py`: compares every record
+  field the parser modules read against every field that actually exists in stored
+  records. Three bugs tonight had that exact shape and none of them raised. Codebase
+  is clean on it now; re-run after adding any record parser.
+- **`trivial_targets` half-worked on saved data** — it read `_zone_rank`, which is
+  stripped before the targets file is written, so the zone check defaulted to "fine"
+  and could never fire on a spec read back off disk. Now derives the zone from the
+  target string itself.
 
 - **`drill [deck] [n]`** — exports a deck's best lines as EDOPro `.yrpX` plus a text
   card-by-card summary (opening hand, end board). Verified the written replay parses
