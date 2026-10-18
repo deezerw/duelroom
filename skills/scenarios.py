@@ -132,11 +132,25 @@ def describe_targets(conn, targets):
 # --- handtrap matrix ------------------------------------------------------
 
 def handtrap_matrix(records):
-    """survival-given-line per deck per handtrap, from funnel_eval records.
+    """Per deck per handtrap: survival, computed from the per-hand records.
 
-    Survival is conditional on the hand having had a line at all. An
-    unconditional rate would reward decks that brick, since a brick cannot
-    be disrupted.
+    NOT `summary.survival_given_line`. That field counts a `no_window`
+    outcome -- the handtrap never had a legal moment to be used -- as a
+    survival, which conflates two opposite facts and inverts the answer.
+
+    Sky-striker vs Nibiru is the clear case: the summary reports 90%
+    survival, but the per-hand records are `no_window` nine times and
+    `unsolved` once. Nibiru got exactly one legal window and STOPPED the
+    line. Where testable its survival is 0%, not 90%, and the inflated
+    number is most of why Nibiru ranked last among handtraps to main.
+
+    So report both, because both matter and they are different questions:
+      survival  -- of the windows where it COULD be used, how often did
+                   the line still complete (did they play through it)
+      windows   -- how often it had any legal window at all (is it even
+                   live in this matchup)
+    A handtrap with no window is useless here, but for a different reason
+    than one that gets played through, and the fixes differ.
     """
     matrix = {}
     for rec in records:
@@ -144,11 +158,30 @@ def handtrap_matrix(records):
         deck = s.get("deck")
         if not deck:
             continue
+        tested, survived, offered = Counter(), Counter(), Counter()
+        for h in rec.get("hands") or []:
+            if h.get("status") != "solved":
+                continue
+            for code, f in (h.get("fire") or {}).items():
+                code = int(code)
+                offered[code] += 1
+                st = f.get("status")
+                if st == "no_window":
+                    continue
+                tested[code] += 1
+                if st == "solved":      # line still completed
+                    survived[code] += 1
         row = {}
-        for code, surv in (s.get("survival_given_line") or {}).items():
-            row[int(code)] = surv
+        for code in offered:
+            n = tested[code]
+            row[code] = {
+                "survival": (survived[code] / n) if n else None,
+                "tested": n,
+                "offered": offered[code],
+                "window_rate": n / offered[code] if offered[code] else 0.0,
+            }
         matrix[deck] = {
-            "survival": row,
+            "cells": row,
             "solved": s.get("solved"),
             "hands": s.get("hands"),
             "brick_rate": s.get("brick_rate"),
@@ -163,21 +196,28 @@ def weighted_handtrap_ranking(matrix, weights):
     blanks a deck nobody in your room plays is worth nothing, which is
     the entire reason that file exists.
     """
-    scores = Counter()
+    scores, coverage = Counter(), Counter()
     total_w = 0.0
     for deck, data in matrix.items():
         w = weights.get(deck, 0.0)
         if not w:
             continue
         total_w += w
-        for code, surv in data["survival"].items():
-            # stopped = 1 - survived
-            scores[code] += w * (1.0 - surv)
+        for code, cell in data["cells"].items():
+            # Expected value of drawing it: it must have a window AND the
+            # line must fail through it. Scoring stop-rate alone would
+            # reward a handtrap that is never live, which is the trap the
+            # summary field falls into.
+            surv = cell["survival"]
+            stop_given_window = 0.0 if surv is None else (1.0 - surv)
+            scores[code] += w * cell["window_rate"] * stop_given_window
+            coverage[code] += w * cell["window_rate"]
     if total_w:
         for code in scores:
             scores[code] /= total_w
+            coverage[code] /= total_w
     return [
-        (code, HANDTRAPS.get(code, str(code)), score)
+        (code, HANDTRAPS.get(code, str(code)), score, coverage[code])
         for code, score in scores.most_common()
     ]
 

@@ -393,26 +393,55 @@ def cmd_matrix(conn, args):
 
     codes = sorted(scenarios.HANDTRAPS)
     short = {c: scenarios.HANDTRAPS[c].split(" &")[0].split(",")[0][:9] for c in codes}
-    print("  how often a solved line SURVIVES each handtrap")
-    print("  (lower is better for you — it means the handtrap stops them)\n")
+
+    print("  SURVIVAL — of the windows where the handtrap could be used,")
+    print("  how often the line still completed. Lower is better for you.")
+    print("  '-' means it never had a legal window in any solved hand.\n")
     print("  " + "deck".ljust(26) + "".join(f"{short[c]:>10}" for c in codes))
     for deck, data in sorted(m.items()):
         cells = ""
         for c in codes:
-            v = data["survival"].get(c)
-            cells += f"{'   -' if v is None else f'{v*100:9.0f}%'}"
+            cell = data["cells"].get(c)
+            v = cell["survival"] if cell else None
+            cells += "         -" if v is None else f"{v*100:9.0f}%"
+        print(f"  {deck.ljust(26)}{cells}")
+
+    print("\n  WINDOW RATE — how often it was live at all.")
+    print("  A handtrap with no window is useless here for a different")
+    print("  reason than one that gets played through.\n")
+    print("  " + "deck".ljust(26) + "".join(f"{short[c]:>10}" for c in codes))
+    for deck, data in sorted(m.items()):
+        cells = ""
+        for c in codes:
+            cell = data["cells"].get(c)
+            cells += "         -" if not cell else f"{cell['window_rate']*100:9.0f}%"
         print(f"  {deck.ljust(26)}{cells}")
 
     w = config.weights()
     ranking = scenarios.weighted_handtrap_ranking(m, w)
     covered, missing = config.coverage(m.keys())
     if ranking:
-        print(f"\n  WHICH HANDTRAPS TO MAIN — weighted by locals.toml")
+        print("\n  WHICH HANDTRAPS TO MAIN — weighted by locals.toml")
         print(f"  (covers {covered*100:.0f}% of your stated meta)\n")
-        for code, name, score in ranking:
-            print(f"    {score*100:5.1f}%  of weighted matchups stopped by {name}")
+        print("    stop%   live%   handtrap")
+        for code, name, score, cov in ranking:
+            print(f"    {score*100:5.1f}%  {cov*100:5.1f}%   {name}")
+        print("\n    stop% = weighted chance it both has a window and stops the line")
+        print("    live% = weighted chance it has a window at all")
         if missing:
             print(f"\n    no measured deck for: {', '.join(missing)}")
+
+    print("\n  READ WITH CARE:")
+    print("  * Maxx \"C\" and Droll score 0% stop because this metric asks only")
+    print("    whether the line still reaches its target. Maxx \"C\" never stops")
+    print("    a combo — it punishes one with cards. The metric is blind to")
+    print("    resource punishment, so a 0% here is not a verdict on the card.")
+    print("  * A low live% with a high stop-when-live (Nibiru) is a different")
+    print("    card from a high live% with a low stop rate (Imperm). The first")
+    print("    is a swingy answer, the second a consistent speed bump.")
+    print("  * branded's row is thin because its derived target is just setting")
+    print("    a backrow card — there is little in that line to interrupt.")
+    print("  * 12 hands per deck. Several cells rest on 1-3 tested windows.")
 
 
 def cmd_export(conn, args):
