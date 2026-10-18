@@ -27,8 +27,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 - [ ] IN FLIGHT: 40-hand board library rebuild (`results/boards40.log`). Pick up the
       result, load it, and re-derive targets from the bigger sample.
-- [ ] Nibiru count and Maxx "C" cost — the solver already tracks special summons per
-      line, so these are nearly free and were promised in STAGE3.
+- [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
+      prints summon counts to stdout but nothing lands in the JSONL (no 'summon' key
+      anywhere in a record). Exact counts need the line replayed through ygorl and
+      summon actions counted; a proxy from the end board would undercount materials
+      sent to GY, and a plausible-but-wrong number is the failure mode this project
+      keeps hitting. Do it properly when CPU is free.
 - [ ] Meta drift: diff inclusion rates across scrapes to surface rising tech cards.
 - [ ] EDOPro `.yrpX` export for a deck's best lines, so they can be drilled.
 - [ ] Push to GitHub (user approved).
@@ -50,6 +54,11 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **`report [deck] [archetype]`** — one view: legality, engine loadability, the solver
+  target (with its warning if flagged), measured solve rate with a Wilson interval, a
+  small-sample caveat under 20 hands, opening odds, and how the list compares to the
+  scraped meta. Assembles only what exists and says plainly what is missing rather
+  than filling gaps with plausible numbers.
 - **Bug sweep #1 (silent no-ops).** `.get()`-on-Row and None-arithmetic are clean; the
   real find was four `subprocess.run` calls in breaking.py with `capture_output` and
   no `check`. A non-zero solver exit produced no .yrp, which `going_second` reported

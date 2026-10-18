@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, engine, gate,
-                    importer, meta_scrape as ms, optimizer, scenarios,
-                    stats)
+                    importer, meta_scrape as ms, optimizer, report,
+                    scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -33,6 +33,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
   mydeck [name]             show or set the deck commands default to
   ydke <deck>               export a deck as a ydke:// URI to paste elsewhere
+  report [deck] [archetype] everything known about a deck, in one view
   export <archetype> [name] write a scraped list out as a .ydk
   setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
@@ -723,6 +724,78 @@ def cmd_ydke(conn, args):
     print(importer.to_ydke(Deck.from_ydk(path)))
 
 
+def cmd_report(conn, args):
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print("usage: report <deck> [archetype]   (or set one with `mydeck`)")
+        return
+    archetype = " ".join(args[1:]) if len(args) > 1 else None
+    r = report.deck_report(conn, path, archetype)
+
+    m, e, s = r["sizes"]
+    print(f"\n  {r['name']}  —  {m} main / {e} extra / {s} side")
+
+    print("\n  LEGAL")
+    if r["legality"]:
+        for p in r["legality"]:
+            print(f"    ! {p}")
+    else:
+        print("    passes deck construction and the TCG banlist")
+    if r["unresolved"]:
+        print(f"    ! {len(r['unresolved'])} passcode(s) unknown to the card mirror")
+    if r["engine_blockers"]:
+        print(f"    ! {len(r['engine_blockers'])} card(s) the solver cannot load "
+              f"— run `setup`")
+
+    print("\n  SOLVER TARGET")
+    if not r["target"]:
+        print("    none yet — `gate` will derive one (costs a solve pass)")
+    else:
+        code = int(r["target"].split("@")[0])
+        row = card_db.resolve(conn, code)
+        print(f"    {row['name'] if row else r['target']}  ({r['target']})")
+        if r["target_warning"]:
+            print(f"    ! {r['target_warning']}")
+            print("      measurements below are about reaching THAT, so treat")
+            print("      them as unmeasured rather than as a verdict")
+
+    print("\n  MEASURED")
+    f = r["funnel"]
+    if not f:
+        print("    no funnel run yet — `gate` to measure")
+    else:
+        solved, hands = f.get("solved") or 0, f.get("hands") or 0
+        p, lo, hi = stats.wilson(solved, hands)
+        print(f"    solved        {solved}/{hands}  "
+              f"({p*100:.0f}%, 95% CI {lo*100:.0f}-{hi*100:.0f}%)")
+        ca = f.get("combo_actions") or {}
+        if ca.get("median") is not None:
+            print(f"    line length   median {ca['median']} actions "
+                  f"({ca.get('min')}-{ca.get('max')})")
+        for code, surv in (f.get("survival_given_line") or {}).items():
+            row = card_db.resolve(conn, int(code))
+            name = row["name"] if row else code
+            shown = "n/a" if surv is None else f"{surv*100:.0f}%"
+            print(f"    survives      {name}: {shown} of solved hands")
+        if hands and hands < 20:
+            print(f"    ! only {hands} hands — the interval above is wide enough")
+            print("      that most comparisons against it are noise")
+
+    print("\n  OPENING ODDS (going first)")
+    for name, copies, pc in r["hand_math"]:
+        print(f"    {copies}x  {pc*100:5.1f}%  {name}")
+
+    if r["inclusion"]:
+        inc = r["inclusion"]
+        print(f"\n  VS THE META  ({inc['lists']} lists of {archetype})")
+        print(f"    {inc['core']} core cards, {inc['flex']} contested slots")
+        if inc["off_meta"]:
+            print("    cards in your list that no scraped list runs:")
+            for n in inc["off_meta"]:
+                print(f"      {n}")
+    print()
+
+
 def cmd_decks(conn, args):
     DECKS.mkdir(parents=True, exist_ok=True)
     files = sorted(DECKS.glob("*.ydk"))
@@ -744,6 +817,7 @@ COMMANDS = {
     "import": cmd_import,
     "mydeck": cmd_mydeck,
     "ydke": cmd_ydke,
+    "report": cmd_report,
     "export": cmd_export,
     "setup": cmd_setup,
     "engine": cmd_engine,
