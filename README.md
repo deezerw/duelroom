@@ -64,7 +64,9 @@ in its own output:
 - **`locals.toml` is a stand-in** until you edit it with your actual room.
 
 ```bash
-venv/bin/pytest tests/ -q      # 19 regression tests, under a second
+venv/bin/pytest tests/ -q                 # regression tests, under a second
+venv/bin/python tools/check_invariants.py # facts that cannot all be true
+venv/bin/python tools/audit_fields.py     # fields read but never present
 ```
 
 The suite covers bugs that were actually found here, not hypothetical ones, and each

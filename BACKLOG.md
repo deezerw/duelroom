@@ -59,6 +59,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **`tools/check_invariants.py`** — every wrong answer this project produced was caught
+  either by a number that could not be true or by two outputs disagreeing, so both are
+  now mechanical. 7 invariants over the stored data: counts summing, rates matching
+  their own numerator, survival in range and never exceeding offered windows, the
+  retracted summon metric staying retracted, Wilson intervals containing their point,
+  board frequencies summing to 1, and every derived target being a card its deck can
+  actually produce. Mutation-tested.
 - **40-hand board library landed and promoted to canonical** (271/280 solved, 83 min).
   The 12-hand conclusions HELD: mean interruptions moved by at most 0.5 (sky-striker
   3.33 -> 2.85), intervals tightened from [76-100] to [91-100], and branded's drop
