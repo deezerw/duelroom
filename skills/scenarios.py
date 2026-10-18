@@ -629,3 +629,73 @@ def response_windows(records):
 
 
 NIBIRU = 27204311
+
+
+# --- real special-summon counts -----------------------------------------
+
+def special_summons(records, limit=None):
+    """Count special summons per line by REPLAYING it.
+
+    STAGE3 promised this and deferred it twice, and the shortcut tried
+    in between -- reading Maxx "C" window counts as summons -- was
+    wrong, since Maxx "C" has no activation condition and its windows
+    track line length instead. Branded showed 6.8 "summons" against 1.0
+    actions that way; replayed, it makes zero.
+
+    Replaying is cheap because there is no search involved: the line is
+    already known, so this just feeds recorded responses back through
+    the core and counts MSG_SPSUMMONED as it goes.
+
+    Returns {deck: {"mean", "max", "nibiru_rate", "n"}} where
+    nibiru_rate is the share of lines passing five summons, the
+    threshold at which Nibiru becomes live.
+    """
+    from ygorl.engine.replay import Replay
+    import ygorl.engine.messages as M
+
+    NIBIRU_AT = 5
+    per_deck = {}
+    for rec in records:
+        if rec.get("status") != "solved":
+            continue
+        d = rec.get("deck")
+        name = d.get("name") if isinstance(d, dict) else str(d)
+        start = rec.get("start") or {}
+        if not (start.get("decks") or {}).get("a"):
+            continue
+        for line in (rec.get("lines") or [])[:1]:
+            counted = [0]
+
+            class _Obs:
+                def on_start(self, core):
+                    pass
+
+                def on_buffer(self, core, buf):
+                    for raw in M.split_messages(buf):
+                        if type(M.decode_message(raw)).__name__ == "SpSummoned":
+                            counted[0] += 1
+
+            rep = Replay(
+                seed=0, first=0, rule_flags=start["rule_flags"],
+                player=start["player"], shuffle_decks=False,
+                decks=start["decks"],
+                responses=[bytes.fromhex(r) for r in line.get("responses") or []],
+                seed_words=start.get("core_seed"),
+            )
+            try:
+                rep.duel().replay(rep.responses, observer=_Obs())
+            except Exception:
+                continue   # a line that will not replay tells us nothing
+            per_deck.setdefault(name, []).append(counted[0])
+        if limit and len(per_deck.get(name, [])) >= limit:
+            continue
+
+    return {
+        name: {
+            "mean": sum(c) / len(c),
+            "max": max(c),
+            "nibiru_rate": sum(1 for x in c if x >= NIBIRU_AT) / len(c),
+            "n": len(c),
+        }
+        for name, c in per_deck.items() if c
+    }

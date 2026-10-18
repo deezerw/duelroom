@@ -588,3 +588,14 @@ def test_recent_set_databases_are_merged():
     assert all(p.name.startswith("release-") for p in extras)
     assert not any("prerelease" in p.name for p in extras), (
         "pre-release sets are not tournament legal and must stay out")
+
+
+def test_special_summons_are_replayed_not_inferred():
+    # The Maxx "C"-window shortcut gave branded 6.8 "summons" against 1.0
+    # actions. Replaying gives 0.6. The function must not be reachable
+    # without actually replaying, so it is checked for the observer.
+    import inspect
+    src = inspect.getsource(scenarios.special_summons)
+    assert "SpSummoned" in src, "must count the engine's own summon message"
+    assert "replay" in src, "must replay the line rather than infer"
+    assert "23434538" not in src, 'must not read Maxx "C" windows'

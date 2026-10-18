@@ -25,9 +25,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Nibiru and Maxx "C" cost still need REAL special-summon counts, which means
-      replaying each line through ygorl and counting summon actions. The shortcut via
-      Maxx "C" windows was wrong. Do it when CPU is free.
 
 
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
@@ -57,6 +54,15 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Real special-summon counts, and they CLOSE the Nibiru question.** Replayed every
+  stored line through the core counting MSG_SPSUMMONED — cheap, since the line is
+  known and no search is involved. fiendsmith 8.4/line, elfnote 6.1, kewl-tune 2.5,
+  branded 0.6 (the Maxx "C" shortcut had claimed 6.8 for branded against 1.0 actions).
+  The share of lines reaching five summons correlates with observed Nibiru windows at
+  **r=0.936** — kewl-tune clears five on 5% of lines and got 8 windows, fiendsmith on
+  100% and got 245. So Nibiru's low window count was always correct and the
+  "contradiction" I detected two iterations ago never existed. The retraction was
+  right, and this is positive evidence rather than absence of it.
 - **40-hand handtrap matrix landed and promoted** (7/7 decks, 49 min). Unlike the
   board library, these conclusions DID shift: Infinite Impermanence overtakes Ash for
   first (93.4% vs 74.1%) and Effect Veiler overtakes Ghost Ogre for third. The

@@ -524,6 +524,19 @@ def cmd_threats(conn, args):
             print("\n  (Not special summons — Maxx \"C\" has no activation")
             print("   condition, so its window count tracks line length, r=0.94.)")
 
+    bpath = ROOT / "results" / "boards.jsonl"
+    if bpath.exists():
+        cache = ROOT / "results" / "special_summons.json"
+        if cache.exists():
+            ss = json.loads(cache.read_text())
+            print("\n  special summons per line (replayed, not inferred)\n")
+            print("  " + "archetype".ljust(28) + "  SS/line   max   Nibiru live")
+            for deck, v in sorted(ss.items(), key=lambda kv: -kv[1]["mean"]):
+                print(f"  {deck.ljust(28)}{v['mean']:8.1f}{v['max']:6}"
+                      f"{v['nibiru_rate']*100:12.0f}%")
+            print("\n  (Nibiru live = share of lines passing 5 summons. This")
+            print("   explains its window counts: r=0.94 against them.)")
+
     print("\n  visible board vs cards held in hand\n")
     print("  " + "archetype".ljust(28) + "  on field   in hand")
     bh = gate.board_vs_hand(conn)
