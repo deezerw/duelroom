@@ -33,8 +33,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
 
-- [ ] Re-run the HANDTRAP MATRIX at 40 hands too. The board library is now 40/deck
-      but the matrix is still 12, so survival cells rest on 8-11 tested windows.
+- [ ] IN FLIGHT (verified running, 6 solvers): 40-hand handtrap matrix ->
+      `results/handtrap_matrix_40h.jsonl`. The first launch silently did nothing;
+      check for actual records this time, not just that the process exited.
 - [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
       prints summon counts to stdout but nothing lands in the JSONL (no 'summon' key
       anywhere in a record). Exact counts need the line replayed through ygorl and
@@ -59,6 +60,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Silent no-op in my own workflow.** The 40-hand matrix launched an hour earlier
+  exited in 0.0s having done nothing: funnel_eval resumes by SKIPPING decks already
+  present in the output file, and it was pointed at the 12-hand results. It reported
+  "0 decks" and success, and I had reported it as running. Output paths now carry the
+  hand count so sample sizes cannot share a file, and run_matrix raises if a sweep
+  gains no records. Verified running before claiming it this time.
 - **`tools/check_invariants.py`** — every wrong answer this project produced was caught
   either by a number that could not be true or by two outputs disagreeing, so both are
   now mechanical. 7 invariants over the stored data: counts summing, rates matching

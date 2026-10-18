@@ -369,14 +369,24 @@ def weighted_handtrap_ranking(matrix, weights, exclude=None):
 
 def run_matrix(decks, targets_path, hands=12, solve_ms=None, workers=None,
                fire_ms=3000, out=None, timeout=None):
-    """funnel_eval across several decks with every handtrap fired."""
+    """funnel_eval across several decks with every handtrap fired.
+
+    The output path carries the hand count. funnel_eval resumes by
+    SKIPPING any deck already present in the target file, which is right
+    for continuing an interrupted sweep and silently wrong for re-running
+    at a different sample size: a 40-hand run pointed at a file holding
+    12-hand results exits in 0.0 seconds having done nothing, reporting
+    "0 decks" and success. Separate files per hand count make that
+    impossible, and a resume within one size still works.
+    """
     import subprocess
 
     engine.require()
     engine.preflight(decks)
     solve_ms = solve_ms or engine.SOLVE_MS
     workers = workers or engine.DEFAULT_WORKERS
-    out = Path(out) if out else engine.ROOT / "results" / "handtrap_matrix.jsonl"
+    out = (Path(out) if out else
+           engine.ROOT / "results" / f"handtrap_matrix_{hands}h.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -389,9 +399,15 @@ def run_matrix(decks, targets_path, hands=12, solve_ms=None, workers=None,
     ]
     for code in sorted(HANDTRAPS):
         cmd += ["--fire", str(code)]
+    before = len(out.read_text().splitlines()) if out.exists() else 0
     subprocess.run(cmd, env=engine.env(), cwd=str(engine.VENDOR),
                    timeout=timeout, check=True)
-    return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    records = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    if len(records) == before and len(records) < len(decks):
+        raise RuntimeError(
+            f"{out.name} gained no records: funnel_eval skipped every deck as "
+            f"already present. Delete it to force a re-run.")
+    return records
 
 
 # --- targets for a deck the board library has never seen -----------------

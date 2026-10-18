@@ -331,3 +331,17 @@ def test_droll_is_no_longer_a_blind_spot():
     # 45/85 windows convert and 19 hands died to it
     assert 94145021 not in scenarios.BLIND_SPOTS
     assert 23434538 in scenarios.BLIND_SPOTS
+
+
+# --- resume-vs-rerun -----------------------------------------------------
+# Bug: funnel_eval resumes by SKIPPING decks already in the target file.
+# A 40-hand run pointed at a file holding 12-hand results exited in 0.0s
+# having done nothing, and reported success.
+
+def test_matrix_output_path_carries_the_hand_count():
+    import inspect
+    src = inspect.getsource(scenarios.run_matrix)
+    assert 'handtrap_matrix_{hands}h' in src, (
+        "runs at different sample sizes must not share an output file")
+    assert "gained no records" in src, (
+        "a run that skipped every deck must raise, not report success")

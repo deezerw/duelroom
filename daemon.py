@@ -59,6 +59,13 @@ def _since(days):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
+def _latest_matrix():
+    """Newest handtrap matrix file, whatever hand count it used."""
+    cands = sorted((ROOT / "results").glob("handtrap_matrix*.jsonl"),
+                   key=lambda p: p.stat().st_mtime)
+    return cands[-1] if cands else None
+
+
 def _resolve_deck(arg, conn=None):
     """Find a deck by path or name, falling back to the active deck.
 
@@ -383,8 +390,8 @@ def cmd_threats(conn, args):
         tag = "  (yours)" if mine and config.slug(arch) == config.slug(mine) else ""
         print(f"  {arch.ljust(28)}{cells}  {mean:6.1f}{tag}")
 
-    recs_path = ROOT / "results" / "handtrap_matrix.jsonl"
-    if recs_path.exists():
+    recs_path = _latest_matrix()
+    if recs_path and recs_path.exists():
         recs = [json.loads(l) for l in recs_path.read_text().splitlines() if l.strip()]
         rw = scenarios.response_windows(recs)
         if rw:
@@ -498,10 +505,13 @@ def cmd_locals(conn, args):
 
 
 def cmd_matrix(conn, args):
-    path = ROOT / "results" / "handtrap_matrix.jsonl"
-    if not path.exists():
-        print(f"no {path} — run scenarios.run_matrix first")
+    # newest by hand count: handtrap_matrix_40h beats _12h beats the
+    # unsuffixed legacy file
+    path = _latest_matrix()
+    if not path:
+        print("no handtrap matrix yet — run scenarios.run_matrix first")
         return
+    print(f"  from {path.name}\n")
     recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
     m = scenarios.handtrap_matrix(recs)
     if not m:
