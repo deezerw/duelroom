@@ -528,6 +528,17 @@ def cmd_matrix(conn, args):
             cells += "         -" if v is None else f"{v*100:9.0f}%"
         print(f"  {deck.ljust(26)}{cells}{_tag(deck)}")
 
+    recs_p = ROOT / "results" / "handtrap_matrix.jsonl"
+    if recs_p.exists():
+        _recs = [json.loads(l) for l in recs_p.read_text().splitlines() if l.strip()]
+        anomalies = scenarios.window_anomalies(_recs)
+        if anomalies:
+            print("\n  ! Nibiru's row is NOT trustworthy for these decks — they clear")
+            print("    5 special summons every line yet report zero legal windows:")
+            for deck, mean, _ in anomalies:
+                print(f"      {deck}: {mean:.1f} summons/line, 0 Nibiru windows")
+            print("    Read those cells as unmeasured, not as 'Nibiru does nothing'.")
+
     print("\n  WINDOW RATE — how often it was live at all.")
     print("  A handtrap with no window is useless here for a different")
     print("  reason than one that gets played through.\n")
@@ -540,7 +551,11 @@ def cmd_matrix(conn, args):
         print(f"  {deck.ljust(26)}{cells}")
 
     w = config.weights()
-    ranking = scenarios.weighted_handtrap_ranking(m, w)
+    excl = set()
+    if recs_p.exists():
+        excl = {(deck, scenarios.NIBIRU)
+                for deck, _, _ in scenarios.window_anomalies(_recs)}
+    ranking = scenarios.weighted_handtrap_ranking(m, w, exclude=excl)
     covered, missing = config.coverage(m.keys())
     if ranking:
         print("\n  WHICH HANDTRAPS TO MAIN — weighted by locals.toml")
@@ -550,6 +565,10 @@ def cmd_matrix(conn, args):
             print(f"    {score*100:5.1f}%  {cov*100:5.1f}%   {name}")
         print("\n    stop% = weighted chance it both has a window and stops the line")
         print("    live% = weighted chance it has a window at all")
+        if excl:
+            print(f"    ({len(excl)} deck/card cell(s) excluded as artifacts, so"
+                  f" those cards are")
+            print("     scored over the decks they were actually measured on)")
         if missing:
             print(f"\n    no measured deck for: {', '.join(missing)}")
 

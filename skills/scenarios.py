@@ -325,14 +325,20 @@ def handtrap_matrix(records):
     return matrix
 
 
-def weighted_handtrap_ranking(matrix, weights):
+def weighted_handtrap_ranking(matrix, weights, exclude=None):
     """Which handtraps to main, weighted by who you actually face.
 
     `weights` is the locals.toml share per archetype. A handtrap that
     blanks a deck nobody in your room plays is worth nothing, which is
     the entire reason that file exists.
     """
-    scores, coverage = Counter(), Counter()
+    # (deck, card) pairs whose measurement is known to be an artifact.
+    # Counting them as a zero is not neutral: it drags a card's score
+    # down with data we have already decided not to believe. They are
+    # dropped from both the numerator and that card's weight total, so
+    # the card is scored over the decks it was actually measured on.
+    exclude = set(exclude or ())
+    scores, coverage, card_weight = Counter(), Counter(), Counter()
     total_w = 0.0
     for deck, data in matrix.items():
         w = weights.get(deck, 0.0)
@@ -340,6 +346,9 @@ def weighted_handtrap_ranking(matrix, weights):
             continue
         total_w += w
         for code, cell in data["cells"].items():
+            if (deck, code) in exclude:
+                continue
+            card_weight[code] += w
             # Expected value of drawing it: it must have a window AND the
             # line must fail through it. Scoring stop-rate alone would
             # reward a handtrap that is never live, which is the trap the
@@ -348,10 +357,11 @@ def weighted_handtrap_ranking(matrix, weights):
             stop_given_window = 0.0 if surv is None else (1.0 - surv)
             scores[code] += w * cell["window_rate"] * stop_given_window
             coverage[code] += w * cell["window_rate"]
-    if total_w:
-        for code in scores:
-            scores[code] /= total_w
-            coverage[code] /= total_w
+    for code in list(scores):
+        denom = card_weight[code] or total_w
+        if denom:
+            scores[code] /= denom
+            coverage[code] /= denom
     return [
         (code, HANDTRAPS.get(code, str(code)), score, coverage[code])
         for code, score in scores.most_common()
@@ -585,4 +595,43 @@ def summon_counts(records):
                                if c >= NIBIRU_THRESHOLD) / len(counts),
             "n": len(counts),
         }
+    return out
+
+
+NIBIRU = 27204311
+
+
+def window_anomalies(records):
+    """Decks whose Nibiru row contradicts their own summon count.
+
+    Nibiru needs five special summons. Maxx "C" opens a window on each
+    one, so its window count is a lower bound on how many summons
+    happened. When a deck clears five by that count and Nibiru still
+    reports zero legal windows, the two measurements disagree and
+    Nibiru's row cannot be read as "never live" -- kewl-tune averages
+    8.4 summons per line and reports no Nibiru window at all, while
+    fiendsmith at 20.1 reports 90.
+
+    The cause is upstream in how the solver offers that window and is
+    not resolved here. Flagging it is the honest move: an unexplained
+    zero presented as a measurement is worse than one presented as a
+    contradiction.
+
+    Returns [(deck, summons_per_line, nibiru_windows)].
+    """
+    out = []
+    counts = summon_counts(records)
+    for rec in records:
+        deck = (rec.get("summary") or {}).get("deck")
+        if not deck or deck not in counts:
+            continue
+        nib = 0
+        for h in rec.get("hands") or []:
+            if h.get("status") != "solved":
+                continue
+            f = (h.get("fire") or {}).get(str(NIBIRU)) or {}
+            nib += f.get("windows") or 0
+        mean = counts[deck]["mean"]
+        if mean >= NIBIRU_THRESHOLD and nib == 0:
+            out.append((deck, mean, nib))
     return out

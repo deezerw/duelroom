@@ -322,3 +322,48 @@ def test_droll_is_no_longer_a_blind_spot():
     # 45/85 windows convert and 19 hands died to it
     assert 94145021 not in scenarios.BLIND_SPOTS
     assert 23434538 in scenarios.BLIND_SPOTS
+
+
+def test_window_anomaly_flags_a_deck_that_should_see_nibiru():
+    # 8 summons a line but zero Nibiru windows: the two measurements
+    # disagree, so the row must not be read as "Nibiru does nothing".
+    recs = [{
+        "summary": {"deck": "d"},
+        "hands": [
+            {"status": "solved", "fire": {
+                "23434538": {"status": "solved", "windows": 8},
+                "27204311": {"status": "no_window", "windows": 0}}}
+        ],
+    }]
+    assert scenarios.window_anomalies(recs) == [("d", 8.0, 0)]
+
+
+def test_window_anomaly_quiet_when_nibiru_has_windows():
+    recs = [{
+        "summary": {"deck": "d"},
+        "hands": [
+            {"status": "solved", "fire": {
+                "23434538": {"status": "solved", "windows": 8},
+                "27204311": {"status": "unsolved", "windows": 3}}}
+        ],
+    }]
+    assert scenarios.window_anomalies(recs) == []
+
+
+def test_excluded_cells_do_not_drag_a_handtrap_down():
+    # Two decks, equal weight. The card is live and stops the line in one
+    # and is a known artifact zero in the other. Excluding the artifact
+    # must score it on the deck it was measured on, not average in a
+    # zero we have already decided not to believe.
+    matrix = {
+        "good": {"cells": {27204311: {"survival": 0.0, "tested": 4,
+                                      "offered": 4, "window_rate": 1.0}}},
+        "artifact": {"cells": {27204311: {"survival": None, "tested": 0,
+                                          "offered": 5, "window_rate": 0.0}}},
+    }
+    w = {"good": 0.5, "artifact": 0.5}
+    naive = scenarios.weighted_handtrap_ranking(matrix, w)[0][2]
+    fixed = scenarios.weighted_handtrap_ranking(
+        matrix, w, exclude={("artifact", 27204311)})[0][2]
+    assert naive == pytest.approx(0.5), "artifact zero halves the score"
+    assert fixed == pytest.approx(1.0), "excluded, it scores on real data"

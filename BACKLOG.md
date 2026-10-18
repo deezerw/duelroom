@@ -25,9 +25,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Nibiru reports few legal windows in the matrix (0 for kewl-tune) even though
-      every deck makes 8-23 special summons per line. Check how ygorl offers that
-      window before trusting Nibiru's row either way.
+- [ ] ROOT CAUSE still unknown for the Nibiru window gap: fiendsmith gets 90 windows
+      at 20.1 summons/line but kewl-tune gets 0 at 8.4. Detected and excluded, not
+      explained. Needs a look at how the solver offers that response window.
 
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
@@ -58,6 +58,11 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Nibiru window contradiction detected and quarantined.** Decks clearing 5 summons
+  every line while reporting zero Nibiru windows now get flagged, and those cells are
+  excluded from the weighted ranking instead of counted as zeros. Nibiru moves
+  13.7% -> 32.6% stop, last place to fifth — the artifact had been burying a card that
+  is genuinely strong against combo.
 - **BLIND_SPOTS re-examined on evidence.** Maxx "C" stays (856/908 windows convert, so
   lines continue through it and the cards surrendered are invisible to a
   "did the line finish" metric). **Droll removed** — only 45/85 convert and 19 hands
