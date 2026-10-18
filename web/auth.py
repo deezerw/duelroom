@@ -7,7 +7,6 @@ added after an incident.
 
 import hmac
 import time
-from collections import defaultdict
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -17,21 +16,48 @@ from werkzeug.security import check_password_hash
 
 bp = Blueprint("auth", __name__)
 
-# attempts per source address
-_ATTEMPTS = defaultdict(list)
 WINDOW_S = 300
 MAX_ATTEMPTS = 8
 
 
+def _conn():
+    from skills import db
+    return db.connect()
+
+
 def _rate_limited(addr):
-    now = time.monotonic()
-    hits = [t for t in _ATTEMPTS[addr] if now - t < WINDOW_S]
-    _ATTEMPTS[addr] = hits
-    return len(hits) >= MAX_ATTEMPTS
+    """Shared across processes, deliberately.
+
+    The first version kept attempts in a module-level dict. Under
+    gunicorn that gives every worker its own allowance, so the real
+    limit becomes 8 x workers and the limiter barely inconveniences a
+    brute force. It also leaked between tests, which is how it was
+    found.
+    """
+    c = _conn()
+    cutoff = time.time() - WINDOW_S
+    with c:
+        c.execute("DELETE FROM login_attempts WHERE at < ?", (cutoff,))
+    n = c.execute("SELECT COUNT(*) AS n FROM login_attempts WHERE addr = ?",
+                  (addr,)).fetchone()["n"]
+    return n >= MAX_ATTEMPTS
 
 
 def _record(addr):
-    _ATTEMPTS[addr].append(time.monotonic())
+    c = _conn()
+    with c:
+        c.execute("INSERT INTO login_attempts (addr, at) VALUES (?,?)",
+                  (addr, time.time()))
+
+
+def clear_attempts(addr=None):
+    """Test hook and a manual unlock if you lock yourself out."""
+    c = _conn()
+    with c:
+        if addr:
+            c.execute("DELETE FROM login_attempts WHERE addr = ?", (addr,))
+        else:
+            c.execute("DELETE FROM login_attempts")
 
 
 def safe_next(target):

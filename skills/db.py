@@ -148,6 +148,16 @@ CREATE INDEX IF NOT EXISTS idx_incl_hist ON inclusion_history(archetype, label);
 -- One worker means one solver job at a time by construction: the engine
 -- takes 6 of 8 cores, and two concurrent sweeps make both slower and
 -- the machine unusable.
+-- Login attempts, in the database rather than in process memory.
+-- An in-process counter gives each gunicorn worker its own allowance,
+-- so the effective limit becomes 8 x workers and the limiter barely
+-- slows a brute force at all.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    addr  TEXT NOT NULL,
+    at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(addr, at);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     kind        TEXT NOT NULL,

@@ -39,9 +39,11 @@ making uncertainty visible, and the easy version of this UI would undo it.
 
 - `duelroom_session` cookie, **not** the Flask default `session`: stockroom and
   flipper both used the default and logged people between apps.
-- Login **rate limited from the first commit** (8 per 5 min per address). The
-  qBittorrent WebUI here was actively brute-forced while exposed. A correct
-  password is refused while limited.
+- Login **rate limited from the first commit** (8 per 5 min per address),
+  counted **in SQLite, not in process memory**. The qBittorrent WebUI here was
+  actively brute-forced while exposed. An in-process counter gives every
+  gunicorn worker its own allowance — the real limit becomes 8 x workers, and it
+  resets whenever a worker recycles. A correct password is refused while limited.
 - `safe_next()` rejects anything absolute, scheme-bearing or `//`-prefixed —
   open redirect on the post-login `next` was a real finding in stockroom *and*
   flipper.

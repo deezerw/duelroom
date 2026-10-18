@@ -12,14 +12,20 @@ from werkzeug.security import generate_password_hash
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from web import create_app  # noqa: E402
-from web.auth import safe_next  # noqa: E402
+from web.auth import MAX_ATTEMPTS, safe_next  # noqa: E402
 
 
 @pytest.fixture
 def client():
+    # The limiter is shared state by design (see auth._rate_limited), so
+    # each test starts from a clean slate or the brute-force test locks
+    # out every test after it.
+    from web.auth import clear_attempts
+    clear_attempts()
     app = create_app({"PASSWORD_HASH": generate_password_hash("pw"),
                       "TESTING": True})
-    return app.test_client()
+    yield app.test_client()
+    clear_attempts()
 
 
 def test_pages_require_login(client):
@@ -37,6 +43,16 @@ def test_wrong_password_does_not_grant_access(client):
 def test_right_password_grants_access(client):
     client.post("/login", data={"password": "pw"})
     assert client.get("/").status_code == 200
+
+
+def test_rate_limit_survives_a_process_restart(client):
+    # An in-process counter resets when a worker recycles, and gives each
+    # gunicorn worker its own allowance. This one is in the database.
+    from web.auth import _rate_limited, _record
+    for _ in range(MAX_ATTEMPTS):
+        _record("10.9.9.9")
+    assert _rate_limited("10.9.9.9") is True
+    assert _rate_limited("10.9.9.8") is False, "limits are per address"
 
 
 def test_rate_limit_blocks_brute_force_including_the_real_password(client):
