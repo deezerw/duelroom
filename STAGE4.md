@@ -42,6 +42,27 @@ Impermanence in their spell/trap zone, Ash in our hand -- queried back as team 1
 monsters 1, team 1 spell/trap 1, team 0 hand 1. That is the exact shape every
 going-second puzzle needs.
 
+**The solver supports going second directly** -- this is a designed-for path, not the
+replay-fork workaround originally written down here. Relevant flags:
+
+    --start <replay>      rebuild the reference board from THAT duel
+    --player <0|1>        whose turn is optimised (default 0)
+    --turns <n>           1 (default) or 2, where the line crosses turns
+    --board-remove <c>    the final board must no longer contain this card
+    --board-add <c>       ...must also contain this one (FIELD zones only)
+    --opp-hand <c>        add cards to the opponent's hand in the start state
+
+So a board-breaking run is: `--start` the opponent's solved turn-1 replay,
+`--player 1`, `--turns 2`, and `--board-remove` their key interruption. "Break this
+board" is expressible in the solver's own vocabulary.
+
+`solve_blocking` already stored the response sequence of every line it found, and
+`ygorl.engine.replay` can rebuild a `.yrp`/`.yrpX` from it -- so the start states for
+all 69 library boards already exist and do not need re-solving.
+
+`Puzzle` remains the right tool for the floodgate check, where the board is
+hand-specified rather than derived from a real line.
+
 Two notes for the implementation:
 - `Puzzle.__init__` takes `cards, seed, lp, rule_flags` but no `snapshots` flag, so
   `duel.snapshot()` raises "this duel was created without snapshots". Branch-and-return

@@ -41,12 +41,23 @@ FLOODGATES = {
 }
 
 
-def derive_targets(jsonl_path, per_deck=2, min_hits=2):
+def derive_targets(jsonl_path, per_deck=1, min_hits=2):
     """Build a funnel_eval targets file from solve_blocking results.
 
     Counts the targets each deck actually reached and keeps the most
     common. A target reached once in twelve hands is noise, so `min_hits`
     filters those out unless nothing else qualifies.
+
+    ONE target per deck by default. A targets list is a CONJUNCTION -- the
+    final board must contain every entry (batch.py checks it with
+    `board_summary_missing`, and `_check_targets` counts all of them) --
+    so two targets demands both at once, which is far harder than either
+    and reads as a brick when they rarely co-occur. Measured: branded went
+    from 11/12 solved with per-hand auto targets to bricking repeatedly on
+    a two-target conjunction. ygorl's own curated file uses a single
+    target for nine of its ten decks; the exception is labrynth, whose
+    real board genuinely is a pair. Raise `per_deck` only when a deck's
+    signature board is itself a combination.
     """
     records = [
         json.loads(l)
@@ -86,7 +97,7 @@ def derive_targets(jsonl_path, per_deck=2, min_hits=2):
     return out
 
 
-def write_targets(jsonl_path, out_path, per_deck=2, min_hits=2):
+def write_targets(jsonl_path, out_path, per_deck=1, min_hits=2):
     targets = derive_targets(jsonl_path, per_deck, min_hits)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -2,8 +2,7 @@
  "_comment": "Derived by duelroom from solve_blocking results: the targets each deck actually reached most often. Regenerate after a meta refresh.",
  "branded": {
   "targets": [
-   "5318639@szone:fd",
-   "24224830@szone:fd"
+   "5318639@szone:fd"
   ],
   "fire": [
    10045474,
@@ -17,8 +16,7 @@
  },
  "despia": {
   "targets": [
-   "51409648@atk",
-   "24299458@szone:fd"
+   "51409648@atk"
   ],
   "fire": [
    10045474,
@@ -32,8 +30,7 @@
  },
  "elfnote": {
   "targets": [
-   "36270527@atk",
-   "4063756@atk"
+   "36270527@atk"
   ],
   "fire": [
    10045474,
@@ -47,8 +44,7 @@
  },
  "fiendsmith": {
   "targets": [
-   "82135803@atk",
-   "33158448@atk"
+   "82135803@atk"
   ],
   "fire": [
    10045474,
@@ -62,8 +58,7 @@
  },
  "kewl-tune": {
   "targets": [
-   "15665977@atk",
-   "10045474@szone:fd"
+   "15665977@atk"
   ],
   "fire": [
    10045474,
@@ -77,8 +72,7 @@
  },
  "light-and-darkness-ritual": {
   "targets": [
-   "37818794@atk",
-   "46396218@atk"
+   "37818794@atk"
   ],
   "fire": [
    10045474,
@@ -92,8 +86,7 @@
  },
  "sky-striker": {
   "targets": [
-   "76072561@atk",
-   "34433770@szone:fd"
+   "76072561@atk"
   ],
   "fire": [
    10045474,
