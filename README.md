@@ -67,6 +67,12 @@ in its own output:
   replayed special-summon count, which is exactly the cards it draws them. Surviving
   it while handing over eight cards is not beating it.
 - **`locals.toml` is a stand-in** until you edit it with your actual room.
+- **The optimizer may have nothing to say.** On kewl-tune at 12 hands, three of its
+  four objective terms were identical across every trial — the swapped card is not in
+  the hands that brick, and the deck folds to Imperm either way — leaving the ordering
+  to a combo-length tiebreak. It now reports which terms were flat and tells you not
+  to read the ranking as evidence. Flex slots being genuinely interchangeable is a
+  real answer, but it is not the same as one swap being better.
 
 ```bash
 venv/bin/pytest tests/ -q                 # regression tests, under a second

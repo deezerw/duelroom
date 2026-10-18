@@ -58,6 +58,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **The optimizer's objective is degenerate for kewl-tune.** Reading the ledger: all
+  10 trials scored an identical 10/12 solved, 17% brick and 0% survival. Only the
+  combo-length term varied, so the whole 0.06 score spread came from a tiebreak with
+  weight -0.05. `degenerate_terms` now reports which terms were flat and the command
+  says the ranking is not evidence. Three of four terms flat is not a bug in the
+  objective so much as a true statement about this deck at this sample size — but
+  presenting the resulting order as a recommendation would have been.
 - **`engine.duel` parameters verified.** It is used by nothing today, so it was
   unverified surface a bot-vs-bot stage would rest on. seed, first, agent_a/agent_b
   and max_turns each demonstrably change the result. `max_turns` is consistently OFF

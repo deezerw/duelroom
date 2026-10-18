@@ -281,6 +281,33 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
     return best, history
 
 
+def degenerate_terms(history):
+    """Which objective terms did not vary across the trials.
+
+    A term with one distinct value cannot rank anything. Measured on
+    kewl-tune at 12 hands, THREE of the four were constant — solve rate,
+    brick rate and handtrap survival were identical in every trial — so
+    the whole ordering came from the combo-length tiebreak at weight
+    -0.05, a term that was never meant to decide anything.
+
+    That ordering is not wrong so much as empty, and an empty ordering
+    presented as a ranking is the failure this project keeps producing.
+    Returns (constant_terms, varying_terms).
+    """
+    keys = {
+        "solve rate": lambda c: (c.summary or {}).get("best_line_rate"),
+        "brick rate": lambda c: (c.summary or {}).get("brick_rate"),
+        "handtrap survival": lambda c: (c.summary or {}).get("hand_trap_survival"),
+        "combo length": lambda c: ((c.summary or {}).get("combo_actions")
+                                   or {}).get("mean"),
+    }
+    constant, varying = [], []
+    for name, get in keys.items():
+        vals = {get(c) for c in history}
+        (varying if len(vals) > 1 else constant).append(name)
+    return constant, varying
+
+
 def report(history, hands):
     """Rank trials with intervals, so noise is visible as noise."""
     rows = []

@@ -746,3 +746,28 @@ def test_max_turns_is_off_by_one_and_stays_that_way():
     assert r["turns"] == 3, (
         "upstream stops as turn N+1 begins; if this becomes 2 the contract "
         "changed and callers capping turns need revisiting")
+
+
+def test_degenerate_objective_terms_are_detected():
+    # Measured on kewl-tune at 12 hands: solve rate, brick rate and
+    # handtrap survival were identical across every trial, so the whole
+    # ranking came from the combo-length tiebreak at weight -0.05.
+    from skills import optimizer
+
+    class C:
+        def __init__(self, mean):
+            self.summary = {"best_line_rate": 0.83, "brick_rate": 0.17,
+                            "hand_trap_survival": 0.0,
+                            "combo_actions": {"mean": mean}}
+    hist = [C(4.0), C(4.5), C(5.0)]
+    constant, varying = optimizer.degenerate_terms(hist)
+    assert set(constant) == {"solve rate", "brick rate", "handtrap survival"}
+    assert varying == ["combo length"]
+
+    class D(C):
+        def __init__(self, mean, solved):
+            super().__init__(mean)
+            self.summary["best_line_rate"] = solved
+    mixed = [D(4.0, 0.8), D(4.5, 0.9)]
+    constant2, varying2 = optimizer.degenerate_terms(mixed)
+    assert "solve rate" in varying2

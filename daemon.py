@@ -773,16 +773,23 @@ def cmd_optimize(conn, args):
               f"{(r['brick_rate'] or 0)*100:5.0f}%  "
               f"{(r['survival'] or 0)*100:5.0f}%  {r['label']}")
     rows = optimizer.report(history, hands)
+    constant, varying = optimizer.degenerate_terms(history)
     distinct_solve = {round(r["solve_rate"], 4) for r in rows}
     distinct_brick = {round(r["brick_rate"] or 0, 4) for r in rows}
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
     print("  most of these intervals overlap — treat the table as a shortlist")
     print("  to re-run at higher hand counts, not as a ranking.")
-    if len(distinct_solve) == 1 and len(distinct_brick) == 1:
-        print(f"\n  ! At {hands} hands every trial scored the SAME solve and brick")
-        print("    rate, so the ranking above rests entirely on the handtrap")
-        print("    survival term. The swapped card is simply not in the hands")
-        print("    that brick. Raise hands before reading anything into this.")
+    if constant:
+        print(f"\n  ! {len(constant)} of 4 objective terms did not vary at all:")
+        print(f"    {', '.join(constant)}")
+        if len(varying) <= 1:
+            only = varying[0] if varying else "nothing"
+            print(f"    The entire ordering above therefore comes from {only}.")
+            print(f"    That is a tiebreak, not a measurement — do not read the")
+            print(f"    ranking as evidence one swap beats another. Raise hands,")
+            print(f"    or accept that these flex slots are interchangeable here.")
+        else:
+            print(f"    Ranking rests on: {', '.join(varying)}.")
     out = ROOT / "results" / f"optimize_{deck.name}.ydk"
     best.deck.write_ydk(out)
     print(f"\n  best list written to {out}")
