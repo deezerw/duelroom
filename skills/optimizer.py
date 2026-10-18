@@ -215,3 +215,101 @@ def report(history, hands):
             "survival": s.get("hand_trap_survival"),
         })
     return sorted(rows, key=lambda r: -r["score"])
+
+
+# --- side deck ------------------------------------------------------------
+
+def side_in(deck, out_card, in_card, name=None):
+    """Bring a side card in over a main-deck card, as you would between games.
+
+    Strictly 1-for-1: `in_card` must already be IN the side deck, because
+    that is what siding is. Appending a card that is not there silently
+    produced a 16-card side deck and an illegal list -- caught by
+    `Deck.validate`, but worth refusing outright rather than relying on a
+    later check.
+
+    To test a card that is not yet in the side, use `propose_side` to put
+    it there first (displacing an existing side card), then side it in.
+    """
+    if in_card not in deck.side:
+        raise ValueError(
+            f"{in_card} is not in the side deck; use propose_side first"
+        )
+    new = Deck(name=name or f"{deck.name}_sided", main=list(deck.main),
+               extra=list(deck.extra), side=list(deck.side))
+    new.main.remove(out_card)
+    new.main.append(in_card)
+    new.side.remove(in_card)
+    new.side.append(out_card)
+    return new
+
+
+def propose_side(deck, drop_side, add_side, name=None):
+    """Replace one side-deck slot, keeping the side at its legal size."""
+    new = Deck(name=name or f"{deck.name}_s", main=list(deck.main),
+               extra=list(deck.extra), side=list(deck.side))
+    new.side.remove(drop_side)
+    new.side.append(add_side)
+    return new
+
+
+def side_plan(conn, deck, archetype, their_deck, their_target, our_target,
+              candidates=None, hands=4, solve_ms=None, log=print):
+    """Which side cards most improve this matchup, going second.
+
+    The objective is deliberately different from the main-deck climb:
+    a side card is judged on whether it gets us THROUGH their board, not
+    on whether our own goldfish improves. Games two and three are
+    overwhelmingly decided on the draw.
+
+    Cost warning. Each candidate is `hands` full going-second runs, and
+    each of those is two solves (their turn, then ours) at the solver
+    budget. At four hands and 60 s that is roughly ten minutes per
+    candidate, so a fifteen-slot search is an overnight job. Shortlist
+    with `candidate_pool` before spending it.
+    """
+    from . import breaking
+
+    def rate(d):
+        tmp = Path(engine.ROOT / "results" / "side" / d.name)
+        rows = breaking.going_second(their_deck, _written(d, tmp), their_target,
+                                     our_target, hands=hands,
+                                     solve_ms=solve_ms, scratch=tmp)
+        searched = [r for r in rows if r["searched"]]
+        if not searched:
+            return None, rows
+        return sum(r["broke"] for r in searched) / len(searched), rows
+
+    base_rate, _ = rate(deck)
+    log(f"base {deck.name} vs {Path(str(their_deck)).stem}: "
+        f"{'no search' if base_rate is None else f'{base_rate*100:.0f}% through'}")
+
+    # Default to the deck's OWN side deck: "which of my side cards help
+    # this matchup" is the question that has an answer you can act on
+    # between games.
+    pool = candidates or sorted(set(deck.side))
+    outs = removable(conn, deck, archetype)
+    results = []
+    for cid in pool:
+        if not outs:
+            break
+        trial = side_in(deck, outs[0][0], cid,
+                        name=f"{deck.name}_side_{cid}")
+        if trial.validate(conn):
+            continue
+        r, _ = rate(trial)
+        name = card_name(conn, cid)
+        log(f"  +{name}: {'no search' if r is None else f'{r*100:.0f}%'}")
+        results.append({"card_id": cid, "name": name, "rate": r,
+                        "delta": None if r is None or base_rate is None
+                                 else r - base_rate})
+    return base_rate, sorted(
+        results, key=lambda r: (r["delta"] is None, -(r["delta"] or 0)))
+
+
+def _written(deck, scratch):
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    p = scratch / f"{deck.name}.ydk"
+    deck.write_ydk(p)
+    return p

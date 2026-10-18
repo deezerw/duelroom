@@ -145,22 +145,44 @@ stage is complete and verified.
 1. ~~Meta ingestion & card database~~ — **done** (card_db, meta_scrape, deck, stats, daemon)
 2. ~~Engine harness~~ — **done** (`engine.py` drives ygorl + ygo-combo-solver)
 3. ~~Validation gate, scale, storage~~ — **done** (`gate.py`; gate passed, board library built)
-4. `STAGE4.md` — Scenario suite *(handtraps via `--fire`; board breaking verified available)*
-5. `STAGE5.md` — Optimizer *(rewritten: ygorl's tuners need a policy checkpoint we
-   cannot train, so the flex-slot hill climb stands)*
+4. ~~Scenario suite~~ — **done** (`scenarios.py`, `breaking.py`)
+5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
 snapshot/branch, paired seeds, replay export and a wrapped combo solver. Stages 3-5 were
 rewritten against what actually exists rather than what was planned.
 
-The gate passed: snake_eye into Snake-Eyes Flamberge Dragon, 10/12 hands, both bricks
-inspected and genuine. Re-run `daemon.py gate snake_eye` after **any** component bump --
-CardScripts changes rules behaviour for every deck.
+All five stages are implemented. Standing cautions, in the order they will bite:
 
-**Stage 4 is next.** Two standing cautions from Stage 3: measure the solver budget per
-deck with `daemon.py ladder` rather than assuming one, and run `daemon.py setup` after
-any submodule bump or newly released cards will segfault the solver.
+- **Run `daemon.py setup` after any submodule bump.** BabelCDB ships recent sets as
+  separate `release-*.cdb` that ygorl does not load, and a deck holding one of those
+  cards segfaults the solver after five misleading diagnostics.
+- **Bump BabelCDB and CardScripts together.** Cards without their Lua load fine and
+  then do nothing, which looks exactly like a deck that cannot combo.
+- **Re-run `daemon.py gate snake_eye` after any component bump.** CardScripts changes
+  rules behaviour for every deck.
+- **Measure the solver budget per deck with `daemon.py ladder`.** Never assume one; a
+  cheap run is a wrong run, not a fast one.
+
+## Known limitations
+
+Honest gaps, so nobody mistakes a limit for a result:
+
+- **Sample sizes are small.** Everything measured so far is 4-12 hands per deck. At six
+  hands an optimizer run scored an identical brick and solve rate for every trial, so
+  the whole ranking rested on the handtrap-survival term. The code says so when it
+  happens; raise `hands` before believing an ordering.
+- **Handtrap pairs are not supported.** `--fire` takes one card per invocation and
+  funnel_eval loops them separately, so Ash + Imperm together cannot be tested. Locals
+  players hold more than one, so the matrix understates how stoppable a deck is.
+- **Maxx "C" and Droll measure 0% stop** because the metric only asks whether the line
+  reaches its target. Maxx "C" punishes a combo with cards rather than stopping it; that
+  0% is a blind spot, not a verdict.
+- **`locals.toml` holds placeholder weights** covering 55% of a stated meta that is not
+  yours. Every weighted ranking inherits whatever is in that file.
+- **The side plan and floodgate check are implemented but not run at scale.** Each side
+  candidate is `hands` full going-second runs, roughly ten minutes apiece.
 
 **Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
 detail yet — see "Why No Duel AI (Yet)" above for the trade.
