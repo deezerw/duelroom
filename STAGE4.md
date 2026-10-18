@@ -92,18 +92,33 @@ Two notes for the implementation:
 For each board in the Stage 3 library: construct it, deal a going-second hand, and
 search for a break.
 
-**What is still missing, concretely.** `--start` wants a replay containing BOTH decks,
-and the stored demonstrations only contain the piloted one -- they were solved against
-a passive opponent, so there is no "our side" in them. So the work is:
+**Where this actually stands** (`skills/breaking.py`, 2026-10-18).
 
-1. Build a two-deck duel (theirs first, ours second) with `ygorl.engine.duel`.
-2. Replay their stored line into it. `ygorl.solver.demo` has the pieces --
-   `read_jsonl`, `_duel_from`, `verify_line`, `iter_steps` -- but `_duel_from`
-   constructs the single-deck demo duel, so this needs its two-deck equivalent.
-3. Save that as a replay, then `--start` it with `--player 1 --turns 2` and
-   `--board-remove` their key interruption.
+Stored demonstrations cannot be transplanted into a two-deck duel. Three approaches
+were tried and all fail; the module docstring records them so nobody retries. The
+cause is that ygorl solves every deck against `PASSIVE_OPPONENT` (40 copies of one
+vanilla monster) and the recorded responses are only valid against it.
 
-Step 2 is the real work. Everything either side of it is verified.
+What works: `template_vs()` writes a solver template whose deck b is ours instead of
+the passive one, and solving against that produces replays with both real decks.
+`convert_line(..., close_turn=True)` then extends a solution past end of turn --
+without it `--start` rejects the replay as "the line does not get through the turn".
+
+Verified: template carries both decks; solver runs against it; solutions replay
+cleanly; `close_turn` moves the end board to turn 2; `--start` accepts the result and
+reports "target board (end of turn, player 1)".
+
+**Blocked on the search itself.** With `--player 1 --turns 2 --board-remove` the
+solver finishes its reference analysis and exits 0 without searching, writing nothing.
+`--target-subset` and `--board-add` behave the same; `--solve --target-subset` exits 1.
+Its report shows our side untouched ("player 1 total: 55, consommees: 0").
+
+Next step is to read the solver's sources for how `--player 1` reaches its search
+rather than guessing at flags -- ygorl's own spike doc lists `--fire` and `--adapt` as
+untested upstream, so going second may simply be an unexercised path. If it turns out
+not to be supported, the fallback is `ygorl.engine.puzzle` plus a non-solver search
+(the engine enumerates legal actions; `Puzzle` builds the board), which is more work
+but uses only verified machinery.
 
 Report per archetype:
 - Break rate with Wilson CI (`stats.wilson`)
