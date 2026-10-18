@@ -169,16 +169,33 @@ def evaluate(deck, target, hands=12, solve_ms=None, scratch=None, fire=None):
     path = scratch / f"{deck.name}.ydk"
     deck.write_ydk(path)
 
+    # The fire list MUST go on the command line. funnel_eval's
+    # load_deck_targets returns only v["targets"] and discards every
+    # other key, so a "fire" entry in this file is read by nothing --
+    # writing one looked like a fix and changed no behaviour at all.
+    # It is still written for provenance, but --fire is what acts.
     fire = list(fire) if fire is not None else threat_handtraps()
     tfile = scratch / f"{deck.name}.targets.json"
     tfile.write_text(json.dumps({
-        "_comment": "generated per trial by duelroom optimizer",
+        "_comment": "fire is recorded here for provenance; funnel_eval "
+                    "only honours --fire on the command line",
         deck.name: {"targets": [target], "fire": fire},
     }))
     rec = gate.run_funnel(path, hands=hands,
                           solve_ms=solve_ms or engine.SOLVE_MS,
                           out=scratch / f"{deck.name}.jsonl",
-                          targets=tfile)
+                          targets=tfile, fire=fire)
+
+    # Verify what was actually fired rather than what was requested.
+    fired = set()
+    for h in rec.get("hands") or []:
+        fired |= {int(c) for c in (h.get("fire") or {})}
+    if fired and set(fire) - fired:
+        missing = sorted(set(fire) - fired)
+        raise RuntimeError(
+            f"asked to fire {sorted(fire)} but the run only fired "
+            f"{sorted(fired)} (missing {missing}) — the objective would be "
+            f"scoring the wrong handtraps")
     return rec["summary"]
 
 
@@ -197,8 +214,27 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
     # interval so a 1-point "gain" inside a 4-point CI reads as noise.
     objective = objective or Objective()
     fire = threat_handtraps()
+
+    # Checkpoint after every trial. A run is hours, and killing one --
+    # which happens, e.g. when the objective itself turns out to be
+    # wrong -- otherwise loses every evaluation with it. Each line is a
+    # finished trial, so an interrupted run is still a usable shortlist.
+    ledger = engine.ROOT / "results" / f"optimize_{deck.name}.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("")
+
+    def _record(label, summary, score):
+        with ledger.open("a") as fh:
+            fh.write(json.dumps({
+                "label": label, "score": score,
+                "solved": summary.get("solved"), "hands": summary.get("hands"),
+                "brick_rate": summary.get("brick_rate"),
+                "survival": summary.get("hand_trap_survival"),
+                "fire": fire,
+            }) + "\n")
     base_summary = evaluate(deck, target, hands, solve_ms, fire=fire)
     best = Candidate(deck, "base", base_summary, objective.score(base_summary))
+    _record("base", base_summary, best.score)
     log(f"base {deck.name}: score {best.score:+.3f} "
         f"(brick {base_summary.get('brick_rate'):.2f}, "
         f"solve {base_summary.get('best_line_rate'):.2f})")
@@ -223,8 +259,9 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 score = objective.score(summary)
                 out_name = card_name(conn, out_card)
                 log(f"  -{out_name} +{cand_row['name']}: {score:+.3f}")
-                history.append(Candidate(trial, f"-{out_name} +{cand_row['name']}",
-                                         summary, score))
+                label = f"-{out_name} +{cand_row['name']}"
+                history.append(Candidate(trial, label, summary, score))
+                _record(label, summary, score)
                 # Keep the BEST improvement, not the last one that beat
                 # the base. `best.score` does not move inside this loop,
                 # so a plain `score > best.score` lets every qualifying

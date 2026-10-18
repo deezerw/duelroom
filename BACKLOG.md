@@ -25,9 +25,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] The in-flight optimizer run was launched BEFORE the fire-list fix, so its
-      survival term measures Ash only. Re-run it once it finishes to get a result
-      scored against Imperm too.
+- [ ] VERIFY the running optimizer actually fires Imperm AND Ash — check a trial
+      RECORD's `fire` keys, not the targets file. The file lies; funnel_eval drops
+      every key but `targets`.
 
 
 
@@ -58,6 +58,15 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **The fire-list fix was itself a silent no-op.** It wrote `fire` into the per-trial
+  targets file — and funnel_eval's `load_deck_targets` returns only `v["targets"]`,
+  discarding every other key. Trials kept firing Ash alone while the file claimed
+  otherwise, and the test I wrote asserted the FILE contents so it could not catch it.
+  Fire now goes on the command line, `evaluate` raises if a run fired fewer handtraps
+  than requested, and the test asserts the call rather than the file.
+- **Checkpointing**: `hill_climb` writes every finished trial to
+  `results/optimize_<deck>.jsonl` as it goes. Killing a multi-hour run — which I did,
+  losing 16 trials — otherwise loses everything.
 - **Optimizer was optimising for the wrong handtrap.** Its objective weights handtrap
   survival most heavily (+1.5), but `evaluate` wrote a per-trial targets file with no
   `fire` key, so funnel_eval fell back to its default — Ash Blossom alone. The 40-hand

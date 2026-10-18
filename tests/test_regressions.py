@@ -618,22 +618,47 @@ def test_maxx_c_cost_is_the_summon_count():
 # funnel_eval's default that was Ash alone, while the 40-hand matrix put
 # Imperm well ahead of it.
 
-def test_trial_targets_file_carries_a_fire_list(tmp_path, monkeypatch):
+def test_fire_list_reaches_the_command_line_not_just_the_file(tmp_path,
+                                                             monkeypatch):
+    # The first version of this fix wrote "fire" into the per-trial
+    # targets file. funnel_eval's load_deck_targets returns only
+    # v["targets"] and drops every other key, so that changed nothing:
+    # trials still fired Ash alone while the file claimed otherwise.
+    # Asserting the file contents could not catch that. Assert the call.
     from skills import engine, gate, optimizer
-    captured = {}
+    seen = {}
 
-    def fake_run_funnel(path, hands=12, solve_ms=None, out=None, targets=None):
-        captured["targets"] = json.loads(Path(targets).read_text())
-        return {"summary": {"solved": 1, "hands": 1}}
+    def fake_run_funnel(path, hands=12, solve_ms=None, out=None,
+                        targets=None, fire=None):
+        seen["fire"] = fire
+        seen["file"] = json.loads(Path(targets).read_text())
+        return {"summary": {"solved": 1, "hands": 1},
+                "hands": [{"fire": {str(c): {} for c in (fire or ())}}]}
 
     monkeypatch.setattr(gate, "run_funnel", fake_run_funnel)
     monkeypatch.setattr(engine, "ROOT", tmp_path)
     deck = Deck(name="t", main=[1], extra=[], side=[])
     optimizer.evaluate(deck, "1@atk", hands=1, fire=[111, 222])
-    spec = captured["targets"]["t"]
-    assert spec["fire"] == [111, 222], (
-        "without a fire list funnel_eval defaults to Ash alone, so the "
-        "objective silently optimises for one handtrap")
+    assert seen["fire"] == [111, 222], (
+        "fire must be passed to run_funnel; funnel_eval ignores the file key")
+
+
+def test_evaluate_refuses_a_run_that_fired_the_wrong_handtraps(tmp_path,
+                                                               monkeypatch):
+    # Belt and braces: if the request is silently dropped again, the run
+    # must fail loudly rather than score the objective on one handtrap.
+    from skills import engine, gate, optimizer
+
+    def fake_run_funnel(path, hands=12, solve_ms=None, out=None,
+                        targets=None, fire=None):
+        return {"summary": {"solved": 1, "hands": 1},
+                "hands": [{"fire": {"111": {}}}]}   # only one of the two
+
+    monkeypatch.setattr(gate, "run_funnel", fake_run_funnel)
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    deck = Deck(name="t", main=[1], extra=[], side=[])
+    with pytest.raises(RuntimeError, match="only fired"):
+        optimizer.evaluate(deck, "1@atk", hands=1, fire=[111, 222])
 
 
 def test_threat_handtraps_falls_back_without_a_matrix(tmp_path, monkeypatch):
@@ -643,3 +668,33 @@ def test_threat_handtraps_falls_back_without_a_matrix(tmp_path, monkeypatch):
     got = optimizer.threat_handtraps()
     assert 14558127 in got and 10045474 in got, (
         "with no measurement, fall back to Ash and Imperm rather than nothing")
+
+
+def test_hill_climb_checkpoints_every_trial(tmp_path, monkeypatch):
+    # A run is hours. Killing one — which happened when the objective
+    # turned out to be wrong — must not lose every evaluation with it.
+    from skills import db, engine, optimizer
+    from skills.meta_scrape import DEFAULT_FORMAT as FMT
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("A", FMT, 1, "main", 1.0, 1, 50, "now"),
+             ("A", FMT, 9, "main", 0.10, 1, 50, "now"),
+             ("A", FMT, 50, "main", 0.40, 1, 50, "now")])
+        conn.executemany("INSERT INTO cards (id, name, last_fetched) VALUES (?,?,?)",
+                         [(i, f"c{i}", "now") for i in (1, 9, 50)])
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    (tmp_path / "results").mkdir(exist_ok=True)
+    base = Deck(name="ck", main=[1, 9], extra=[], side=[])
+    _stub_optimizer.base = set(base.main)
+    _stub_optimizer(monkeypatch, {50: 0.9})
+    monkeypatch.setattr(Deck, "validate", lambda self, conn, region="tcg": [])
+    optimizer.hill_climb(conn, base, "A", "1@atk", hands=2, rounds=1,
+                         log=lambda *a: None)
+    lines = (tmp_path / "results" / "optimize_ck.jsonl").read_text().splitlines()
+    assert len(lines) >= 2, "base plus each trial must be on disk as it finishes"
+    assert json.loads(lines[0])["label"] == "base"
+    assert "fire" in json.loads(lines[0]), "record which handtraps scored it"
