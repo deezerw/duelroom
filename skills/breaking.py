@@ -118,28 +118,54 @@ def template_vs(path, their_deck, our_deck, seed, config=None, cards=None,
     return Path(path)
 
 
-def break_args(start_replay, remove, our_hand=None, solve_ms=None,
-               add=(), turns=2):
-    """Solver arguments for "break this board".
+def going_second_args(start_replay, our_deck_path, our_hand, target,
+                      solve_ms=None, turns=2):
+    """Solver arguments for "can we still do our thing through their board".
 
-    `--player 1` optimises our turn rather than theirs, `--turns 2` lets
-    the line cross the turn boundary, and each `--board-remove` says the
-    final board must no longer contain that card -- which is what
-    breaking a board means, expressed in the solver's own vocabulary.
+    `--board-remove` does NOT mean this. It edits the captured goal so a
+    card is no longer REQUIRED (`main.cpp` sets `c.present = false` on the
+    target board) -- goal relaxation, not destruction. The help's "stop
+    requiring this card" says so; it is easy to read as the opposite.
+    Breaking a board is therefore not expressible in the solver's goal
+    language, which only talks about what `--player`'s own final board
+    contains.
+
+    The question that matters is expressible, and is arguably the better
+    one: going second, into their real board, can we still assemble our
+    payoff? If their interruptions stop us we fail; if we play through,
+    we succeed. That is the handtrap matrix generalised from one card to
+    a whole board.
+
+    `--deck` and `--hand` are REQUIRED alongside `--start`. Without them
+    the solver enters "repair mode" -- it tries to re-reach the
+    reference's own target, has nothing to search with, and exits 0 after
+    the analysis phase without ever searching. That silent no-op cost an
+    afternoon; the giveaway is output with no "probe:" or
+    "bounded-discrepancy search" line.
     """
-    args = [
+    return [
         str(Path(start_replay).resolve()),
+        "--deck", str(Path(our_deck_path).resolve()),
+        "--hand", "|".join(str(c) for c in our_hand),
         "--player", "1",
         "--turns", str(turns),
+        "--target", str(target),
         "--solve-ms", str(solve_ms or engine.SOLVE_MS),
     ]
-    for card in ([remove] if isinstance(remove, (str, int)) else remove):
-        args += ["--board-remove", str(card)]
-    for card in add:
-        args += ["--board-add", str(card)]
-    if our_hand:
-        args += ["--hand", "|".join(str(c) for c in our_hand)]
-    return args
+
+
+SEARCH_MARKERS = ("probe:", "bounded-discrepancy")
+
+
+def searched(stdout):
+    """True if the solver actually entered its search phase.
+
+    Guards against the repair-mode no-op above, where exit status is 0
+    and no solutions are written for a reason that has nothing to do with
+    the deck.
+    """
+    low = stdout.lower()
+    return any(m in low for m in SEARCH_MARKERS)
 
 
 # --- extending a solved line to the end of its turn ----------------------
@@ -182,3 +208,105 @@ class ScriptedThenYield:
 def action_kinds_seen(point):
     """Debug helper: the distinct action kinds offered at a decision."""
     return sorted({a.kind for a in point.actions})
+
+
+# --- driver ---------------------------------------------------------------
+
+def build_start(their_deck, our_deck, their_target, seed, scratch,
+                solve_ms=None):
+    """Solve their turn 1 against our deck, then close the turn.
+
+    Returns the path to a replay that `--start` accepts, or None if their
+    hand bricked. Two steps are load-bearing: the template must carry our
+    deck as side b (otherwise the opponent is 40 vanilla monsters), and
+    the solved line must be re-emitted with `close_turn=True` (otherwise
+    `--start` rejects it -- "the line does not get through the turn").
+    """
+    import subprocess
+    from ygorl.engine.replay import Replay, load_yrp
+    from ygorl.solver.batch import sample_hand
+    from ygorl.solver.combo_solver import Workdir
+    from ygorl.solver.demo import convert_line
+
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    wd = Workdir.create(scratch / "workdir")
+    sols = scratch / "sol"
+    sols.mkdir(exist_ok=True)
+
+    tpl = template_vs(scratch / "tpl.yrpX", their_deck, our_deck, seed=seed)
+    theirs = to_ydeck(their_deck)
+    hand, _ = sample_hand(theirs, seed=seed)
+
+    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
+    for d in wd.scriptdirs:
+        cmd += ["--scriptdir", str(d)]
+    cmd += ["--no-ref", "--deck", str(Path(their_deck).resolve()),
+            "--hand", "|".join(map(str, hand)),
+            "--target", str(their_target),
+            "--solve-ms", str(solve_ms or engine.SOLVE_MS),
+            "--threads", "1", "--outdir", str(sols)]
+    subprocess.run(cmd, capture_output=True, text=True, env=engine.env(),
+                   timeout=None)
+
+    found = sorted(sols.glob("*.yrp"))
+    if not found:
+        return None
+    line = convert_line(load_yrp(found[0]), [str(their_target)],
+                        close_turn=True)
+    base = Replay.from_yrp(found[0])
+    ext = Replay(seed=base.seed, first=base.first, rule_flags=base.rule_flags,
+                 player=base.player, shuffle_decks=base.shuffle_decks,
+                 decks=base.decks, responses=list(line.responses),
+                 seed_words=base.seed_words)
+    start = scratch / f"start_{seed}.yrpX"
+    ext.to_yrpx(start, names=("them", "us"))
+    return start
+
+
+def going_second(their_deck, our_deck, their_target, our_target, hands=4,
+                 solve_ms=None, scratch=None):
+    """Can our deck assemble its payoff going second into their board?
+
+    One record per hand: whether their turn-1 board was built at all,
+    whether the solver searched, and whether we got through.
+    """
+    import subprocess
+    from ygorl.solver.batch import sample_hand
+    from ygorl.solver.combo_solver import Workdir
+
+    scratch = Path(scratch or (engine.ROOT / "results" / "going_second"))
+    rows = []
+    ours_deck = to_ydeck(our_deck)
+    for seed in range(hands):
+        sd = scratch / f"h{seed}"
+        start = build_start(their_deck, our_deck, their_target, seed, sd,
+                            solve_ms)
+        if start is None:
+            rows.append({"seed": seed, "their_board": False,
+                         "searched": False, "broke": False})
+            continue
+        wd = Workdir.create(sd / "workdir")
+        out = sd / "gs"
+        out.mkdir(exist_ok=True)
+        # Going second draws for turn, so six cards rather than five.
+        hand, _ = sample_hand(ours_deck, seed=1000 + seed, size=6)
+        cmd = [str(engine.SOLVER_BIN)] + going_second_args(
+            start, our_deck, hand, our_target, solve_ms)
+        cmd = [cmd[0], cmd[1], "--workdir", str(wd.path)]
+        for d in wd.scriptdirs:
+            cmd += ["--scriptdir", str(d)]
+        cmd += going_second_args(start, our_deck, hand, our_target,
+                                 solve_ms)[1:]
+        cmd += ["--threads", "2", "--outdir", str(out)]
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           env=engine.env(), timeout=None)
+        wrote = list(out.glob("*.yrp"))
+        rows.append({
+            "seed": seed,
+            "their_board": True,
+            "searched": searched(r.stdout or ""),
+            "broke": bool(wrote),
+            "hand": hand,
+        })
+    return rows

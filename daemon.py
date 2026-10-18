@@ -12,8 +12,8 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import (card_db, carddb, config, db, engine, gate,
-                    meta_scrape as ms, scenarios, stats)
+from skills import (breaking, card_db, carddb, config, db, engine, gate,
+                    meta_scrape as ms, optimizer, scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -40,6 +40,8 @@ duelroom — Yu-Gi-Oh! deck laboratory
   targets                   derive solver targets from the board library
   matrix                    handtrap matrix: which handtraps to main deck
   locals                    your locals.toml weights and their coverage
+  optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
+  second <theirs> <ours>    going second into their real board
   help / quit
 """
 
@@ -444,6 +446,83 @@ def cmd_matrix(conn, args):
     print("  * 12 hands per deck. Several cells rest on 1-3 tested windows.")
 
 
+def cmd_optimize(conn, args):
+    if len(args) < 2:
+        print("usage: optimize <deck.ydk> <archetype> [hands] [rounds]")
+        return
+    path = _resolve_deck(args[0])
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    archetype = args[1]
+    hands = int(args[2]) if len(args) > 2 else 8
+    rounds = int(args[3]) if len(args) > 3 else 2
+
+    deck = Deck.from_ydk(path)
+    deck.canonicalise(conn)
+    pool = optimizer.candidate_pool(conn, archetype, deck)
+    outs = optimizer.removable(conn, deck, archetype)
+    if not pool:
+        print(f"no flex/fringe pool for {archetype!r} — run `meta` and check `archetypes`")
+        return
+    print(f"{deck.name}: {len(outs)} non-core slots, {len(pool)} candidates")
+    print(f"each trial is one funnel_eval run — {hands} hands at "
+          f"{engine.SOLVE_MS/1000:.0f}s. This takes hours, not minutes.\n")
+
+    best, history = optimizer.hill_climb(conn, deck, archetype, hands=hands,
+                                         rounds=rounds)
+    print(f"\nbest: {best.label}  score {best.score:+.3f}")
+    print(f"\n  {'score':>7}  {'solve':>16}  {'brick':>6}  {'surv':>6}  change")
+    for r in optimizer.report(history, hands)[:12]:
+        lo, hi = r["ci"]
+        print(f"  {r['score']:+7.3f}  {r['solve_rate']*100:4.0f}% "
+              f"[{lo*100:3.0f}-{hi*100:3.0f}]  "
+              f"{(r['brick_rate'] or 0)*100:5.0f}%  "
+              f"{(r['survival'] or 0)*100:5.0f}%  {r['label']}")
+    print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
+    print("  most of these intervals overlap — treat the table as a shortlist")
+    print("  to re-run at higher hand counts, not as a ranking.")
+    out = ROOT / "results" / f"optimize_{deck.name}.ydk"
+    best.deck.write_ydk(out)
+    print(f"\n  best list written to {out}")
+
+
+def cmd_second(conn, args):
+    if len(args) < 2:
+        print("usage: second <their_deck> <our_deck> [hands]")
+        return
+    theirs, ours = _resolve_deck(args[0]), _resolve_deck(args[1])
+    if not theirs or not ours:
+        print("deck not found")
+        return
+    hands = int(args[2]) if len(args) > 2 else 4
+    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
+    tk, ok_ = theirs.stem, ours.stem
+    if tk not in tgt or ok_ not in tgt:
+        print(f"need derived targets for both decks — run `targets` (have: "
+              f"{', '.join(k for k in tgt if not k.startswith('_'))})")
+        return
+    their_target = tgt[tk]["targets"][0]
+    our_target = tgt[ok_]["targets"][0]
+    print(f"{ok_} going second into {tk}")
+    print(f"  their board target: {their_target}")
+    print(f"  our payoff target : {our_target}\n")
+    rows = breaking.going_second(theirs, ours, their_target, our_target,
+                                 hands=hands)
+    built = sum(r["their_board"] for r in rows)
+    searched = sum(r["searched"] for r in rows)
+    through = sum(r["broke"] for r in rows)
+    for r in rows:
+        state = ("they bricked" if not r["their_board"]
+                 else "NO SEARCH (misconfigured)" if not r["searched"]
+                 else "got through" if r["broke"] else "stopped")
+        print(f"  hand {r['seed']}: {state}")
+    print(f"\n  their board built {built}/{len(rows)}, "
+          f"we searched {searched}, got through {through}")
+    if searched < built:
+        print("  ! some hands never entered a search — see breaking.searched()")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -500,6 +579,8 @@ COMMANDS = {
     "targets": cmd_targets,
     "matrix": cmd_matrix,
     "locals": cmd_locals,
+    "optimize": cmd_optimize,
+    "second": cmd_second,
 }
 
 

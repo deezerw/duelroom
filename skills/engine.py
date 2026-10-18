@@ -69,6 +69,22 @@ class EngineNotReady(RuntimeError):
     pass
 
 
+def _export():
+    """Set the ygorl env vars in THIS process, not only for subprocesses.
+
+    ygorl resolves its data paths at call time from the environment, so
+    anything that imports ygorl directly (Workdir.create, Replay,
+    convert_line) needs them set here too. Without it the in-process
+    calls raise "third_party/ data not found" while subprocesses work
+    fine -- a confusing split.
+    """
+    os.environ.setdefault("YGORL_THIRD_PARTY", str(THIRD_PARTY))
+    os.environ.setdefault("YGORL_COMBO_SOLVER", str(SOLVER_BIN))
+
+
+_export()
+
+
 def env():
     """Environment for any ygorl subprocess."""
     e = dict(os.environ)
