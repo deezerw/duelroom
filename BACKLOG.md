@@ -60,6 +60,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Hill-climb control flow unit-tested** against a stubbed evaluator (no solver, no
+  engine). A real optimize run is hours, so a control-flow bug is expensive to find
+  by running it. Covers: the best candidate winning over a later one that also beats
+  base, every trial being recorded, and a strictly worse swap being rejected.
+  NOTE: the first version of this test was worthless — the fixture ordered candidates
+  so the best was also the LAST to beat base, making "best wins" and "last wins"
+  agree. Mutation testing caught that; the fixture now puts the best first.
 - **`bootstrap.sh`** — the repo on GitHub carries source and decklists only, so a
   fresh clone could not run a single solver command; the engine needed seven setup
   steps that existed solely in a docstring. The script encodes all of them, with each

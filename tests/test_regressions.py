@@ -449,3 +449,83 @@ def test_removable_puts_the_least_played_card_first(tmp_path):
     assert 1 not in ids, "core cards must never be cut"
     assert ids[0] == 999, "a card no list plays is cut before a 25% card"
     assert ids == [999, 3, 2], "weakest-first ordering"
+
+
+# --- hill climb control flow ---------------------------------------------
+# A real optimize run is hours of solver time. A control-flow bug there
+# is expensive to discover, so the loop is exercised against a stubbed
+# evaluator: no solver, no engine, deterministic.
+
+def _stub_optimizer(monkeypatch, scores):
+    """Make evaluate() return canned summaries keyed by the added card."""
+    from skills import optimizer
+    calls = []
+
+    def fake_evaluate(deck, target, hands=12, solve_ms=None, scratch=None):
+        calls.append(deck.name)
+        added = set(deck.main) - _stub_optimizer.base
+        key = next(iter(added), None)
+        rate = scores.get(key, 0.5)
+        return {"brick_rate": 1 - rate, "best_line_rate": rate,
+                "hand_trap_survival": rate, "combo_actions": {"mean": 5.0},
+                "solved": int(rate * 10), "hands": 10}
+
+    monkeypatch.setattr(optimizer, "evaluate", fake_evaluate)
+    return calls
+
+
+def test_hill_climb_accepts_the_best_candidate_and_stops(tmp_path, monkeypatch):
+    from skills import db, optimizer
+    from skills.meta_scrape import DEFAULT_FORMAT as FMT
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("A", FMT, 1, "main", 1.0, 1, 50, "now"),     # core, never cut
+             ("A", FMT, 9, "main", 0.10, 1, 50, "now"),    # our weak slot
+             ("A", FMT, 50, "main", 0.40, 1, 50, "now"),   # candidates
+             ("A", FMT, 51, "main", 0.35, 1, 50, "now"),
+             ("A", FMT, 52, "main", 0.30, 1, 50, "now")])
+        conn.executemany("INSERT INTO cards (id, name, last_fetched) VALUES (?,?,?)",
+                         [(i, f"c{i}", "now") for i in (1, 9, 50, 51, 52)])
+
+    base = Deck(name="base", main=[1, 9], extra=[], side=[])
+    _stub_optimizer.base = set(base.main)
+    # The pool is ordered by inclusion (50, 51, 52), so the BEST candidate
+    # must come FIRST for this to distinguish "best wins" from "last wins".
+    # With the best last, both behaviours pick the same card and the test
+    # passes against the bug it is meant to catch.
+    _stub_optimizer(monkeypatch, {50: 0.9, 51: 0.6, 52: 0.2})
+    monkeypatch.setattr(Deck, "validate", lambda self, conn, region="tcg": [])
+
+    best, history = optimizer.hill_climb(
+        conn, base, "A", "1@atk", hands=4, rounds=1, log=lambda *a: None)
+    assert "c50" in best.label, (
+        f"took {best.label}; c50 scores highest and must win over the later "
+        f"c51, which also beats base")
+    assert len(history) >= 4, "every trial must be recorded, not just the winner"
+
+
+def test_hill_climb_stops_when_nothing_improves(tmp_path, monkeypatch):
+    from skills import db, optimizer
+    from skills.meta_scrape import DEFAULT_FORMAT as FMT
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("A", FMT, 1, "main", 1.0, 1, 50, "now"),
+             ("A", FMT, 9, "main", 0.10, 1, 50, "now"),
+             ("A", FMT, 50, "main", 0.40, 1, 50, "now")])
+        conn.executemany("INSERT INTO cards (id, name, last_fetched) VALUES (?,?,?)",
+                         [(i, f"c{i}", "now") for i in (1, 9, 50)])
+    base = Deck(name="base", main=[1, 9], extra=[], side=[])
+    _stub_optimizer.base = set(base.main)
+    _stub_optimizer(monkeypatch, {50: 0.1})   # strictly worse than base 0.5
+    monkeypatch.setattr(Deck, "validate", lambda self, conn, region="tcg": [])
+    best, history = optimizer.hill_climb(
+        conn, base, "A", "1@atk", hands=4, rounds=3, log=lambda *a: None)
+    assert best.label == "base", "a worse swap must not be accepted"
