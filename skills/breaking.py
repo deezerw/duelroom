@@ -73,6 +73,7 @@ path may simply be unexercised. Read the solver's own sources for how
 ``--player 1`` reaches its search before guessing at more flags.
 """
 
+import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
@@ -212,17 +213,38 @@ def action_kinds_seen(point):
 
 # --- driver ---------------------------------------------------------------
 
+class SolverFailed(RuntimeError):
+    """The solver exited non-zero. NOT the same as finding no line."""
+
+
+def _run_solver(cmd, what):
+    """Run the solver and refuse to confuse a crash with a null result.
+
+    These calls used capture_output with no check, so a non-zero exit
+    produced no .yrp and the caller reported "their hand bricked" -- a
+    crashed solver and a deck that genuinely cannot combo looked
+    identical in the output. Everything downstream (board-break rates,
+    floodgate survival) would have quietly absorbed solver failures as
+    deck weakness.
+    """
+    r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip().splitlines()[-3:]
+        raise SolverFailed(f"{what}: exit {r.returncode} — " + " | ".join(tail))
+    return r
+
+
 def build_start(their_deck, our_deck, their_target, seed, scratch,
                 solve_ms=None):
     """Solve their turn 1 against our deck, then close the turn.
 
     Returns the path to a replay that `--start` accepts, or None if their
-    hand bricked. Two steps are load-bearing: the template must carry our
+    hand genuinely found no line. Raises SolverFailed if the solver
+    itself broke. Two steps are load-bearing: the template must carry our
     deck as side b (otherwise the opponent is 40 vanilla monsters), and
     the solved line must be re-emitted with `close_turn=True` (otherwise
     `--start` rejects it -- "the line does not get through the turn").
     """
-    import subprocess
     from ygorl.engine.replay import Replay, load_yrp
     from ygorl.solver.batch import sample_hand
     from ygorl.solver.combo_solver import Workdir
@@ -246,8 +268,7 @@ def build_start(their_deck, our_deck, their_target, seed, scratch,
             "--target", str(their_target),
             "--solve-ms", str(solve_ms or engine.SOLVE_MS),
             "--threads", "1", "--outdir", str(sols)]
-    subprocess.run(cmd, capture_output=True, text=True, env=engine.env(),
-                   timeout=None)
+    _run_solver(cmd, f"build_start({Path(their_deck).stem}, seed {seed})")
 
     found = sorted(sols.glob("*.yrp"))
     if not found:
@@ -271,7 +292,6 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
     One record per hand: whether their turn-1 board was built at all,
     whether the solver searched, and whether we got through.
     """
-    import subprocess
     from ygorl.solver.batch import sample_hand
     from ygorl.solver.combo_solver import Workdir
 
@@ -280,8 +300,13 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
     ours_deck = to_ydeck(our_deck)
     for seed in range(hands):
         sd = scratch / f"h{seed}"
-        start = build_start(their_deck, our_deck, their_target, seed, sd,
-                            solve_ms)
+        try:
+            start = build_start(their_deck, our_deck, their_target, seed, sd,
+                                solve_ms)
+        except SolverFailed as e:
+            rows.append({"seed": seed, "their_board": None, "searched": False,
+                         "broke": False, "error": str(e)})
+            continue
         if start is None:
             rows.append({"seed": seed, "their_board": False,
                          "searched": False, "broke": False})
@@ -323,7 +348,6 @@ def floodgate_start(floodgate, our_deck, seed, scratch, solve_ms=None):
     Trap cannot activate the turn it is set, so what you actually face
     going second is a set card that flips during your turn.
     """
-    import subprocess
     from ygorl.engine.duel import Deck as YDeck
     from ygorl.engine.replay import Replay, load_yrp
     from ygorl.solver.combo_solver import Workdir
@@ -350,7 +374,7 @@ def floodgate_start(floodgate, our_deck, seed, scratch, solve_ms=None):
             "--target", f"{floodgate}@szone:fd",
             "--solve-ms", str(solve_ms or engine.SOLVE_MS),
             "--threads", "1", "--outdir", str(sols)]
-    subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
+    _run_solver(cmd, f"floodgate_start({floodgate}, seed {seed})")
 
     found = sorted(sols.glob("*.yrp"))
     if not found:
@@ -374,7 +398,6 @@ def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
     Locals run floodgates far more than top tables do, and this is cheap
     next to a full gauntlet.
     """
-    import subprocess
     from ygorl.solver.batch import sample_hand
     from ygorl.solver.combo_solver import Workdir
     from .scenarios import FLOODGATES
@@ -385,9 +408,14 @@ def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
     rows = []
     for code, name in floodgates.items():
         solved = tested = 0
+        errors = 0
         for seed in range(hands):
             sd = scratch / f"{code}_{seed}"
-            start = floodgate_start(code, our_deck, seed, sd, solve_ms)
+            try:
+                start = floodgate_start(code, our_deck, seed, sd, solve_ms)
+            except SolverFailed:
+                errors += 1
+                continue
             if start is None:
                 continue
             wd = Workdir.create(sd / "wd2")
@@ -409,6 +437,6 @@ def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
             tested += 1
             solved += bool(list(out.glob("*.yrp")))
         rows.append({"card": code, "name": name, "tested": tested,
-                     "functioned": solved,
+                     "functioned": solved, "errors": errors,
                      "rate": solved / tested if tested else None})
     return rows

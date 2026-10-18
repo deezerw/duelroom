@@ -25,9 +25,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Bug sweep: grep for the patterns that already bit us —
-      `.get(` on a `sqlite3.Row`, metrics that count a missing window as a success,
-      any place a list is treated as alternatives when it is a conjunction.
 - [ ] Hand-level memoization `(deck_hash, opening_hand) -> result`. Named in CLAUDE.md
       as a non-negotiable and never actually implemented. Biggest speed win available.
 - [ ] Scale up: gate/boards/matrix at 40+ hands now that long jobs are allowed. The 6-12
@@ -48,6 +45,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **Bug sweep #1 (silent no-ops).** `.get()`-on-Row and None-arithmetic are clean; the
+  real find was four `subprocess.run` calls in breaking.py with `capture_output` and
+  no `check`. A non-zero solver exit produced no .yrp, which `going_second` reported
+  as "they bricked" — a crashed solver and a deck that cannot combo were
+  indistinguishable, and board-break and floodgate rates would have absorbed solver
+  failures as deck weakness. Added `SolverFailed` + `_run_solver`; proved with a bad
+  `--target` (now surfaces "!! --target: no card" instead of a false brick) and
+  regression-checked the happy path.
 - **Blitzclique has no payoff board — settled, not a bug.** 16 hands: every solver
   proposal stayed main-deck, and only 1 of 16 end boards held any monster at all.
   `solve_blocking` plans towards INTERRUPTIONS, which for a backrow deck are all

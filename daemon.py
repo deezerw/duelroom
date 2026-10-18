@@ -571,16 +571,25 @@ def cmd_second(conn, args):
     print(f"  our payoff target : {our_target}\n")
     rows = breaking.going_second(theirs, ours, their_target, our_target,
                                  hands=hands)
-    built = sum(r["their_board"] for r in rows)
+    failed = [r for r in rows if r["their_board"] is None]
+    built = sum(1 for r in rows if r["their_board"])
     searched = sum(r["searched"] for r in rows)
     through = sum(r["broke"] for r in rows)
     for r in rows:
-        state = ("they bricked" if not r["their_board"]
-                 else "NO SEARCH (misconfigured)" if not r["searched"]
-                 else "got through" if r["broke"] else "stopped")
+        if r["their_board"] is None:
+            state = f"SOLVER FAILED — {r.get('error','')[:70]}"
+        elif not r["their_board"]:
+            state = "they bricked"
+        elif not r["searched"]:
+            state = "NO SEARCH (misconfigured)"
+        else:
+            state = "got through" if r["broke"] else "stopped"
         print(f"  hand {r['seed']}: {state}")
     print(f"\n  their board built {built}/{len(rows)}, "
           f"we searched {searched}, got through {through}")
+    if failed:
+        print(f"  ! {len(failed)} hand(s) the SOLVER failed on — not deck weakness,")
+        print("    and excluded from the counts above")
     if searched < built:
         print("  ! some hands never entered a search — see breaking.searched()")
 
@@ -603,10 +612,11 @@ def cmd_floodgates(conn, args):
     rows = breaking.floodgate_check(path, our_target, hands=hands)
     print(f"  {'functioned':>12}  floodgate")
     for r in rows:
+        err = f"  ({r['errors']} solver failures)" if r.get("errors") else ""
         if not r["tested"]:
-            print(f"  {'untested':>12}  {r['name']}  (could not build the board)")
+            print(f"  {'untested':>12}  {r['name']}  (could not build the board){err}")
         else:
-            print(f"  {r['functioned']}/{r['tested']:<10}  {r['name']}")
+            print(f"  {r['functioned']}/{r['tested']:<10}  {r['name']}{err}")
     print("\n  'functioned' = still assembled its payoff with that card set")
     print("  across from it. A set Continuous Trap cannot activate the turn")
     print("  it is set, so this models it flipping during your turn.")
