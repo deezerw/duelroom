@@ -126,7 +126,33 @@ def swap(deck, out_card, in_card, name=None):
     return new
 
 
-def evaluate(deck, target, hands=12, solve_ms=None, scratch=None):
+def threat_handtraps(top=2):
+    """The handtraps worth optimising against, by measured strength.
+
+    The objective weights handtrap survival most heavily, so WHICH
+    handtraps get fired decides what the search optimises for. Left to
+    funnel_eval's default that is Ash Blossom alone — and the 40-hand
+    matrix put Infinite Impermanence well ahead of Ash (93.4% vs 74.1%),
+    with kewl-tune playing through Imperm 0% of the time. Tuning a deck
+    for Ash resilience while Imperm is the card actually beating it is
+    the wrong objective.
+
+    Falls back to Ash and Imperm if no matrix has been run.
+    """
+    from . import config, scenarios
+    path = engine.ROOT / "results"
+    files = sorted(path.glob("handtrap_matrix*.jsonl"),
+                   key=lambda p: p.stat().st_mtime)
+    if not files:
+        return [14558127, 10045474]
+    recs = [json.loads(l) for l in files[-1].read_text().splitlines() if l.strip()]
+    ranked = scenarios.weighted_handtrap_ranking(
+        scenarios.handtrap_matrix(recs), config.weights())
+    live = [code for code, _, score, _ in ranked if score > 0][:top]
+    return live or [14558127, 10045474]
+
+
+def evaluate(deck, target, hands=12, solve_ms=None, scratch=None, fire=None):
     """Score one list. Writes a temp .ydk plus a targets file for it.
 
     funnel_eval keys targets by deck NAME and refuses a deck it has no
@@ -143,10 +169,11 @@ def evaluate(deck, target, hands=12, solve_ms=None, scratch=None):
     path = scratch / f"{deck.name}.ydk"
     deck.write_ydk(path)
 
+    fire = list(fire) if fire is not None else threat_handtraps()
     tfile = scratch / f"{deck.name}.targets.json"
     tfile.write_text(json.dumps({
         "_comment": "generated per trial by duelroom optimizer",
-        deck.name: {"targets": [target]},
+        deck.name: {"targets": [target], "fire": fire},
     }))
     rec = gate.run_funnel(path, hands=hands,
                           solve_ms=solve_ms or engine.SOLVE_MS,
@@ -169,7 +196,8 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
     # are still differences over `hands` hands, and `report` prints the
     # interval so a 1-point "gain" inside a 4-point CI reads as noise.
     objective = objective or Objective()
-    base_summary = evaluate(deck, target, hands, solve_ms)
+    fire = threat_handtraps()
+    base_summary = evaluate(deck, target, hands, solve_ms, fire=fire)
     best = Candidate(deck, "base", base_summary, objective.score(base_summary))
     log(f"base {deck.name}: score {best.score:+.3f} "
         f"(brick {base_summary.get('brick_rate'):.2f}, "
@@ -191,7 +219,7 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 problems = trial.validate(conn)
                 if problems:
                     continue
-                summary = evaluate(trial, target, hands, solve_ms)
+                summary = evaluate(trial, target, hands, solve_ms, fire=fire)
                 score = objective.score(summary)
                 out_name = card_name(conn, out_card)
                 log(f"  -{out_name} +{cand_row['name']}: {score:+.3f}")

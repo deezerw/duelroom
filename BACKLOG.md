@@ -25,6 +25,10 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] The in-flight optimizer run was launched BEFORE the fire-list fix, so its
+      survival term measures Ash only. Re-run it once it finishes to get a result
+      scored against Imperm too.
+
 
 
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
@@ -54,6 +58,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Optimizer was optimising for the wrong handtrap.** Its objective weights handtrap
+  survival most heavily (+1.5), but `evaluate` wrote a per-trial targets file with no
+  `fire` key, so funnel_eval fell back to its default — Ash Blossom alone. The 40-hand
+  matrix had just put Infinite Impermanence well ahead (93.4% vs 74.1%), and kewl-tune
+  plays through Imperm 0% of the time, so the search was tuning for resilience to the
+  second-best card while the best one was what actually beat the deck.
+  `threat_handtraps()` now reads the measured ranking and fires the top two.
 - **Maxx "C" cost measured** — the other half of the STAGE3 promise, free once summons
   were counted: Maxx "C" draws on every special summon, so the replayed count IS the
   cost. fiendsmith hands over 8.4 cards comboing through it (15 at worst), kewl-tune

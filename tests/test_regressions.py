@@ -461,7 +461,8 @@ def _stub_optimizer(monkeypatch, scores):
     from skills import optimizer
     calls = []
 
-    def fake_evaluate(deck, target, hands=12, solve_ms=None, scratch=None):
+    def fake_evaluate(deck, target, hands=12, solve_ms=None, scratch=None,
+                      fire=None):
         calls.append(deck.name)
         added = set(deck.main) - _stub_optimizer.base
         key = next(iter(added), None)
@@ -609,3 +610,36 @@ def test_maxx_c_cost_is_the_summon_count():
                                        "nibiru_rate": 1.0, "n": 40}})
     assert got["d"]["cards"] == pytest.approx(8.4)
     assert got["d"]["worst"] == 15
+
+
+# --- optimizer objective -------------------------------------------------
+# The objective weights handtrap survival most heavily, so which
+# handtraps get fired decides what the search optimises for. Left to
+# funnel_eval's default that was Ash alone, while the 40-hand matrix put
+# Imperm well ahead of it.
+
+def test_trial_targets_file_carries_a_fire_list(tmp_path, monkeypatch):
+    from skills import engine, gate, optimizer
+    captured = {}
+
+    def fake_run_funnel(path, hands=12, solve_ms=None, out=None, targets=None):
+        captured["targets"] = json.loads(Path(targets).read_text())
+        return {"summary": {"solved": 1, "hands": 1}}
+
+    monkeypatch.setattr(gate, "run_funnel", fake_run_funnel)
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    deck = Deck(name="t", main=[1], extra=[], side=[])
+    optimizer.evaluate(deck, "1@atk", hands=1, fire=[111, 222])
+    spec = captured["targets"]["t"]
+    assert spec["fire"] == [111, 222], (
+        "without a fire list funnel_eval defaults to Ash alone, so the "
+        "objective silently optimises for one handtrap")
+
+
+def test_threat_handtraps_falls_back_without_a_matrix(tmp_path, monkeypatch):
+    from skills import engine, optimizer
+    (tmp_path / "results").mkdir()
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    got = optimizer.threat_handtraps()
+    assert 14558127 in got and 10045474 in got, (
+        "with no measurement, fall back to Ash and Imperm rather than nothing")
