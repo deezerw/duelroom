@@ -54,6 +54,25 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   help / quit
 ```
 
+## The Web UI
+
+`web/` is a Flask app over the same `skills.*` and the same SQLite — not a second
+copy of either, because two implementations of a number is how this project's
+worst bugs got in. It is being built to replace the CLI for everyday use; the CLI
+stays as the debugging tool. Stages, settled decisions and the security history
+that shaped the login are in **`web/PLAN.md`**.
+
+```bash
+export DUELROOM_PASSWORD_HASH='pbkdf2:sha256:...'   # see web/PLAN.md
+venv/bin/python web/run.py        # 127.0.0.1:8446
+venv/bin/python web/worker.py     # exactly one, runs the queued solver jobs
+```
+
+The deckbuilder's two load-bearing rules: card search ranks on the **Wilson lower
+bound** of the inclusion rate, never the raw rate, and **legality is only ever
+`Deck.validate`**, asked over HTTP on every edit — never reimplemented in the
+browser.
+
 ## Why No Duel AI (Yet)
 
 Yu-Gi-Oh's open AI (WindBot) is rule-based with a hand-written executor per archetype.

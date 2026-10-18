@@ -102,6 +102,23 @@ MUTATIONS = [
      "    return re.compile(body, re.IGNORECASE)",
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
+    ("skills/builder.py",
+     "        lo = stats.wilson(round(pct * n), n)[1]",
+     "        lo = pct",
+     "rank card search on the raw inclusion rate, so 100% of two lists "
+     "outranks 85% of forty"),
+
+    ("skills/builder.py",
+     "            0 if (p and p[\"own\"]) else 1,   # the deck's own archetype first",
+     "            0,",
+     "ignore the deck's own archetype when ranking the card search"),
+
+    ("skills/builder.py",
+     "    if name_low == q:\n        return 0\n    return 1 if q in name_low else 2",
+     "    if name_low == q:\n        return 0\n    if name_low.startswith(q):\n"
+     "        return 1\n    return 2 if q in name_low else 3",
+     "tier search hits by prefix, burying meta cards under alphabetical ones"),
+
     ("skills/carddb.py",
      "    out = sorted(babel.glob(\"release-*.cdb\"))",
      "    out = []",

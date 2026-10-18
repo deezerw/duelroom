@@ -137,7 +137,10 @@ class Deck:
             if n > limit:
                 status = "forbidden" if limit == 0 else f"limit {limit}"
                 problems.append(f"{name}: {n} copies but {status} on the {region} list")
-            if n > 3:
+            elif n > 3:
+                # Only reachable if the banlist ever reports a limit above
+                # three. Reported separately from the line above so the
+                # same violation is never listed twice.
                 problems.append(f"{name}: {n} copies (hard cap is 3)")
 
         # Section routing

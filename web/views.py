@@ -7,8 +7,9 @@ from flask import (Blueprint, Response, flash, redirect, render_template,
 
 import json
 
-from skills import (card_db, config, db, drill, gate, importer,
-                    meta_scrape as ms, report as report_mod, scenarios, stats)
+from skills import (builder, card_db, carddb, config, db, drill, gate,
+                    importer, meta_scrape as ms, report as report_mod,
+                    scenarios, stats)
 from skills.deck import Deck
 
 from . import jobs
@@ -327,3 +328,138 @@ def download_ydk(name):
     return Response(
         path.read_text(), mimetype="text/plain",
         headers={"Content-Disposition": f'attachment; filename="{name}.ydk"'})
+
+
+# --- deckbuilder ---------------------------------------------------------
+#
+# The browser holds the working list; the server holds the truth about it.
+# Every change is validated by `Deck.validate` over HTTP rather than by a
+# second copy of the banlist in JavaScript, because two implementations of
+# legality means the builder eventually shows a legal deck that the CLI and
+# the engine both refuse.
+
+MAX_LIST = 300   # a sane ceiling; the real limits come from validate()
+
+
+def _sections_from(payload):
+    out = {}
+    for sec in ("main", "extra", "side"):
+        ids = payload.get(sec) or []
+        if not isinstance(ids, list):
+            raise ValueError(f"{sec} must be a list of passcodes")
+        if len(ids) > MAX_LIST:
+            raise ValueError(f"{sec} has {len(ids)} cards (ceiling {MAX_LIST})")
+        out[sec] = [int(x) for x in ids]
+    return out
+
+
+@bp.route("/build")
+@bp.route("/build/<name>")
+@login_required
+def build(name=None):
+    c = conn()
+    name = name or db.get_meta(c, "active_deck")
+    d = Deck(name=name or "untitled")
+    existing = False
+    # A mistyped name must not quietly become a blank new deck that looks
+    # like the one you meant to open.
+    requested = bool(name)
+    if name and (DECKS / f"{name}.ydk").exists():
+        d = Deck.from_ydk(DECKS / f"{name}.ydk")
+        d.canonicalise(c)
+        existing = True
+
+    guesses = ms.identify_archetype(c, d) if d.main else []
+    arch = guesses[0][0] if guesses and guesses[0][1] >= 0.5 else None
+    sections = {sec: builder.decorate(c, getattr(d, sec), arch)
+                for sec in ("main", "extra", "side")}
+    # Jinja has no comprehensions, so the browser's starting state is
+    # shaped here rather than in the template.
+    seed = {"sections": {s: [{k: card.get(k) for k in
+                              ("id", "name", "type", "frame", "extra",
+                               "limit", "status", "play")}
+                             for card in sections[s]]
+                         for s in ("main", "extra", "side")}}
+    n_meta = c.execute(
+        "SELECT COUNT(DISTINCT card_id) AS n FROM inclusion").fetchone()["n"]
+    n_pool = c.execute("SELECT COUNT(*) AS n FROM cards").fetchone()["n"]
+    return render_template(
+        "build.html", name=d.name, existing=existing, sections=sections,
+        seed=seed, is_new=requested and not existing,
+        archetype=arch, archetypes=sorted(
+            {r["archetype"] for r in c.execute(
+                "SELECT DISTINCT archetype FROM inclusion")}),
+        n_meta=n_meta, n_pool=n_pool, running=jobs.active(c))
+
+
+@bp.route("/api/cards")
+@login_required
+def api_cards():
+    c = conn()
+    rows, total = builder.search(
+        c,
+        q=request.args.get("q", ""),
+        archetype=request.args.get("arch") or None,
+        section=request.args.get("section") or None,
+        limit=min(request.args.get("limit", type=int) or 60, 200),
+        include_text=request.args.get("text", "1") != "0",
+    )
+    return {"cards": rows, "total": total, "shown": len(rows)}
+
+
+@bp.route("/api/validate", methods=["POST"])
+@login_required
+def api_validate():
+    """The one authority on whether the working list is legal."""
+    c = conn()
+    try:
+        sections = _sections_from(request.get_json(force=True) or {})
+    except (ValueError, TypeError) as e:
+        return {"error": str(e)}, 400
+    d = builder.build_deck("working", sections)
+    d.canonicalise(c)
+    problems = d.validate(c)
+    return {
+        "problems": problems,
+        "misrouted": builder.misrouted(c, sections),
+        "legal": not problems,
+        "counts": {s: len(getattr(d, s)) for s in ("main", "extra", "side")},
+    }
+
+
+@bp.route("/build/save", methods=["POST"])
+@login_required
+def build_save():
+    c = conn()
+    payload = request.get_json(force=True) or {}
+    try:
+        sections = _sections_from(payload)
+    except (ValueError, TypeError) as e:
+        return {"error": str(e)}, 400
+
+    name = builder.safe_name(payload.get("name"), "")
+    if not name:
+        return {"error": "give the deck a name"}, 400
+
+    d = builder.build_deck(name, sections)
+    d.canonicalise(c)
+    problems = d.validate(c)
+    if problems and not payload.get("force"):
+        # Saving an illegal list is allowed -- a deck in progress is
+        # illegal most of the time -- but never silently.
+        return {"error": "not legal", "problems": problems,
+                "confirm": True}, 409
+
+    path = importer.save(d, name)
+    warn = []
+    blockers = carddb.check_deck(d)
+    if blockers:
+        warn.append(
+            f"{len(blockers)} card(s) cannot be loaded by the solver — run "
+            "`daemon.py setup` to rebuild the merged card database, or any "
+            "run on this deck will crash rather than report a bad result.")
+    if payload.get("activate"):
+        db.set_meta(c, "active_deck", path.stem)
+        c.commit()
+    return {"ok": True, "name": path.stem, "problems": problems,
+            "warnings": warn, "url": url_for("views.deck", name=path.stem)}

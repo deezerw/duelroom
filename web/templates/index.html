@@ -3,6 +3,8 @@
 <h1>Decks</h1>
 <p class="muted">{{ decks|length }} list{{ '' if decks|length == 1 else 's' }}
   {%- if active %} · active: <strong>{{ active }}</strong>{% endif %}</p>
+<p style="margin:10px 0 0"><a class="btn" href="{{ url_for('views.build') }}">Build
+  a deck</a> <a class="btn" href="{{ url_for('views.import_deck') }}">Import</a></p>
 
 <div class="panel">
 <table>
@@ -20,6 +22,8 @@
       <td>{% if d.legal %}<span class="pill ok">legal</span>
           {% else %}<span class="pill bad">illegal</span>{% endif %}</td>
       <td style="text-align:right">
+        <a href="{{ url_for('views.build', name=d.name) }}"
+           class="muted" style="font-size:12px;margin-right:8px">edit</a>
         {% if not d.active %}
         <form method="post" action="{{ url_for('views.activate', name=d.name) }}"
               style="margin:0"><button style="padding:3px 9px;font-size:12px">
@@ -28,6 +32,7 @@
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">No decks yet —
+      <a href="{{ url_for('views.build') }}">build one</a> or
       <a href="{{ url_for('views.import_deck') }}">import one</a>.</td></tr>
   {% endfor %}
   </tbody>

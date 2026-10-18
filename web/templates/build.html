@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}build {{ name }} · duelroom{% endblock %}
+{% block body %}
+
+<h1 style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+  <input type="text" id="deckname" value="{{ name }}"
+         style="width:auto;flex:1;min-width:200px;font:inherit;font-size:19px">
+  <button class="primary" id="save">Save</button>
+  {% if existing %}<a class="btn" href="{{ url_for('views.deck', name=name) }}">open</a>{% endif %}
+</h1>
+<p class="muted" style="margin-top:0">
+  Searching all {{ '{:,}'.format(n_pool) }} cards.
+  {{ '{:,}'.format(n_meta) }} of them appear in a scraped tournament list and
+  are ranked first.
+  {%- if archetype %} Inclusion rates shown for <strong>{{ archetype }}</strong>
+  where it plays the card.{% endif %}
+</p>
+
+{% if is_new %}
+  <div class="flag">No saved deck called <strong>{{ name }}</strong> — this is a
+    blank list under that name. Saving will create it.</div>
+{% endif %}
+
+<div id="saveout"></div>
+
+<div class="build">
+  <!-- ---------------- search ---------------- -->
+  <section class="panel" style="margin-top:0">
+    <input type="text" id="q" placeholder="search cards…" autocomplete="off" autofocus>
+    <div class="row" style="margin:9px 0 2px">
+      <label>rank for
+        <select id="arch">
+          <option value="">whatever plays it most</option>
+          {% for a in archetypes %}
+            <option value="{{ a }}" {{ 'selected' if a == archetype }}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>add to
+        <select id="target"><option value="main">main</option>
+          <option value="side">side</option></select>
+      </label>
+      <label><input type="checkbox" id="nametext" checked> search card text</label>
+    </div>
+    <div class="prov" id="count">—</div>
+    <div id="results" class="results"></div>
+  </section>
+
+  <!-- ---------------- the deck ---------------- -->
+  <section>
+    <div class="panel" id="legal" style="margin-top:0">checking…</div>
+    <div id="deck"></div>
+  </section>
+</div>
+
+<script id="seed" type="application/json">{{ seed | tojson }}</script>
+
+<style>
+  .build{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1fr);
+         gap:16px;align-items:start}
+  @media(max-width:860px){.build{grid-template-columns:1fr}}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;
+       color:var(--dim)}
+  select{background:#0d0f15;border:1px solid var(--line);color:var(--ink);
+         border-radius:6px;padding:4px 6px;font:inherit;font-size:12px}
+  .results{max-height:62vh;overflow-y:auto;margin:0 -8px}
+  .hit{display:flex;gap:9px;align-items:center;padding:5px 8px;border-radius:6px;
+       cursor:pointer}
+  .hit:hover{background:#ffffff0c}
+  .hit .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+           white-space:nowrap}
+  .hit .sub{font-size:11px;color:var(--dim)}
+  .hit.full{opacity:.4;cursor:not-allowed}
+  /* Inclusion drawn as a miniature interval: the solid part is the Wilson
+     lower bound (what the sample actually supports, and the sort key), the
+     ghost reaches the point estimate. A 100%-of-one-list card is visibly
+     mostly ghost. */
+  .mini{position:relative;width:46px;height:6px;background:#0d0f15;
+        border:1px solid var(--line);border-radius:999px;flex:none}
+  .mini i{position:absolute;top:0;bottom:0;left:0;border-radius:999px;display:block}
+  .mini i.lo{background:var(--accent)} .mini i.pt{background:#7aa2f73a}
+  .pl{font-size:11px;color:var(--dim);font-family:ui-monospace,Menlo,monospace;
+      white-space:nowrap;min-width:84px;text-align:right}
+  .lim{font-size:10px;padding:0 5px;border-radius:999px;border:1px solid;flex:none}
+  .lim.l0{color:var(--bad);border-color:#f7768e55}
+  .lim.l1{color:var(--warn);border-color:#e0af6855}
+  .lim.l2{color:var(--accent);border-color:#7aa2f755}
+  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;
+          color:var(--dim);margin:0 0 7px;font-weight:500}
+  .card{display:flex;gap:8px;align-items:center;padding:3px 6px;border-radius:5px;
+        cursor:pointer;font-size:13px}
+  .card:hover{background:#f7768e14}
+  .card .x{flex:none;font-family:ui-monospace,Menlo,monospace;color:var(--dim)}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+</style>
+
+<script>
+const seed = JSON.parse(document.getElementById('seed').textContent);
+const SECTIONS = ['main','extra','side'];
+const CAP = {main:[40,60], extra:[0,15], side:[0,15]};
+const info = {};                       // id -> card record
+const deck = {main:[],extra:[],side:[]};
+for (const s of SECTIONS) for (const c of seed.sections[s]) {
+  info[c.id] = c; deck[s].push(c.id);
+}
+
+const $ = id => document.getElementById(id);
+const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g,
+  m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+function copies(id){
+  return SECTIONS.reduce((n,s) => n + deck[s].filter(x => x === id).length, 0);
+}
+
+// --- search -------------------------------------------------------------
+let timer = null, seq = 0, shown = [];   // shown: the current result list
+function searchSoon(){ clearTimeout(timer); timer = setTimeout(search, 170); }
+
+async function search(){
+  const mine = ++seq;
+  const p = new URLSearchParams({q: $('q').value, arch: $('arch').value,
+                                 text: $('nametext').checked ? '1' : '0'});
+  const r = await fetch('/api/cards?' + p);
+  const d = await r.json();
+  if (mine !== seq) return;            // a later keystroke already answered
+  $('count').textContent = d.total
+    ? `${d.shown} of ${d.total} matching cards`
+    : 'nothing matches';
+  shown = d.cards;
+  paint();
+}
+
+// Redrawn after every edit, so "3 in deck" and the greyed-out at-the-limit
+// state stay true while you build rather than only until the first click.
+function paint(){
+  $('results').innerHTML = shown.map(row).join('');
+  [...$('results').children].forEach((el, i) => { el.onclick = () => add(shown[i]); });
+}
+
+function row(c){
+  info[c.id] = c;
+  const n = copies(c.id), full = n >= c.limit;
+  const lim = c.limit < 3
+    ? `<span class="lim l${c.limit}">${['forbidden','limited','semi'][c.limit]}</span>` : '';
+  let play = '<span class="pl"></span>', bar = '<span class="mini"></span>';
+  if (c.play){
+    const pct = Math.round(c.play.pct*100), lo = Math.round(c.play.rank*100);
+    bar = `<span class="mini"><i class="pt" style="width:${pct}%"></i>` +
+          `<i class="lo" style="width:${lo}%"></i></span>`;
+    play = `<span class="pl" title="${esc(c.play.archetype)} ${esc(c.play.section)} deck">` +
+           `${pct}% of ${c.play.n}</span>`;
+  }
+  const sub = [c.type, c.race, c.attribute].filter(Boolean).join(' · ');
+  return `<div class="hit ${full?'full':''}">
+    <span class="nm">${esc(c.name)} ${lim}
+      <span class="sub">${esc(sub)}${n ? ` — ${n} in deck` : ''}</span></span>
+    ${bar}${play}</div>`;
+}
+
+// --- editing ------------------------------------------------------------
+function add(c){
+  const n = copies(c.id);
+  if (n >= c.limit){
+    note(c.limit === 0
+      ? `${c.name} is forbidden on the TCG list.`
+      : `Already at ${n} copies of ${c.name} — the list allows ${c.limit}.`);
+    return;
+  }
+  const sec = c.extra ? 'extra' : $('target').value;
+  deck[sec].push(c.id);
+  draw(); paint(); validateSoon();
+}
+
+function remove(id, sec){
+  const i = deck[sec].lastIndexOf(id);
+  if (i >= 0) deck[sec].splice(i, 1);
+  draw(); paint(); validateSoon();
+}
+
+function bucket(c){
+  const t = c.type || '';
+  if (t.includes('Spell')) return 1;
+  if (t.includes('Trap')) return 2;
+  return 0;
+}
+
+function draw(){
+  $('deck').innerHTML = SECTIONS.map(sec => {
+    const counts = new Map();
+    for (const id of deck[sec]) counts.set(id, (counts.get(id)||0)+1);
+    const [lo,hi] = CAP[sec], n = deck[sec].length;
+    const bad = n > hi || n < lo;
+    const items = [...counts.entries()]
+      .sort((a,b) => bucket(info[a[0]]) - bucket(info[b[0]]) ||
+                     (info[a[0]].name||'').localeCompare(info[b[0]].name||''))
+      .map(([id,k]) => {
+        const c = info[id], p = c.play
+          ? `<span class="pl">${Math.round(c.play.pct*100)}% of ${c.play.n}</span>` : '';
+        return `<div class="card" data-id="${id}" data-sec="${sec}" title="click to remove one">
+          <span class="x">${k}×</span><span class="nm">${esc(c.name)}</span>${p}</div>`;
+      }).join('');
+    return `<div class="panel sec"><h3>${sec}
+      <span class="${bad?'bad':'ok'}">${n}</span>
+      <span class="muted">/ ${lo?lo+'–':''}${hi}</span></h3>
+      ${items || '<p class="muted" style="margin:0">empty</p>'}</div>`;
+  }).join('');
+  for (const el of document.querySelectorAll('#deck .card'))
+    el.onclick = () => remove(+el.dataset.id, el.dataset.sec);
+}
+
+// --- legality, from the server and only from the server ------------------
+let vtimer = null, vseq = 0;
+function validateSoon(){ clearTimeout(vtimer); vtimer = setTimeout(validate, 220); }
+
+async function validate(){
+  const mine = ++vseq;
+  $('legal').innerHTML = '<span class="muted">checking…</span>';
+  const r = await fetch('/api/validate', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(deck)});
+  const d = await r.json();
+  if (mine !== vseq) return;
+  if (d.error){ $('legal').innerHTML = `<span class="bad">${esc(d.error)}</span>`; return; }
+  const extra = (d.misrouted||[]).map(m => `${m[0]}: ${m[1]}`);
+  const all = (d.problems||[]).concat(extra);
+  $('legal').innerHTML = all.length
+    ? `<strong class="bad">Not legal</strong><ul style="margin:6px 0 0">` +
+      all.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>'
+    : `<strong class="ok">Legal</strong> <span class="muted">— ` +
+      `${d.counts.main} main, ${d.counts.extra} extra, ${d.counts.side} side. ` +
+      `Checked by the same code the CLI runs.</span>`;
+}
+
+function note(msg, cls){
+  $('saveout').innerHTML = `<div class="msg">${esc(msg)}</div>`;
+  setTimeout(() => { if ($('saveout').textContent.includes(msg)) $('saveout').innerHTML=''; },
+             6000);
+}
+
+// --- saving -------------------------------------------------------------
+$('save').onclick = async (ev) => { await save(false); };
+
+async function save(force){
+  const body = Object.assign({}, deck,
+    {name: $('deckname').value, force: force, activate: true});
+  const r = await fetch('/build/save', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json();
+  if (r.status === 409){
+    $('saveout').innerHTML =
+      `<div class="flag"><strong>This list is not legal.</strong><ul>` +
+      d.problems.map(p => `<li>${esc(p)}</li>`).join('') +
+      `</ul><button id="forcesave">Save it anyway</button>
+       <span class="muted">— a work in progress is allowed, but no command
+       will give a trustworthy answer on an illegal list.</span></div>`;
+    $('forcesave').onclick = () => save(true);
+    return;
+  }
+  if (d.error){ $('saveout').innerHTML = `<div class="flag bad">${esc(d.error)}</div>`; return; }
+  let html = `<div class="msg">Saved as <a href="${d.url}">${esc(d.name)}</a>` +
+             ` and set as the active deck.</div>`;
+  for (const w of d.warnings || []) html += `<div class="flag">${esc(w)}</div>`;
+  $('saveout').innerHTML = html;
+  history.replaceState(null, '', '/build/' + encodeURIComponent(d.name));
+}
+
+$('q').oninput = searchSoon;
+$('arch').onchange = () => { search(); };
+$('nametext').onchange = searchSoon;
+draw(); search(); validate();
+</script>
+{% endblock %}

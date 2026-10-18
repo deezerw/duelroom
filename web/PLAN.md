@@ -74,9 +74,25 @@ making uncertainty visible, and the easy version of this UI would undo it.
       direction is good — including when the sweep does not contain your deck
       at all, which otherwise reads as a matchup picture that happens to omit
       you.
-- [ ] **4 — deckbuilder.** Search 14.6k cards with meta ranking, live banlist
-      validation, save to .ydk. Biggest single chunk; effectively a mini
-      YGOPRODeck.
+- [x] **4 — deckbuilder.** Built. Searches all 14,618 cards; the 1,088 that
+      appear in a scraped tournament list rank first, and the deck's own
+      archetype ranks ahead of that when one is identified. Two decisions
+      carry the weight:
+
+      *Ranking is by a Wilson lower bound, not by the raw inclusion rate.*
+      Sorting on `pct_lists` puts a card in 100% of two lists above one in
+      85% of forty, at the exact spot in the UI where a reader stops
+      scrolling. Each row also draws the gap: a solid bar to the lower
+      bound, a ghost bar out to the point estimate, with "87% of 94"
+      beside it. A one-list card is visibly almost all ghost.
+
+      *Legality is computed only by `Deck.validate`, over HTTP, on every
+      change.* A copy of the banlist in JavaScript would drift from the
+      CLI's answer the first time a list updated, and the builder would
+      show a legal deck the engine refuses. Saving an illegal list is
+      allowed — a list in progress usually is — but never silently, and
+      the save path reuses `importer.save`'s filename sanitising and runs
+      the same solver preflight as import.
 - [ ] **5 — images at full scale, hardening pass, deploy.** systemd unit,
       gunicorn + TLS, matching the stockroom pattern.
 
