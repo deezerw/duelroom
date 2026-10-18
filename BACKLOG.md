@@ -33,8 +33,8 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
 
-- [ ] IN FLIGHT: 40-hand board library rebuild (`results/boards40.log`). Pick up the
-      result, load it, and re-derive targets from the bigger sample.
+- [ ] Re-run the HANDTRAP MATRIX at 40 hands too. The board library is now 40/deck
+      but the matrix is still 12, so survival cells rest on 8-11 tested windows.
 - [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
       prints summon counts to stdout but nothing lands in the JSONL (no 'summon' key
       anywhere in a record). Exact counts need the line replayed through ygorl and
@@ -59,6 +59,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **40-hand board library landed and promoted to canonical** (271/280 solved, 83 min).
+  The 12-hand conclusions HELD: mean interruptions moved by at most 0.5 (sky-striker
+  3.33 -> 2.85), intervals tightened from [76-100] to [91-100], and branded's drop
+  from 92% to 78% sits inside its own old interval. 6 of 7 derived targets unchanged;
+  only branded moved (Mirrorjade -> Rindbrumm), the deck with the most variable lines.
+  193 distinct boards, 304 trials.
 - **RETRACTED: the "Nibiru contradiction" was my own error.** It rested on reading
   Maxx "C" windows as special summons. They are RESPONSE windows — Maxx "C" has no
   activation condition, so the solver offers it nearly everywhere; the count
