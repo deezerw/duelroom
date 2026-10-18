@@ -284,8 +284,12 @@ def cmd_gate(conn, args):
         return
     hands = int(args[1]) if len(args) > 1 else 12
     ms = int(args[2]) if len(args) > 2 else engine.SOLVE_MS
+    if not scenarios.ensure_target(path):
+        print(f"could not establish a target for {path.stem} — nothing to gate")
+        return
     print(f"gate: {path.stem}, {hands} hands, {ms/1000:.0f}s budget\n")
-    rec = gate.run_funnel(path, hands=hands, solve_ms=ms)
+    rec = gate.run_funnel(path, hands=hands, solve_ms=ms,
+                          targets=scenarios.merged_targets_file())
     rep = gate.gate_report(rec, conn)
 
     lo, hi = rep["solve_rate_ci"]
@@ -498,11 +502,10 @@ def cmd_optimize(conn, args):
     print(f"each trial is one funnel_eval run — {hands} hands at "
           f"{engine.SOLVE_MS/1000:.0f}s. This takes hours, not minutes.\n")
 
-    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
-    if path.stem not in tgt:
-        print(f"no derived target for {path.stem} — run `targets` first")
+    target = scenarios.ensure_target(path)
+    if not target:
+        print(f"could not establish a target for {path.stem}")
         return
-    target = tgt[path.stem]["targets"][0]
     print(f"holding the target fixed at {target} across all trials\n")
     best, history = optimizer.hill_climb(conn, deck, archetype, target,
                                          hands=hands, rounds=rounds)
@@ -539,14 +542,11 @@ def cmd_second(conn, args):
         print("deck not found")
         return
     hands = int(args[2]) if len(args) > 2 else 4
-    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
-    tk, ok_ = theirs.stem, ours.stem
-    if tk not in tgt or ok_ not in tgt:
-        print(f"need derived targets for both decks — run `targets` (have: "
-              f"{', '.join(k for k in tgt if not k.startswith('_'))})")
+    their_target = scenarios.ensure_target(theirs)
+    our_target = scenarios.ensure_target(ours)
+    if not their_target or not our_target:
+        print("could not establish a target for both decks")
         return
-    their_target = tgt[tk]["targets"][0]
-    our_target = tgt[ok_]["targets"][0]
     print(f"{ok_} going second into {tk}")
     print(f"  their board target: {their_target}")
     print(f"  our payoff target : {our_target}\n")
@@ -575,11 +575,10 @@ def cmd_floodgates(conn, args):
         print(f"no such deck: {args[0]}")
         return
     hands = int(args[1]) if len(args) > 1 else 2
-    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
-    if path.stem not in tgt:
-        print(f"no derived target for {path.stem} — run `targets`")
+    our_target = scenarios.ensure_target(path)
+    if not our_target:
+        print(f"could not establish a target for {path.stem}")
         return
-    our_target = tgt[path.stem]["targets"][0]
     print(f"{path.stem} under floodgates, target {our_target}")
     print("locals run these far more than top tables do\n")
     rows = breaking.floodgate_check(path, our_target, hands=hands)

@@ -247,3 +247,98 @@ def run_matrix(decks, targets_path, hands=12, solve_ms=None, workers=None,
     subprocess.run(cmd, env=engine.env(), cwd=str(engine.VENDOR),
                    timeout=timeout, check=True)
     return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+
+
+# --- targets for a deck the board library has never seen -----------------
+
+TARGETS_FILE = engine.ROOT / "assets" / "derived_targets.json"
+
+
+def load_targets(path=None):
+    path = Path(path or TARGETS_FILE)
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+# ygorl curates targets for its own ten test decks. Ours is the override;
+# theirs is the fallback, so `gate snake_eye` keeps working without us
+# re-deriving a target that upstream already hand-picked.
+UPSTREAM_TARGETS = (engine.VENDOR / "tests" / "decks" / "solver_targets.json")
+
+
+def target_for(deck_name, path=None):
+    for src in (path or TARGETS_FILE, UPSTREAM_TARGETS):
+        spec = load_targets(src).get(deck_name)
+        if spec:
+            targets = spec["targets"] if isinstance(spec, dict) else spec
+            if targets:
+                return targets[0]
+    return None
+
+
+def merged_targets_file(path=None):
+    """One targets file covering both ours and ygorl's, for funnel_eval.
+
+    funnel_eval takes a single --targets path and refuses any deck absent
+    from it, so the two sources have to be combined before handing it
+    over. Ours wins on conflict.
+    """
+    merged = dict(load_targets(UPSTREAM_TARGETS))
+    merged.update(load_targets(path or TARGETS_FILE))
+    merged.pop("_comment", None)
+    out = engine.ROOT / "results" / "targets_merged.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(
+        {"_comment": "generated: duelroom targets over ygorl's defaults",
+         **merged}, indent=1))
+    return out
+
+
+def ensure_target(deck, hands=6, solve_ms=None, path=None, log=print):
+    """Return this deck's solver target, deriving it first if needed.
+
+    `derive_targets` reads the board library, so it only knows the meta
+    decks that were goldfished into it. A freshly imported list -- which
+    is every deck the user actually brings -- has no entry, and
+    funnel_eval refuses a deck it has no target for. That surfaced as a
+    bare CalledProcessError from `gate`, which reads like a crash rather
+    than a missing prerequisite.
+
+    So: solve the deck once with ygorl's automatic target planning, take
+    the target it most often reached, and cache it alongside the others.
+    Costs one solve_blocking pass the first time and nothing afterwards.
+    """
+    from . import engine as _engine
+
+    deck = Path(deck)
+    name = deck.stem
+    path = Path(path or TARGETS_FILE)
+
+    existing = target_for(name, path)
+    if existing:
+        return existing
+
+    log(f"no target for {name} yet — solving {hands} hands to find one "
+        f"(one-off, a few minutes)")
+    out = _engine.ROOT / "results" / f"targets_{name}.jsonl"
+    summary = _engine.ROOT / "results" / f"targets_{name}.json"
+    _engine.solve_blocking(deck, hands=hands,
+                           solve_ms=solve_ms or _engine.SOLVE_MS,
+                           out=out, summary=summary)
+    if not out.exists():
+        log(f"  solver produced nothing for {name}")
+        return None
+
+    derived = derive_targets(out, per_deck=1)
+    spec = derived.get(name)
+    if not spec:
+        log(f"  {name} reached no target in {hands} hands — it may brick a lot, "
+            f"or need a bigger budget (`ladder {name}`)")
+        return None
+
+    allt = load_targets(path)
+    allt[name] = {"targets": spec["targets"], "fire": sorted(HANDTRAPS)}
+    path.write_text(json.dumps(allt, indent=1))
+    log(f"  derived {spec['targets'][0]} for {name}")
+    return spec["targets"][0]

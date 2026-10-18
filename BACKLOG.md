@@ -25,9 +25,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Targets for a user deck that is not in the board library — `derive_targets` reads
-      `results/boards.jsonl`, so a fresh deck has no target and `gate`/`optimize`/
-      `second` all refuse it. Needs a solve_blocking pass on demand.
+- [ ] VERIFY: `results/ensure_target.log` — background derivation for the imported
+      Blitzclique deck. If it found a target, run `gate Blitzclique` to confirm the
+      whole path works for a user deck. If it found none in 6 hands, try `ladder`.
 - [ ] Bug sweep: grep for the patterns that already bit us —
       `.get(` on a `sqlite3.Row`, metrics that count a missing window as a success,
       any place a list is treated as alternatives when it is a conjunction.
@@ -51,6 +51,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **On-demand targets** (`scenarios.ensure_target`): a freshly imported deck had no
+  target, so gate/optimize/second/floodgates died with a bare CalledProcessError that
+  read like a crash. Now derives one via solve_blocking on first use and caches it.
+  `target_for` falls back to ygorl's own curated file (its ten test decks) and
+  `merged_targets_file` combines both, since funnel_eval takes one --targets path and
+  refuses any deck missing from it — without the merge, fixing user decks would have
+  broken `gate snake_eye`.
 - **locals.toml auto-fill** (`daemon.py locals auto [rogue%]`). Each DECK contributes
   one unit of weight split across its tags: raw tag counts would sum to 166% of the
   deck count (1.66 tags/deck, one list carries five) and inflate hybrid-heavy
