@@ -43,6 +43,8 @@ duelroom — Yu-Gi-Oh! deck laboratory
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   boards [load]             meta end-board library (what you must break)
   threats                   interruption counts + common pieces per archetype
+  snapshot [label]          freeze today's inclusion rates for later comparison
+  drift <archetype> [a] [b] what's rising or falling between two snapshots
   targets                   derive solver targets from the board library
   matrix                    handtrap matrix: which handtraps to main deck
   locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
@@ -390,6 +392,48 @@ def cmd_threats(conn, args):
         print(f"  {arch}")
         for name, share in pieces:
             print(f"      {share*100:4.0f}%  {name}")
+
+
+def cmd_snapshot(conn, args):
+    label, n = ms.snapshot_inclusion(conn, args[0] if args else None)
+    print(f"snapshot {label!r}: {n} inclusion rows frozen")
+    print("\n  stored snapshots:")
+    for lab, rows, when in ms.snapshots(conn):
+        print(f"    {lab:24} {rows:6} rows   {when[:10]}")
+    print("\n  re-scrape with `meta`, then `snapshot` again, then `drift` to")
+    print("  see which cards are rising. One scrape cannot show drift.")
+
+
+def cmd_drift(conn, args):
+    snaps = ms.snapshots(conn)
+    if len(snaps) < 2 and len(args) < 3:
+        print("need two snapshots to compare — you have:")
+        for lab, rows, when in snaps:
+            print(f"    {lab} ({when[:10]})")
+        print("\n  drift is a question about TIME. Re-scrape with `meta` on a")
+        print("  later day, `snapshot` again, then come back. Slicing one scrape")
+        print("  by date does not work: the stored lists cluster around when they")
+        print("  were last updated, leaving a handful in any recent window.")
+        return
+    if not args:
+        print("usage: drift <archetype> [old_label] [new_label]")
+        return
+    archetype = args[0]
+    old = args[1] if len(args) > 1 else snaps[-2][0]
+    new = args[2] if len(args) > 2 else snaps[-1][0]
+    rows, note = ms.drift(conn, archetype, old, new)
+    print(f"{archetype}: {old} -> {new}")
+    if note:
+        print(f"  ! {note}")
+    if not rows:
+        print("  no change")
+        return
+    print(f"\n  {'was':>6} {'now':>6} {'delta':>7}  card")
+    for r in rows[:15]:
+        row = card_db.resolve(conn, r["card_id"])
+        name = row["name"] if row else r["card_id"]
+        print(f"  {r['was']*100:5.0f}% {r['now']*100:5.0f}% "
+              f"{r['delta']*100:+6.0f}%  {name}")
 
 
 def cmd_targets(conn, args):
@@ -860,6 +904,8 @@ COMMANDS = {
     "boards": cmd_boards,
     "threats": cmd_threats,
     "targets": cmd_targets,
+    "snapshot": cmd_snapshot,
+    "drift": cmd_drift,
     "matrix": cmd_matrix,
     "locals": cmd_locals,
     "optimize": cmd_optimize,

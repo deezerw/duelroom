@@ -422,3 +422,95 @@ def classify(conn, archetype, fmt=DEFAULT_FORMAT, section="main"):
             }
         )
     return buckets
+
+
+# --- drift over time ------------------------------------------------------
+
+# Below this many lists an archetype's inclusion rates move by more than
+# a tech card ever would, purely from which lists happened to be scraped.
+MIN_LISTS_FOR_DRIFT = 15
+
+
+def snapshot_inclusion(conn, label=None):
+    """Freeze the current `inclusion` table under a label.
+
+    Drift is a question about time, so it needs more than one scrape.
+    Slicing a single scrape by date does not substitute: the stored lists
+    cluster around when they were last updated, leaving a handful in any
+    recent window.
+    """
+    label = label or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with conn:
+        conn.execute("DELETE FROM inclusion_history WHERE label = ?", (label,))
+        conn.execute(
+            """INSERT INTO inclusion_history
+                 (label, archetype, format, card_id, section, pct_lists,
+                  avg_copies, n_lists, captured_at)
+               SELECT ?, archetype, format, card_id, section, pct_lists,
+                      avg_copies, n_lists, ?
+                 FROM inclusion""",
+            (label, now),
+        )
+        n = conn.execute(
+            "SELECT COUNT(*) AS n FROM inclusion_history WHERE label = ?",
+            (label,),
+        ).fetchone()["n"]
+    return label, n
+
+
+def snapshots(conn):
+    return [
+        (r["label"], r["n"], r["captured_at"])
+        for r in conn.execute(
+            """SELECT label, COUNT(*) AS n, MAX(captured_at) AS captured_at
+                 FROM inclusion_history GROUP BY label ORDER BY captured_at""")
+    ]
+
+
+def drift(conn, archetype, old_label, new_label, fmt=DEFAULT_FORMAT,
+          section="main"):
+    """Inclusion-rate change between two snapshots.
+
+    Returns (rows, note). `note` is non-empty when the comparison is not
+    worth reading -- too few lists on either side -- rather than letting
+    a confident-looking percentage stand on five decks.
+    """
+    def side(label):
+        return {
+            r["card_id"]: r
+            for r in conn.execute(
+                """SELECT * FROM inclusion_history
+                    WHERE label = ? AND archetype = ? AND format = ?
+                      AND section = ?""",
+                (label, archetype, fmt, section))
+        }
+
+    old, new = side(old_label), side(new_label)
+    if not old or not new:
+        return [], f"no snapshot for {old_label if not old else new_label}"
+
+    n_old = next(iter(old.values()))["n_lists"]
+    n_new = next(iter(new.values()))["n_lists"]
+    note = ""
+    if min(n_old, n_new) < MIN_LISTS_FOR_DRIFT:
+        note = (f"only {min(n_old, n_new)} lists on one side "
+                f"(need {MIN_LISTS_FOR_DRIFT}); treat this as noise")
+
+    rows = []
+    for cid in set(old) | set(new):
+        a = old.get(cid, {"pct_lists": 0.0})["pct_lists"]
+        b = new.get(cid, {"pct_lists": 0.0})["pct_lists"]
+        if a == b:
+            continue
+        src = new.get(cid) or old.get(cid)
+        rows.append({
+            "card_id": cid,
+            "was": a,
+            "now": b,
+            "delta": b - a,
+            "n_old": n_old,
+            "n_new": n_new,
+        })
+    rows.sort(key=lambda r: -abs(r["delta"]))
+    return rows, note

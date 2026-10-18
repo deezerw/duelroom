@@ -33,7 +33,8 @@ Work queue for the autonomous loop. **Read this first every iteration.**
       summon actions counted; a proxy from the end board would undercount materials
       sent to GY, and a plausible-but-wrong number is the failure mode this project
       keeps hitting. Do it properly when CPU is free.
-- [ ] Meta drift: diff inclusion rates across scrapes to surface rising tech cards.
+- [ ] Re-scrape on a later day and `snapshot` again — drift needs a second data point.
+      Baseline `baseline-2026-10-18` is stored (5599 rows).
 
 ## BLOCKED / WON'T DO
 
@@ -50,6 +51,11 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Meta drift machinery** (`snapshot` / `drift`). Drift needs TIME: slicing the one
+  scrape by date gives 25 decks in the last 30 days against 485 in 120, i.e. 2-5 lists
+  per archetype, which measures noise. So `snapshot` freezes inclusion rates under a
+  label and `drift` diffs two, refusing to report a comparison with under 15 lists on
+  either side. Baseline captured.
 - **Pushed to GitHub**: https://github.com/deezerw/duelroom (PRIVATE, 36 commits).
   Secret-scanned before pushing; venv/vendor/data/results all excluded, so only the
   33 source files went up. Added a README whose "read the numbers carefully" section

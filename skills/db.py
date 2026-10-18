@@ -125,6 +125,25 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS idx_boards_arch ON boards(archetype, format);
 
+-- Point-in-time copies of `inclusion`, so tech cards rising or falling
+-- can be seen across scrapes. Drift needs TIME, not a bigger single
+-- scrape: the stored lists skew heavily to when they were last updated
+-- (274 in one month, 25 in the most recent 30 days), so slicing one
+-- scrape by date gives 2-5 lists per archetype and measures noise.
+CREATE TABLE IF NOT EXISTS inclusion_history (
+    label        TEXT NOT NULL,
+    archetype    TEXT NOT NULL,
+    format       TEXT NOT NULL,
+    card_id      INTEGER NOT NULL,
+    section      TEXT NOT NULL,
+    pct_lists    REAL NOT NULL,
+    avg_copies   REAL NOT NULL,
+    n_lists      INTEGER NOT NULL,
+    captured_at  TEXT NOT NULL,
+    PRIMARY KEY (label, archetype, format, card_id, section)
+);
+CREATE INDEX IF NOT EXISTS idx_incl_hist ON inclusion_history(archetype, label);
+
 CREATE TABLE IF NOT EXISTS meta (
     key    TEXT PRIMARY KEY,
     value  TEXT
