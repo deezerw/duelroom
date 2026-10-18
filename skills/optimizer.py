@@ -180,7 +180,14 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 log(f"  -{out_name} +{cand_row['name']}: {score:+.3f}")
                 history.append(Candidate(trial, f"-{out_name} +{cand_row['name']}",
                                          summary, score))
-                if score > best.score:
+                # Keep the BEST improvement, not the last one that beat
+                # the base. `best.score` does not move inside this loop,
+                # so a plain `score > best.score` lets every qualifying
+                # candidate overwrite the previous one -- it accepted
+                # Super Polymerization at +0.063 while Over Tuning sat in
+                # the same history at +0.313.
+                if score > best.score and (improved is None
+                                           or score > improved.score):
                     improved = Candidate(trial, f"-{out_name} +{cand_row['name']}",
                                          summary, score)
                 break  # one removal candidate per round keeps this finite

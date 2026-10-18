@@ -92,54 +92,48 @@ Two notes for the implementation:
 For each board in the Stage 3 library: construct it, deal a going-second hand, and
 search for a break.
 
-**Where this actually stands** (`skills/breaking.py`, 2026-10-18).
+**DONE (2026-10-18)** -- `skills/breaking.py`, `daemon.py second`.
 
-Stored demonstrations cannot be transplanted into a two-deck duel. Three approaches
-were tried and all fail; the module docstring records them so nobody retries. The
-cause is that ygorl solves every deck against `PASSIVE_OPPONENT` (40 copies of one
-vanilla monster) and the recorded responses are only valid against it.
+Two root causes had stalled this, both misreadings of the solver rather than limits
+of it:
 
-What works: `template_vs()` writes a solver template whose deck b is ours instead of
-the passive one, and solving against that produces replays with both real decks.
-`convert_line(..., close_turn=True)` then extends a solution past end of turn --
-without it `--start` rejects the replay as "the line does not get through the turn".
+1. **`--board-remove` does not mean "destroy this card."** `main.cpp` sets
+   `c.present = false` on the *captured goal board*: it stops **requiring** the card.
+   Goal relaxation, not destruction. Breaking a board is therefore not expressible in
+   the solver's goal language, which only describes what `--player`'s own final board
+   contains. The question that is expressible is the better one anyway: going second,
+   into their real board, can we still assemble our payoff? That is the handtrap matrix
+   generalised from one card to a whole board.
+2. **`--start` requires `--deck` and `--hand`.** Without them the solver enters "repair
+   mode", tries to re-reach the reference's own target, has nothing to search with, and
+   **exits 0 after analysis without ever searching**. A silent no-op with a success exit
+   code. `breaking.searched()` detects it via the "probe:" / "bounded-discrepancy"
+   markers, and `daemon.py second` flags any hand that never searched -- never trust a
+   zero result without that check.
 
-Verified: template carries both decks; solver runs against it; solutions replay
-cleanly; `close_turn` moves the end board to turn 2; `--start` accepts the result and
-reports "target board (end of turn, player 1)".
+The pipeline: `template_vs` (both real decks) -> solve their turn 1 ->
+`convert_line(close_turn=True)` (without it `--start` rejects the replay: "the line does
+not get through the turn") -> their board as `--start` -> our deck plus a six-card hand
+-> did we get through.
 
-**Blocked on the search itself.** With `--player 1 --turns 2 --board-remove` the
-solver finishes its reference analysis and exits 0 without searching, writing nothing.
-`--target-subset` and `--board-add` behave the same; `--solve --target-subset` exits 1.
-Its report shows our side untouched ("player 1 total: 55, consommees: 0").
+First measurement, sky-striker going second into kewl-tune, 4 hands: they bricked once,
+built three boards, all three searched, we got through **0 of 3**. Plausible -- kewl-tune
+ends on 3-5 interruptions and Sky Striker is grindy control, not a board breaker -- but
+note that a zero at a 60 s budget carries the same false-negative risk as a brick does.
+Ladder it before believing a zero.
 
-Next step is to read the solver's sources for how `--player 1` reaches its search
-rather than guessing at flags -- ygorl's own spike doc lists `--fire` and `--adapt` as
-untested upstream, so going second may simply be an unexercised path. If it turns out
-not to be supported, the fallback is `ygorl.engine.puzzle` plus a non-solver search
-(the engine enumerates legal actions; `Puzzle` builds the board), which is more work
-but uses only verified machinery.
+## 3. Floodgate check — DONE
 
-Report per archetype:
-- Break rate with Wilson CI (`stats.wilson`)
-- Which of your cards did the breaking — this feeds Stage 5's side deck search
-- Which boards you simply cannot beat; equally worth knowing
+`breaking.floodgate_check`, `daemon.py floodgates`. Reuses the going-second pipeline
+with the opponent's deck set to 40 copies of the floodgate, so turn 1 reliably ends with
+one set.
 
-Weight break rates by board *frequency*. The library is a distribution, and optimizing
-against a board they rarely assemble is wasted effort.
+Targets it **face-down** (`@szone:fd`) deliberately: a Continuous Trap cannot activate
+the turn it is set, so a set card that flips during your turn is both the only legal
+state and the realistic one.
 
-If arbitrary board construction turns out to be unavailable, the fallback is to start
-from a replay of the opponent's solved turn-1 line (`ygorl branch` forks a replay at a
-decision point) and take over from there. Slower, but it uses only verified machinery.
-
-## 3. Floodgate check
-
-Cheap static test using the same board-construction path: Skill Drain, Dimensional
-Barrier, Rivalry of Warlords, There Can Be Only One, Summon Limit. Does the deck still
-function?
-
-**Locals run floodgates far more than top tables do.** Costs almost nothing and catches
-a real way to lose.
+Covers Skill Drain, Dimensional Barrier, Rivalry of Warlords, There Can Be Only One and
+Summon Limit. **Locals run these far more than top tables do.**
 
 ## Deliverables
 

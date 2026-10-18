@@ -480,15 +480,23 @@ def cmd_optimize(conn, args):
                                          hands=hands, rounds=rounds)
     print(f"\nbest: {best.label}  score {best.score:+.3f}")
     print(f"\n  {'score':>7}  {'solve':>16}  {'brick':>6}  {'surv':>6}  change")
-    for r in optimizer.report(history, hands)[:12]:
+    for r in rows[:12]:
         lo, hi = r["ci"]
         print(f"  {r['score']:+7.3f}  {r['solve_rate']*100:4.0f}% "
               f"[{lo*100:3.0f}-{hi*100:3.0f}]  "
               f"{(r['brick_rate'] or 0)*100:5.0f}%  "
               f"{(r['survival'] or 0)*100:5.0f}%  {r['label']}")
+    rows = optimizer.report(history, hands)
+    distinct_solve = {round(r["solve_rate"], 4) for r in rows}
+    distinct_brick = {round(r["brick_rate"] or 0, 4) for r in rows}
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
     print("  most of these intervals overlap — treat the table as a shortlist")
     print("  to re-run at higher hand counts, not as a ranking.")
+    if len(distinct_solve) == 1 and len(distinct_brick) == 1:
+        print(f"\n  ! At {hands} hands every trial scored the SAME solve and brick")
+        print("    rate, so the ranking above rests entirely on the handtrap")
+        print("    survival term. The swapped card is simply not in the hands")
+        print("    that brick. Raise hands before reading anything into this.")
     out = ROOT / "results" / f"optimize_{deck.name}.ydk"
     best.deck.write_ydk(out)
     print(f"\n  best list written to {out}")

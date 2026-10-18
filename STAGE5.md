@@ -19,7 +19,19 @@ cards against a 13,000-card pool — you are searching ~8 flex slots against abo
 cards real players run. Three orders of magnitude off the search space, and the only
 reason this stage is cheap.
 
-## Build — `skills/optimizer.py`
+## Built — `skills/optimizer.py`, `daemon.py optimize`
+
+**Status (2026-10-18): built and exercised.** On kewl-tune it finds 5 non-core slots
+(Imperm x3, Ghost Ogre, Pot of Prosperity, Droll) and 8 candidates drawn from real
+lists. Swaps validate as legal 40-card decks and the objective orders correctly.
+
+Three bugs were found by running it rather than reading it, all of which would have
+surfaced only mid-run: a key mismatch (`pct_lists` vs `pct`), `card_db.resolve`
+returning a `sqlite3.Row` with no `.get()`, and -- the one that would have killed every
+trial -- funnel_eval keying targets by deck NAME, so generated trial names had no
+target. Each trial now writes its own targets file pointing at the BASE deck's payoff,
+which also keeps the comparison honest: the question is whether a swap reaches the same
+board more often, not whether it reaches an easier one.
 
 ### Candidate pool
 - Flex and fringe cards from `inclusion` for your archetype
