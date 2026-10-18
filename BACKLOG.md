@@ -25,6 +25,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] RE-EXAMINE `scenarios.BLIND_SPOTS`. It was added when Maxx "C" and Droll scored
+      0% stop under the buggy `status`-based reading. With the corrected `survives`
+      field they score 21.4% and 17.8%, so the claim that this metric structurally
+      cannot see them is now doubtful — a `survives: False` on Maxx "C" may be the
+      solver correctly declining to combo into a free draw engine, which is exactly
+      the real decision. Check the raw fire entries before keeping or dropping the
+      NOT MEASURABLE label; do not assert either way without looking.
+
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
 
