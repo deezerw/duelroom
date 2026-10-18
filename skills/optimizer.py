@@ -83,7 +83,7 @@ def candidate_pool(conn, archetype, deck, fmt=ms.DEFAULT_FORMAT, limit=30):
             if card_db.banlist_limit(conn, row["card_id"]) == 0:
                 continue
             pool.append(row)
-    pool.sort(key=lambda r: -r["pct_lists"])
+    pool.sort(key=lambda r: -r["pct"])
     return pool[:limit]
 
 
@@ -99,6 +99,12 @@ def removable(conn, deck, archetype, fmt=ms.DEFAULT_FORMAT):
     return [(cid, n) for cid, n in counts.items() if cid not in core]
 
 
+def card_name(conn, code):
+    """card_db.resolve returns a sqlite3.Row, which has no .get()."""
+    row = card_db.resolve(conn, code)
+    return row["name"] if row is not None else str(code)
+
+
 def swap(deck, out_card, in_card, name=None):
     new = Deck(name=name or deck.name, main=list(deck.main),
                extra=list(deck.extra), side=list(deck.side))
@@ -107,21 +113,37 @@ def swap(deck, out_card, in_card, name=None):
     return new
 
 
-def evaluate(deck, hands=12, solve_ms=None, scratch=None, targets=None):
-    """Score one list. Writes a temp .ydk and runs funnel_eval over it."""
+def evaluate(deck, target, hands=12, solve_ms=None, scratch=None):
+    """Score one list. Writes a temp .ydk plus a targets file for it.
+
+    funnel_eval keys targets by deck NAME and refuses a deck it has no
+    target for. Trial lists get generated names, so each one needs its
+    own targets file pointing at the base deck's payoff -- otherwise
+    every trial dies with "no targets for deck ...".
+
+    Holding the target fixed across trials is also what makes the
+    comparison meaningful: we are asking whether a swap reaches the SAME
+    board more often, not whether it reaches some easier board.
+    """
     scratch = Path(scratch or (engine.ROOT / "results" / "optimizer"))
     scratch.mkdir(parents=True, exist_ok=True)
     path = scratch / f"{deck.name}.ydk"
     deck.write_ydk(path)
+
+    tfile = scratch / f"{deck.name}.targets.json"
+    tfile.write_text(json.dumps({
+        "_comment": "generated per trial by duelroom optimizer",
+        deck.name: {"targets": [target]},
+    }))
     rec = gate.run_funnel(path, hands=hands,
                           solve_ms=solve_ms or engine.SOLVE_MS,
                           out=scratch / f"{deck.name}.jsonl",
-                          targets=targets)
+                          targets=tfile)
     return rec["summary"]
 
 
-def hill_climb(conn, deck, archetype, objective=None, hands=12, rounds=3,
-               pool_limit=12, solve_ms=None, targets=None, log=print):
+def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
+               rounds=3, pool_limit=12, solve_ms=None, log=print):
     """Greedy one-card swaps until nothing improves.
 
     Returns (best Candidate, history). Every comparison runs on identical
@@ -130,7 +152,7 @@ def hill_climb(conn, deck, archetype, objective=None, hands=12, rounds=3,
     1-point "gain" inside a 4-point CI is visible as noise.
     """
     objective = objective or Objective()
-    base_summary = evaluate(deck, hands, solve_ms, targets=targets)
+    base_summary = evaluate(deck, target, hands, solve_ms)
     best = Candidate(deck, "base", base_summary, objective.score(base_summary))
     log(f"base {deck.name}: score {best.score:+.3f} "
         f"(brick {base_summary.get('brick_rate'):.2f}, "
@@ -152,9 +174,9 @@ def hill_climb(conn, deck, archetype, objective=None, hands=12, rounds=3,
                 problems = trial.validate(conn)
                 if problems:
                     continue
-                summary = evaluate(trial, hands, solve_ms, targets=targets)
+                summary = evaluate(trial, target, hands, solve_ms)
                 score = objective.score(summary)
-                out_name = (card_db.resolve(conn, out_card) or {}).get("name", out_card)
+                out_name = card_name(conn, out_card)
                 log(f"  -{out_name} +{cand_row['name']}: {score:+.3f}")
                 history.append(Candidate(trial, f"-{out_name} +{cand_row['name']}",
                                          summary, score))

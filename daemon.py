@@ -470,8 +470,14 @@ def cmd_optimize(conn, args):
     print(f"each trial is one funnel_eval run — {hands} hands at "
           f"{engine.SOLVE_MS/1000:.0f}s. This takes hours, not minutes.\n")
 
-    best, history = optimizer.hill_climb(conn, deck, archetype, hands=hands,
-                                         rounds=rounds)
+    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
+    if path.stem not in tgt:
+        print(f"no derived target for {path.stem} — run `targets` first")
+        return
+    target = tgt[path.stem]["targets"][0]
+    print(f"holding the target fixed at {target} across all trials\n")
+    best, history = optimizer.hill_climb(conn, deck, archetype, target,
+                                         hands=hands, rounds=rounds)
     print(f"\nbest: {best.label}  score {best.score:+.3f}")
     print(f"\n  {'score':>7}  {'solve':>16}  {'brick':>6}  {'surv':>6}  change")
     for r in optimizer.report(history, hands)[:12]:
