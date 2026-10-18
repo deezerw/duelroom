@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ name }} · report{% endblock %}
+{% block body %}
+<h1>{{ name }}</h1>
+<p class="muted">{{ r.sizes[0] }} main · {{ r.sizes[1] }} extra · {{ r.sizes[2] }} side
+  {%- if r.archetype %} · {{ r.archetype }}
+  {% if r.archetype_guess %}<span class="muted">(identified from your cards,
+    {{ '%.0f'|format(r.archetype_guess[1]*100) }}% of its
+    {{ r.archetype_guess[2] }}-card core)</span>{% endif %}{% endif %}</p>
+
+{% if r.legality %}<div class="flag bad"><strong>Not legal.</strong>
+  <ul style="margin:6px 0 0">{% for p in r.legality %}<li>{{ p }}</li>{% endfor %}</ul></div>
+{% endif %}
+{% if r.engine_blockers %}<div class="flag bad">{{ r.engine_blockers|length }}
+  card(s) the solver cannot load — rebuild the merged card database.</div>{% endif %}
+
+<h2>Solver target</h2>
+<div class="panel {% if r.target_warning %}untrusted{% endif %}">
+  {% if not r.target %}
+    <p class="muted" style="margin:0">None yet. Running a gate derives one.</p>
+  {% else %}
+    <p style="margin:0" class="mono">{{ r.target }}</p>
+    {% if r.target_warning %}
+      <div class="flag">{{ r.target_warning }}.<br>
+        Everything below measures reaching <em>that</em>, so read it as
+        unmeasured rather than as a verdict on the deck.</div>
+    {% endif %}
+  {% endif %}
+</div>
+
+<h2>Measured</h2>
+{% if not r.funnel %}
+  <div class="panel"><p class="muted" style="margin:0">No run yet — start a
+    validation gate from the <a href="{{ url_for('views.deck', name=name) }}">deck
+    page</a>.</p></div>
+{% else %}
+<div class="panel {% if r.target_warning %}untrusted{% endif %}">
+  {{ m.provenance(r.provenance) }}
+  {% if r.provenance and r.provenance.solve_ms and r.provenance.solve_ms < 60000 %}
+    <div class="flag">Budget below the 60s default. Too low a budget
+      <em>invents</em> bricks — 10s calls a hand dead that 60s solves in nine
+      actions. Re-run before trusting the brick rate.</div>
+  {% endif %}
+  <div class="two">
+    <div><div class="muted">solve rate</div>
+      {{ m.interval(ci[0], ci[1], ci[2], r.funnel.solved, r.funnel.hands) }}</div>
+    {% if r.funnel.combo_actions and r.funnel.combo_actions.median %}
+    <div><div class="muted">line length</div>
+      <span class="big">{{ r.funnel.combo_actions.median }}</span>
+      <span class="muted">actions ({{ r.funnel.combo_actions.min }}–{{ r.funnel.combo_actions.max }})</span></div>
+    {% endif %}
+  </div>
+  {% if r.funnel.hands and r.funnel.hands < 20 %}
+    <div class="flag">Only {{ r.funnel.hands }} hands. The band above is wide
+      enough that most comparisons against it are noise.</div>
+  {% endif %}
+</div>
+
+{% if surv %}
+<h2>Plays through <span class="muted" style="text-transform:none">— higher is
+  better, this is your deck</span></h2>
+<div class="panel">
+  <table><tbody>
+  {% for s in surv %}
+    <tr>
+      <td style="width:230px">{{ s.name }}</td>
+      <td style="width:60px" class="num">
+        {% if s.value is none %}<span class="muted">n/a</span>
+        {% else %}{{ (s.value*100)|round|int }}%{% endif %}</td>
+      <td>
+        {% if s.blind %}<span class="pill">not measurable</span>
+        {% elif s.value is none %}<span class="muted">never had a window</span>
+        {% elif s.value <= 0.15 %}<span class="pill bad">folds to it</span>
+        {% elif s.value <= 0.5 %}<span class="pill">struggles</span>
+        {% else %}<span class="pill ok">fine</span>{% endif %}
+      </td>
+    </tr>
+    {% if s.blind %}
+      <tr><td colspan="3" class="muted" style="padding-top:0;font-size:12px">
+        {{ s.reason }}.
+        {% if cost and s.code == 23434538 %}
+          Measured separately: comboing through it hands them
+          <strong>{{ '%.1f'|format(cost.mean) }} cards</strong> on average,
+          {{ cost.max }} at worst. Surviving it is not beating it.
+        {% endif %}
+      </td></tr>
+    {% endif %}
+  {% endfor %}
+  </tbody></table>
+</div>
+{% endif %}
+{% endif %}
+
+<h2>Opening odds <span class="muted" style="text-transform:none">going first</span></h2>
+<div class="panel"><table>
+  <thead><tr><th>card</th><th class="num">copies</th><th class="num">chance</th></tr></thead>
+  <tbody>{% for name_, copies, pc in r.hand_math %}
+    <tr><td>{{ name_ }}</td><td class="num">{{ copies }}</td>
+      <td class="num">{{ (pc*100)|round(1) }}%</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+
+{% if r.inclusion %}
+<h2>Vs the meta <span class="muted" style="text-transform:none">—
+  {{ r.inclusion.lists }} lists of {{ r.archetype }}</span></h2>
+<div class="panel">
+  <p style="margin-top:0">{{ r.inclusion.core }} core cards ·
+    {{ r.inclusion.flex }} contested slots</p>
+  {% if r.inclusion.off_meta %}
+    <p class="muted">Cards in your list that no scraped list runs:</p>
+    <div class="grid">{% for n in r.inclusion.off_meta %}<div>{{ n }}</div>{% endfor %}</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

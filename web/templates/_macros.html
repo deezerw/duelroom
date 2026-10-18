@@ -1,0 +1,19 @@
+{% macro interval(point, lo, hi, n=None, hands=None) -%}
+  {# A wide band is drawn differently, not annotated: the eye should
+     reject a 2-hand measurement before the reader parses the number. #}
+  {% set width = (hi - lo) %}
+  <span class="iv {{ 'wide' if width > 0.35 else '' }}">
+    <span class="track">
+      <span class="band" style="left:{{ (lo*100)|round(1) }}%;
+            width:{{ (width*100)|round(1) }}%"></span>
+      <span class="dot" style="left:{{ (point*100)|round(1) }}%"></span>
+    </span>
+    <span class="num">{{ (point*100)|round|int }}%</span>
+    {%- if hands %}<span class="n">{{ n }}/{{ hands }}</span>{% endif %}
+  </span>
+{%- endmacro %}
+
+{% macro provenance(src) -%}
+  {% if src %}<div class="prov">{{ src.file }} · {{ src.hands }} hands ·
+    {{ (src.solve_ms/1000)|int if src.solve_ms else '?' }}s per hand</div>{% endif %}
+{%- endmacro %}

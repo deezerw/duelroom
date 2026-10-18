@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}drill {{ name }} · duelroom{% endblock %}
+{% block body %}
+<h1>Drill — {{ name }}</h1>
+{% if source %}<div class="prov">{{ source }}</div>{% endif %}
+<p class="muted">A line the tool found and you cannot execute at the table is
+  worth nothing. Best boards first.</p>
+
+{% if not lines %}
+  <div class="panel"><p class="muted" style="margin:0">No solved lines stored
+    for this deck yet — run a line search from the
+    <a href="{{ url_for('views.deck', name=name) }}">deck page</a>.</p></div>
+{% endif %}
+
+{% for l in lines %}
+<div class="panel">
+  <div class="two" style="align-items:baseline">
+    <div><span class="big">{{ l.interrupts }}</span>
+      <span class="muted">interruption{{ '' if l.interrupts == 1 else 's' }}</span></div>
+    <div class="muted">{{ l.actions }} actions</div>
+  </div>
+  <p class="muted" style="margin:10px 0 2px">opening hand</p>
+  <div class="grid">{% for c in l.hand %}<div>{{ c }}</div>{% endfor %}</div>
+  {% if l.board %}
+    <p class="muted" style="margin:12px 0 2px">ends on</p>
+    <div class="grid">{% for b in l.board %}<div>{{ b }}</div>{% endfor %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

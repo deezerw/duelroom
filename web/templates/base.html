@@ -48,6 +48,31 @@
   .msg{border:1px solid #7aa2f744;background:#7aa2f714;color:var(--accent);
        padding:9px 13px;border-radius:7px;margin:10px 0}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+
+  /* The signature element. A rate is drawn as its CONFIDENCE INTERVAL,
+     so a 2-hand run looks visibly useless beside a 40-hand one instead
+     of both reading as a tidy percentage. */
+  .iv{display:flex;align-items:center;gap:10px;min-width:210px}
+  .iv .track{position:relative;flex:1;height:8px;background:#0d0f15;
+             border:1px solid var(--line);border-radius:999px}
+  .iv .band{position:absolute;top:-1px;bottom:-1px;background:#7aa2f733;
+            border:1px solid #7aa2f788;border-radius:999px}
+  .iv .dot{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;
+           border-radius:50%;background:var(--accent)}
+  .iv .num{font-family:ui-monospace,Menlo,monospace;font-size:12px;min-width:34px;
+           text-align:right}
+  .iv.wide .band{background:#e0af6826;border-color:#e0af6866}
+  .iv.wide .dot{background:var(--warn)}
+  .iv .n{font-size:11px;color:var(--dim);min-width:46px}
+  .prov{font-size:11px;color:var(--dim);font-family:ui-monospace,Menlo,monospace;
+        margin:2px 0 10px}
+  .two{display:flex;gap:18px;flex-wrap:wrap}
+  .two > div{flex:1;min-width:150px}
+  .big{font-size:22px;font-weight:600}
+  td.num,th.num{text-align:right;font-family:ui-monospace,Menlo,monospace}
+  .heat{display:inline-block;min-width:44px;text-align:right;padding:1px 6px;
+        border-radius:5px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .yours{outline:1px solid #7aa2f755;background:#7aa2f70d}
   @media(max-width:620px){main{padding:16px 14px 50px} header{padding:10px 14px}}
 </style>
 <header>
@@ -55,6 +80,10 @@
   <nav>
     <a href="{{ url_for('views.index') }}">decks</a>
     <a href="{{ url_for('views.import_deck') }}">import</a>
+    <a href="{{ url_for('views.report') }}">report</a>
+    <a href="{{ url_for('views.matrix') }}">matrix</a>
+    <a href="{{ url_for('views.threats') }}">threats</a>
+    <a href="{{ url_for('views.drill_view') }}">drill</a>
     <a href="{{ url_for('views.job_list') }}">jobs</a>
     <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
       <button style="padding:4px 10px;font-size:12px">log out</button></form>

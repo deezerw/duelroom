@@ -65,8 +65,15 @@ making uncertainty visible, and the easy version of this UI would undo it.
       orphaned `running` rows on restart, or they would block the queue forever.
       Running jobs cannot be cancelled from the UI — killing a solver mid-sweep
       is what leaves partial records that read as complete.
-- [ ] **3 — the four views.** Report, handtrap matrix, threats, line drilling.
-      This is where the uncertainty design actually lives.
+- [x] **3 — the four views.** Report, handtrap matrix, threats, line drilling.
+      Built. The uncertainty design is real rather than decorative: solve rates
+      render as confidence bands that visibly widen on small samples, a deck
+      whose target is flagged greys its own panel with the reason attached,
+      every measured panel states its source file and budget, Maxx "C" survival
+      is never shown without its cost beside it, and the matrix says which
+      direction is good — including when the sweep does not contain your deck
+      at all, which otherwise reads as a matchup picture that happens to omit
+      you.
 - [ ] **4 — deckbuilder.** Search 14.6k cards with meta ranking, live banlist
       validation, save to .ydk. Biggest single chunk; effectively a mini
       YGOPRODeck.

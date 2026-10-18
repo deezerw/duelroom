@@ -5,14 +5,19 @@ from pathlib import Path
 from flask import (Blueprint, Response, flash, redirect, render_template,
                    request, url_for)
 
-from skills import card_db, db, importer, meta_scrape as ms
+import json
+
+from skills import (card_db, config, db, drill, gate, importer,
+                    meta_scrape as ms, report as report_mod, scenarios, stats)
 from skills.deck import Deck
 
 from . import jobs
 from .auth import login_required
 
 bp = Blueprint("views", __name__)
-DECKS = Path(__file__).resolve().parent.parent / "assets" / "decks"
+ROOT = Path(__file__).resolve().parent.parent
+DECKS = ROOT / "assets" / "decks"
+ROOT_RESULTS = ROOT / "results"
 
 
 def conn():
@@ -114,6 +119,141 @@ def import_deck():
     c.commit()
     flash(f"Imported {d.name} ({len(d.main)}/{len(d.extra)}/{len(d.side)})")
     return redirect(url_for("views.deck", name=path.stem))
+
+
+def _latest_matrix():
+    files = sorted((ROOT_RESULTS).glob("handtrap_matrix*.jsonl"),
+                   key=lambda p: p.stat().st_mtime)
+    return files[-1] if files else None
+
+
+def _matrix_records():
+    path = _latest_matrix()
+    if not path:
+        return [], None, 0
+    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    return recs, path, len(recs)
+
+
+@bp.route("/report")
+@bp.route("/report/<name>")
+@login_required
+def report(name=None):
+    c = conn()
+    name = name or db.get_meta(c, "active_deck")
+    if not name or not (DECKS / f"{name}.ydk").exists():
+        flash("No deck selected — import one or pick one from the deck list.")
+        return redirect(url_for("views.index"))
+    r = report_mod.deck_report(c, DECKS / f"{name}.ydk")
+
+    surv = []
+    for code, s_ in (r["funnel"] or {}).get("survival_given_line", {}).items():
+        row = card_db.resolve(c, int(code))
+        surv.append({
+            "code": int(code),
+            "name": row["name"] if row else code,
+            "value": s_,
+            "blind": int(code) in scenarios.BLIND_SPOTS,
+            "reason": scenarios.BLIND_SPOTS.get(int(code)),
+        })
+    surv.sort(key=lambda x: (x["value"] is None, x["value"] or 0))
+
+    cost = None
+    cache = ROOT_RESULTS / "special_summons.json"
+    if cache.exists():
+        cost = json.loads(cache.read_text()).get(name)
+
+    f = r["funnel"] or {}
+    ci = stats.wilson(f.get("solved") or 0, f.get("hands") or 0) if f else None
+    return render_template("report.html", r=r, name=name, surv=surv, cost=cost,
+                           ci=ci, running=jobs.active(c))
+
+
+@bp.route("/matrix")
+@login_required
+def matrix():
+    c = conn()
+    recs, path, n = _matrix_records()
+    if not recs:
+        flash("No handtrap matrix yet — run one from a deck page.")
+        return redirect(url_for("views.index"))
+    m = scenarios.handtrap_matrix(recs)
+    w = config.weights()
+    ranking = scenarios.weighted_handtrap_ranking(m, w)
+    covered, missing = config.coverage(m.keys())
+    codes = sorted(scenarios.HANDTRAPS)
+    mine = db.get_meta(c, "active_deck")
+    hands = min((r.get("summary", {}).get("hands") or 0) for r in recs)
+    # Say so when the sweep does not include your deck. Otherwise the
+    # table reads as "here is your matchup picture" while containing
+    # nothing about your deck at all.
+    mine_present = bool(mine) and any(
+        config.slug(d) == config.slug(mine) for d in m)
+    return render_template(
+        "matrix.html", matrix=m, codes=codes, names=scenarios.HANDTRAPS,
+        mine_present=mine_present,
+        ranking=ranking, covered=covered, missing=missing, mine=mine,
+        slug=config.slug, source=path.name, n_decks=n, hands=hands,
+        blind=scenarios.BLIND_SPOTS, running=jobs.active(c))
+
+
+@bp.route("/threats")
+@login_required
+def threats():
+    c = conn()
+    prof = gate.threat_profile(c)
+    if not prof:
+        flash("No board library yet.")
+        return redirect(url_for("views.index"))
+    cache = ROOT_RESULTS / "special_summons.json"
+    ss = json.loads(cache.read_text()) if cache.exists() else {}
+    counts = sorted({n for d in prof.values() for n in d})
+    # Shaped here rather than in the template: a weighted mean is not
+    # something Jinja should be asked to express.
+    rows = sorted(
+        ({"archetype": a,
+          "dist": d,
+          "mean": sum(k * v for k, v in d.items())} for a, d in prof.items()),
+        key=lambda r: -r["mean"])
+    bvh = sorted(
+        ({"archetype": a, **v} for a, v in gate.board_vs_hand(c).items()),
+        key=lambda r: -r["field"])
+    summons = sorted(
+        ({"archetype": a, **v} for a, v in ss.items()),
+        key=lambda r: -r["mean"])
+    return render_template(
+        "threats.html", rows=rows, counts=counts, board_vs_hand=bvh,
+        pieces=sorted(gate.common_pieces(c).items()), summons=summons,
+        mine=db.get_meta(c, "active_deck"), slug=config.slug,
+        running=jobs.active(c))
+
+
+@bp.route("/drill")
+@bp.route("/drill/<name>")
+@login_required
+def drill_view(name=None):
+    c = conn()
+    name = name or db.get_meta(c, "active_deck")
+    if not name:
+        flash("No deck selected.")
+        return redirect(url_for("views.index"))
+    lines, src = [], None
+    for cand in sorted(ROOT_RESULTS.glob("*.jsonl"),
+                       key=lambda p: -p.stat().st_mtime):
+        found = drill.lines_from(cand, name)
+        if found:
+            src = cand.name
+            for rec, line, n in found[:12]:
+                lines.append({
+                    "interrupts": n,
+                    "actions": len(line.get("actions") or []),
+                    "hand": [card_db.resolve(c, x)["name"] if card_db.resolve(c, x)
+                             else str(x) for x in (rec.get("hand") or [])],
+                    "board": drill.describe(c, line),
+                })
+            break
+    return render_template("drill.html", name=name, lines=lines, source=src,
+                           running=jobs.active(c))
 
 
 @bp.route("/jobs")

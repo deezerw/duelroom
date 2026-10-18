@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}threats · duelroom{% endblock %}
+{% block body %}
+<h1>Threats</h1>
+<p class="muted">Decks you will sit across from. A higher mean is a harder board
+  to break — the reading inverts on a row marked yours.</p>
+
+<div class="panel"><div style="overflow-x:auto"><table>
+  <thead><tr><th>archetype</th>
+    {% for n in counts %}<th class="num">{{ n }}</th>{% endfor %}
+    <th class="num">mean</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'yours' if mine and slug(r.archetype) == slug(mine) else '' }}">
+      <td>{{ r.archetype }}{% if mine and slug(r.archetype) == slug(mine) %}
+        <span class="pill active">yours</span>{% endif %}</td>
+      {% for n in counts %}
+        <td class="num">{{ ((r.dist.get(n,0))*100)|round|int }}%</td>{% endfor %}
+      <td class="num">{{ '%.1f'|format(r.mean) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+
+<h2>Visible board vs cards in hand</h2>
+<div class="panel">
+  <table><thead><tr><th>archetype</th><th class="num">on field</th>
+    <th class="num">in hand</th></tr></thead><tbody>
+  {% for v in board_vs_hand %}
+    <tr><td>{{ v.archetype }}</td><td class="num">{{ '%.1f'|format(v.field) }}</td>
+      <td class="num">{{ '%.1f'|format(v.hand) }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+  <p class="muted" style="margin-bottom:0">Going second you can play around a
+    visible negate; you cannot play around a handtrap you have not seen.</p>
+</div>
+
+{% if summons %}
+<h2>Special summons per line <span class="muted" style="text-transform:none">—
+  replayed, not inferred</span></h2>
+<div class="panel">
+  <table><thead><tr><th>archetype</th><th class="num">per line</th>
+    <th class="num">worst</th><th class="num">Nibiru live</th>
+    <th class="num">cards to Maxx "C"</th></tr></thead><tbody>
+  {% for v in summons %}
+    <tr><td>{{ v.archetype }}</td>
+      <td class="num">{{ '%.1f'|format(v.mean) }}</td>
+      <td class="num">{{ v.max }}</td>
+      <td class="num">{{ (v.nibiru_rate*100)|round|int }}%</td>
+      <td class="num">{{ '%.1f'|format(v.mean) }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+  <p class="muted" style="margin-bottom:0">Maxx "C" draws on every special
+    summon, so the summon count <em>is</em> what comboing through it costs them.
+    The survival table cannot see that.</p>
+</div>
+{% endif %}
+
+<h2>Most common interruptions</h2>
+<div class="panel">
+{% for arch, rows in pieces %}
+  <p style="margin:12px 0 4px"><strong>{{ arch }}</strong></p>
+  {% for name, share in rows %}
+    <div class="muted" style="font-size:13px">{{ (share*100)|round|int }}% —
+      {{ name }}</div>
+  {% endfor %}
+{% endfor %}
+</div>
+{% endblock %}

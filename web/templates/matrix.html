@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}handtrap matrix · duelroom{% endblock %}
+{% block body %}
+<h1>Handtrap matrix</h1>
+<div class="prov">{{ source }} · {{ n_decks }} deck(s) · {{ hands }} hands each</div>
+{% if n_decks < 5 %}
+  <div class="flag">This file looks partial — a sweep may still be writing it.
+    Rows below cover only the decks finished so far.</div>
+{% endif %}
+{% if hands < 20 %}
+  <div class="flag">{{ hands }} hands per deck. A matrix cell only counts hands
+    that solved <em>and</em> then offered the handtrap a legal window, so cells
+    here rest on a handful of windows. Going 12 → 40 hands reordered the top two
+    last time.</div>
+{% endif %}
+
+{% if mine and not mine_present %}
+  <div class="flag">This sweep does not include <code>{{ mine }}</code>, your
+    active deck. Everything below is about the decks you face, not about how
+    yours holds up — run a gate on it for that.</div>
+{% endif %}
+
+<h2>Which handtraps to main</h2>
+<div class="panel">
+  <p class="muted" style="margin-top:0">Weighted by <code>locals.toml</code>,
+    which covers {{ (covered*100)|round|int }}% of your stated meta.</p>
+  <table>
+    <thead><tr><th>handtrap</th><th class="num">stops</th>
+      <th class="num">live</th><th></th></tr></thead>
+    <tbody>
+    {% for code, name, score, cov in ranking %}
+      <tr>
+        <td>{{ name }}</td>
+        <td class="num">{{ (score*100)|round(1) }}%</td>
+        <td class="num">{{ (cov*100)|round|int }}%</td>
+        <td class="muted" style="font-size:12px">
+          {% if code in blind %}{{ blind[code] }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin-bottom:0">
+    <strong>stops</strong> = chance it both has a window and stops the line ·
+    <strong>live</strong> = chance it has a window at all.</p>
+  {% if missing %}<p class="muted">No measured deck for:
+    {{ missing|join(', ') }}.</p>{% endif %}
+</div>
+
+<h2>Survival by deck</h2>
+<div class="panel">
+  <p class="muted" style="margin-top:0">Of the windows where the handtrap could
+    be used, how often the line still completed. <strong>Lower is better for
+    you</strong> — except on a row marked yours, where it inverts.</p>
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th>deck</th>
+      {% for c in codes %}<th class="num">{{ names[c].split(' &')[0].split(',')[0] }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+    {% for deck, data in matrix|dictsort %}
+      <tr class="{{ 'yours' if mine and slug(deck) == slug(mine) else '' }}">
+        <td>{{ deck }}{% if mine and slug(deck) == slug(mine) %}
+          <span class="pill active">yours — high is good</span>{% endif %}</td>
+        {% for c in codes %}
+          {% set cell = data.cells.get(c) %}
+          <td class="num">
+            {% if not cell or cell.survival is none %}<span class="muted">–</span>
+            {% else %}
+              <span class="heat" style="background:
+                {%- if cell.survival >= 0.8 %}#f7768e22{% elif cell.survival <= 0.2 %}#86d98b22
+                {%- else %}transparent{% endif %}">{{ (cell.survival*100)|round|int }}%</span>
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted" style="margin-bottom:0">A dash means it never had a legal
+    window in any solved hand — unmeasured, not harmless.</p>
+</div>
+{% endblock %}

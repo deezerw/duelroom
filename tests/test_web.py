@@ -138,3 +138,54 @@ def test_claim_takes_the_oldest_queued_job_once(tmp_path):
     got = jobs.claim(conn)
     assert got["id"] == first
     assert jobs.claim(conn)["deck"] == "b", "claim must not re-serve a running job"
+
+
+# --- analysis views ------------------------------------------------------
+# The point of these pages is that uncertainty survives the trip from
+# terminal to browser. A stat tile looks authoritative in a way a
+# terminal warning beside its own number does not.
+
+def test_analysis_pages_render(client):
+    _logged_in(client)
+    for path in ("/report", "/matrix", "/threats", "/drill"):
+        assert client.get(path, follow_redirects=True).status_code == 200
+
+
+def test_report_draws_an_interval_not_just_a_number(client):
+    _logged_in(client)
+    html = client.get("/report/kewl-tune").data.decode()
+    assert 'class="iv' in html, "solve rate must render as a confidence band"
+    assert "hands" in html, "provenance must state the sample size"
+
+
+def test_report_greys_a_deck_whose_target_is_untrustworthy(client):
+    _logged_in(client)
+    html = client.get("/report/Blitzclique").data.decode()
+    assert "untrusted" in html, "a flagged target must grey its own panel"
+    assert "must be DRAWN" in html, "and state why"
+
+
+def test_report_pairs_maxx_c_survival_with_its_cost(client):
+    # Survival alone reads as "fine" — lines do complete through it.
+    _logged_in(client)
+    html = client.get("/report/kewl-tune").data.decode()
+    assert "Surviving it is not beating it" in html
+
+
+def test_matrix_states_which_direction_is_good(client):
+    _logged_in(client)
+    html = " ".join(client.get("/matrix").data.decode().split())
+    assert "Lower is better for you" in html
+    assert "unmeasured, not harmless" in html, "a dash must not read as harmless"
+
+
+def test_matrix_says_when_it_excludes_your_deck(client):
+    # Otherwise the table reads as your matchup picture while containing
+    # nothing about your deck.
+    from skills import db
+    c = db.connect()
+    db.set_meta(c, "active_deck", "my-despia")
+    c.commit()
+    _logged_in(client)
+    html = client.get("/matrix").data.decode()
+    assert "does not include" in html
