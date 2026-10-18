@@ -31,7 +31,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "ygorl"
-THIRD_PARTY = VENDOR / "third_party"
+UPSTREAM_THIRD_PARTY = VENDOR / "third_party"
+
+# Point the engine at the merged card database when it has been built.
+# BabelCDB ships recent sets as separate release-*.cdb files that ygorl does
+# not load, and a deck containing one of those cards segfaults the solver
+# rather than failing cleanly. See skills/carddb.py.
+_SHADOW = ROOT / "vendor" / "third_party_merged"
+THIRD_PARTY = _SHADOW if (_SHADOW / "BabelCDB" / "cards.cdb").exists() \
+    else UPSTREAM_THIRD_PARTY
 SOLVER_BIN = VENDOR / "build" / "combo-solver" / "bin" / "combosolver"
 PYTHON = ROOT / "venv" / "bin" / "python"
 # The console script, not `python -m ygorl.cli`: cli.py defines main()
@@ -65,6 +73,10 @@ def env():
     """Environment for any ygorl subprocess."""
     e = dict(os.environ)
     e["YGORL_THIRD_PARTY"] = str(THIRD_PARTY)
+    # ygorl derives the solver build directory from third_party's parent, so
+    # pointing it at the shadow tree also moves where it looks for the
+    # binary. Name it explicitly.
+    e["YGORL_COMBO_SOLVER"] = str(SOLVER_BIN)
     return e
 
 
@@ -73,6 +85,9 @@ def check():
     problems = []
     if not VENDOR.exists():
         problems.append(f"ygorl not cloned at {VENDOR}")
+    if not (_SHADOW / "BabelCDB" / "cards.cdb").exists():
+        problems.append("merged card database not built (carddb.build()); "
+                        "recent-set cards will segfault the solver")
     if not (THIRD_PARTY / "BabelCDB" / "cards.cdb").exists():
         problems.append("card database missing (git submodule update --init --recursive)")
     if not (THIRD_PARTY / "CardScripts").exists():
@@ -97,6 +112,13 @@ def require():
 # --- version pinning ------------------------------------------------------
 
 def _git_rev(path):
+    # Only report a revision for an actual repository root. The shadow
+    # third_party tree is a plain directory, and `git rev-parse` there walks
+    # up and returns duelroom's own HEAD -- a version pin that looks valid
+    # and means nothing.
+    path = Path(path)
+    if not (path / ".git").exists():
+        return None
     try:
         out = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--short", "HEAD"],
@@ -115,11 +137,12 @@ def versions():
     """
     return {
         "ygorl": _git_rev(VENDOR),
-        "ygopro_core": _git_rev(THIRD_PARTY / "ygopro-core"),
-        "card_scripts": _git_rev(THIRD_PARTY / "CardScripts"),
-        "babel_cdb": _git_rev(THIRD_PARTY / "BabelCDB"),
-        "lflists": _git_rev(THIRD_PARTY / "LFLists"),
+        "ygopro_core": _git_rev(UPSTREAM_THIRD_PARTY / "ygopro-core"),
+        "card_scripts": _git_rev(UPSTREAM_THIRD_PARTY / "CardScripts"),
+        "babel_cdb": _git_rev(UPSTREAM_THIRD_PARTY / "BabelCDB"),
+        "lflists": _git_rev(UPSTREAM_THIRD_PARTY / "LFLists"),
         "combo_solver": "e0c7221802a2",  # pinned by tools/build_combo_solver.sh
+        "cards_merged": THIRD_PARTY is _SHADOW,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
     }
 
@@ -187,6 +210,7 @@ def solve_blocking(decks, hands=8, solve_ms=SOLVE_MS, workers=None, pieces=3,
     """
     require()
     decks = [decks] if isinstance(decks, (str, Path)) else list(decks)
+    preflight(decks)
     workers = workers or DEFAULT_WORKERS
     out = Path(out) if out else ROOT / "results" / "blocking_demos.jsonl"
     summary = Path(summary) if summary else ROOT / "results" / "blocking_summary.json"
@@ -202,6 +226,33 @@ def solve_blocking(decks, hands=8, solve_ms=SOLVE_MS, workers=None, pieces=3,
     ]
     subprocess.run(cmd, env=env(), cwd=str(VENDOR), timeout=timeout, check=True)
     return json.loads(summary.read_text()) if summary.exists() else {}
+
+
+def preflight(decks):
+    """Refuse decks the engine cannot load, before spending solver time.
+
+    An unknown passcode does not produce a clean error. The solver
+    segfaults and buries the real cause under five unrelated diagnostics,
+    and every hand "fails" in about a second -- which reads like a deck
+    that simply bricks. One elfnote run burned 12 hands that way. Cheap to
+    check, expensive to miss.
+    """
+    from . import carddb
+    from .deck import Deck
+
+    problems = []
+    for d in decks:
+        path = Path(d)
+        bad = carddb.check_deck(Deck.from_ydk(path))
+        if bad:
+            codes = ", ".join(f"{c} ({sec})" for c, sec in bad)
+            problems.append(f"{path.stem}: {len(bad)} card(s) not in the "
+                            f"engine database — {codes}")
+    if problems:
+        raise EngineNotReady(
+            "deck(s) the engine cannot load:\n  " + "\n  ".join(problems)
+            + "\n(try rebuilding the merged database: carddb.build())"
+        )
 
 
 def summarise(summary):
