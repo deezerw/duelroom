@@ -5,13 +5,15 @@ Stage 1 commands only (meta ingestion and exact hand math). The engine-backed
 commands arrive with Stage 2+.
 """
 
+import json
 import shlex
 import sys
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import card_db, carddb, db, engine, gate, meta_scrape as ms, stats
+from skills import (card_db, carddb, config, db, engine, gate,
+                    meta_scrape as ms, scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -35,6 +37,9 @@ duelroom — Yu-Gi-Oh! deck laboratory
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   boards [load]             meta end-board library (what you must break)
   threats                   interruption counts + common pieces per archetype
+  targets                   derive solver targets from the board library
+  matrix                    handtrap matrix: which handtraps to main deck
+  locals                    your locals.toml weights and their coverage
   help / quit
 """
 
@@ -348,6 +353,68 @@ def cmd_threats(conn, args):
             print(f"      {share*100:4.0f}%  {name}")
 
 
+def cmd_targets(conn, args):
+    src = ROOT / "results" / "boards.jsonl"
+    if not src.exists():
+        print(f"no {src} — build the board library first")
+        return
+    out = ROOT / "assets" / "derived_targets.json"
+    t = scenarios.write_targets(src, out)
+    print(f"derived targets for {len(t)} decks -> {out}\n")
+    for deck, named in scenarios.describe_targets(conn, t):
+        print(f"  {deck:28} {', '.join(named)}")
+
+
+def cmd_locals(conn, args):
+    w = config.weights()
+    if not w:
+        print("locals.toml has no weights — edit it with your room's spread")
+        return
+    print("  weight  archetype")
+    for k, v in sorted(w.items(), key=lambda kv: -kv[1]):
+        print(f"  {v*100:5.1f}%  {k}")
+    decks = [p.stem for p in (ROOT / "assets" / "decks").glob("*.ydk")]
+    covered, missing = config.coverage(decks)
+    print(f"\n  measured decks cover {covered*100:.0f}% of your stated meta")
+    if missing:
+        print(f"  no deck exported for: {', '.join(missing)}")
+
+
+def cmd_matrix(conn, args):
+    path = ROOT / "results" / "handtrap_matrix.jsonl"
+    if not path.exists():
+        print(f"no {path} — run scenarios.run_matrix first")
+        return
+    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    m = scenarios.handtrap_matrix(recs)
+    if not m:
+        print("no usable records")
+        return
+
+    codes = sorted(scenarios.HANDTRAPS)
+    short = {c: scenarios.HANDTRAPS[c].split(" &")[0].split(",")[0][:9] for c in codes}
+    print("  how often a solved line SURVIVES each handtrap")
+    print("  (lower is better for you — it means the handtrap stops them)\n")
+    print("  " + "deck".ljust(26) + "".join(f"{short[c]:>10}" for c in codes))
+    for deck, data in sorted(m.items()):
+        cells = ""
+        for c in codes:
+            v = data["survival"].get(c)
+            cells += f"{'   -' if v is None else f'{v*100:9.0f}%'}"
+        print(f"  {deck.ljust(26)}{cells}")
+
+    w = config.weights()
+    ranking = scenarios.weighted_handtrap_ranking(m, w)
+    covered, missing = config.coverage(m.keys())
+    if ranking:
+        print(f"\n  WHICH HANDTRAPS TO MAIN — weighted by locals.toml")
+        print(f"  (covers {covered*100:.0f}% of your stated meta)\n")
+        for code, name, score in ranking:
+            print(f"    {score*100:5.1f}%  of weighted matchups stopped by {name}")
+        if missing:
+            print(f"\n    no measured deck for: {', '.join(missing)}")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -401,6 +468,9 @@ COMMANDS = {
     "gate": cmd_gate,
     "boards": cmd_boards,
     "threats": cmd_threats,
+    "targets": cmd_targets,
+    "matrix": cmd_matrix,
+    "locals": cmd_locals,
 }
 
 

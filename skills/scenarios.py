@@ -1,0 +1,198 @@
+"""Scenario suite: handtrap matrix and derived solver targets.
+
+`funnel_eval` fires a handtrap into every solved hand and reports whether
+the line survives -- that is the handtrap matrix. It wants a per-deck
+targets file, though, and ygorl only ships one for its own ten test decks.
+Scraped tournament lists have no curated target.
+
+Rather than hand-writing targets for decks nobody here plays, derive them:
+`solve_blocking` already searched each deck with automatically planned
+targets and recorded which ones it actually reached. The most frequently
+reached target IS that deck's canonical payoff, measured instead of
+guessed, and it updates itself when the meta moves.
+"""
+
+import json
+from collections import Counter
+from pathlib import Path
+
+from . import card_db, engine
+
+# The handtraps worth testing against. Passcodes verified against the
+# card mirror; names kept for reports.
+HANDTRAPS = {
+    14558127: "Ash Blossom & Joyous Spring",
+    10045474: "Infinite Impermanence",
+    23434538: 'Maxx "C"',
+    27204311: "Nibiru, the Primal Being",
+    94145021: "Droll & Lock Bird",
+    59438930: "Ghost Ogre & Snow Rabbit",
+    97268402: "Effect Veiler",
+}
+
+# Common floodgates for the Stage 4 static check. Locals run these far more
+# than top tables do.
+FLOODGATES = {
+    82732705: "Skill Drain",
+    83326048: "Dimensional Barrier",
+    90846359: "Rivalry of Warlords",
+    97642679: "There Can Be Only One",
+    23616456: "Summon Limit",
+}
+
+
+def derive_targets(jsonl_path, per_deck=2, min_hits=2):
+    """Build a funnel_eval targets file from solve_blocking results.
+
+    Counts the targets each deck actually reached and keeps the most
+    common. A target reached once in twelve hands is noise, so `min_hits`
+    filters those out unless nothing else qualifies.
+    """
+    records = [
+        json.loads(l)
+        for l in Path(jsonl_path).read_text().splitlines()
+        if l.strip()
+    ]
+    hits = {}
+    for r in records:
+        if r.get("status") != "solved":
+            continue
+        d = r.get("deck")
+        name = d.get("name") if isinstance(d, dict) else str(d)
+        hits.setdefault(name, Counter()).update(r.get("targets") or [])
+
+    out = {}
+    for deck, counter in hits.items():
+        ranked = counter.most_common()
+        # Prefer targets that are BUILT over targets that are DEALT. An
+        # "@hand" target only asks that a card be in hand, which a draw can
+        # satisfy without the deck doing anything -- firing a handtrap at
+        # that measures nothing. Branded derived two @hand targets
+        # (Whisker Blitzclique, Droll) purely because it ends on almost no
+        # visible board.
+        built = [(t, n) for t, n in ranked if "@hand" not in t]
+        dealt = [(t, n) for t, n in ranked if "@hand" in t]
+        ordered = built + dealt
+
+        kept = [t for t, n in ordered if n >= min_hits][:per_deck]
+        if not kept and ordered:
+            kept = [ordered[0][0]]
+        if kept:
+            out[deck] = {
+                "targets": kept,
+                "fire": sorted(HANDTRAPS),
+                "_built_targets": sum(1 for t in kept if "@hand" not in t),
+            }
+    return out
+
+
+def write_targets(jsonl_path, out_path, per_deck=2, min_hits=2):
+    targets = derive_targets(jsonl_path, per_deck, min_hits)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for spec in targets.values():
+        spec.pop("_built_targets", None)
+    payload = {
+        "_comment": (
+            "Derived by duelroom from solve_blocking results: the targets "
+            "each deck actually reached most often. Regenerate after a "
+            "meta refresh."
+        ),
+        **targets,
+    }
+    out_path.write_text(json.dumps(payload, indent=1))
+    return targets
+
+
+def describe_targets(conn, targets):
+    """Render a derived targets file with card names."""
+    rows = []
+    for deck, spec in sorted(targets.items()):
+        named = []
+        for t in spec["targets"]:
+            code = int(t.split("@")[0])
+            row = card_db.resolve(conn, code)
+            zone = f"@{t.split('@')[1]}" if "@" in t else ""
+            named.append((row["name"] if row else f"<{code}>") + zone)
+        rows.append((deck, named))
+    return rows
+
+
+# --- handtrap matrix ------------------------------------------------------
+
+def handtrap_matrix(records):
+    """survival-given-line per deck per handtrap, from funnel_eval records.
+
+    Survival is conditional on the hand having had a line at all. An
+    unconditional rate would reward decks that brick, since a brick cannot
+    be disrupted.
+    """
+    matrix = {}
+    for rec in records:
+        s = rec.get("summary") or {}
+        deck = s.get("deck")
+        if not deck:
+            continue
+        row = {}
+        for code, surv in (s.get("survival_given_line") or {}).items():
+            row[int(code)] = surv
+        matrix[deck] = {
+            "survival": row,
+            "solved": s.get("solved"),
+            "hands": s.get("hands"),
+            "brick_rate": s.get("brick_rate"),
+        }
+    return matrix
+
+
+def weighted_handtrap_ranking(matrix, weights):
+    """Which handtraps to main, weighted by who you actually face.
+
+    `weights` is the locals.toml share per archetype. A handtrap that
+    blanks a deck nobody in your room plays is worth nothing, which is
+    the entire reason that file exists.
+    """
+    scores = Counter()
+    total_w = 0.0
+    for deck, data in matrix.items():
+        w = weights.get(deck, 0.0)
+        if not w:
+            continue
+        total_w += w
+        for code, surv in data["survival"].items():
+            # stopped = 1 - survived
+            scores[code] += w * (1.0 - surv)
+    if total_w:
+        for code in scores:
+            scores[code] /= total_w
+    return [
+        (code, HANDTRAPS.get(code, str(code)), score)
+        for code, score in scores.most_common()
+    ]
+
+
+def run_matrix(decks, targets_path, hands=12, solve_ms=None, workers=None,
+               fire_ms=3000, out=None, timeout=None):
+    """funnel_eval across several decks with every handtrap fired."""
+    import subprocess
+
+    engine.require()
+    engine.preflight(decks)
+    solve_ms = solve_ms or engine.SOLVE_MS
+    workers = workers or engine.DEFAULT_WORKERS
+    out = Path(out) if out else engine.ROOT / "results" / "handtrap_matrix.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "nice", "-n", "19", str(engine.PYTHON), "tools/funnel_eval.py",
+        *[str(Path(d).resolve()) for d in decks],
+        "--targets", str(Path(targets_path).resolve()),
+        "--hands", str(hands), "--solve-ms", str(solve_ms),
+        "--fire-ms", str(fire_ms), "--workers", str(workers),
+        "--no-filter", "--out", str(out),
+    ]
+    for code in sorted(HANDTRAPS):
+        cmd += ["--fire", str(code)]
+    subprocess.run(cmd, env=engine.env(), cwd=str(engine.VENDOR),
+                   timeout=timeout, check=True)
+    return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
