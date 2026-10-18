@@ -765,6 +765,8 @@ def cmd_optimize(conn, args):
     best, history = optimizer.hill_climb(conn, deck, archetype, target,
                                          hands=hands, rounds=rounds)
     print(f"\nbest: {best.label}  score {best.score:+.3f}")
+    rows = optimizer.report(history, hands)
+    constant, varying = optimizer.degenerate_terms(history)
     print(f"\n  {'score':>7}  {'solve':>16}  {'brick':>6}  {'surv':>6}  change")
     for r in rows[:12]:
         lo, hi = r["ci"]
@@ -772,8 +774,6 @@ def cmd_optimize(conn, args):
               f"[{lo*100:3.0f}-{hi*100:3.0f}]  "
               f"{(r['brick_rate'] or 0)*100:5.0f}%  "
               f"{(r['survival'] or 0)*100:5.0f}%  {r['label']}")
-    rows = optimizer.report(history, hands)
-    constant, varying = optimizer.degenerate_terms(history)
     distinct_solve = {round(r["solve_rate"], 4) for r in rows}
     distinct_brick = {round(r["brick_rate"] or 0, 4) for r in rows}
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")

@@ -771,3 +771,16 @@ def test_degenerate_objective_terms_are_detected():
     mixed = [D(4.0, 0.8), D(4.5, 0.9)]
     constant2, varying2 = optimizer.degenerate_terms(mixed)
     assert "solve rate" in varying2
+
+
+def test_optimize_report_block_defines_rows_before_use():
+    # A use-before-assignment crashed `optimize` at the very end, after
+    # hours of solver time, swallowing the result table. The checkpoint
+    # ledger made the data recoverable; the crash still should not ship.
+    src = (Path(__file__).resolve().parent.parent / "daemon.py").read_text()
+    block = src[src.index("def cmd_optimize"):]
+    block = block[:block.index("\ndef ")]
+    assign = block.index("rows = optimizer.report(")
+    first_use = block.index("for r in rows[")
+    assert assign < first_use, (
+        "rows must be assigned before the result table iterates it")

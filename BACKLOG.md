@@ -58,6 +58,15 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Crash at the end of `optimize`, fixed.** My degeneracy edit left `rows` used
+  before assignment, so the command died *after* the full run with
+  UnboundLocalError and swallowed the result table. The checkpoint ledger added
+  earlier meant nothing was actually lost — the table was rebuilt from
+  `results/optimize_kewl-tune.jsonl`. Test added that the assignment precedes the use.
+- **FIRST REAL OPTIMIZER RESULT (kewl-tune, 12 hands, Imperm+Ash fired): no swap beats
+  the base list.** All 10 candidates scored below base and every one shared an
+  identical 83% solve, 17% brick and 0% survival. The honest reading is that these
+  flex slots are interchangeable at this sample size, not that base is proven best.
 - **The optimizer's objective is degenerate for kewl-tune.** Reading the ledger: all
   10 trials scored an identical 10/12 solved, 17% brick and 0% survival. Only the
   combo-length term varied, so the whole 0.06 score spread came from a tiebreak with
