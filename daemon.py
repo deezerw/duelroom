@@ -33,7 +33,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
   mydeck [name]             show or set the deck commands default to
   ydke <deck>               export a deck as a ydke:// URI to paste elsewhere
-  report [deck] [archetype] everything known about a deck, in one view
+  report [deck] [archetype] everything known; archetype auto-detected
   drill [deck] [n]          export best lines as EDOPro replays to practise
   export <archetype> [name] write a scraped list out as a .ydk
   doctor                    run every self-check: engine, data, guards
@@ -989,7 +989,12 @@ def cmd_report(conn, args):
 
     if r["inclusion"]:
         inc = r["inclusion"]
-        print(f"\n  VS THE META  ({inc['lists']} lists of {archetype})")
+        g = r.get("archetype_guess")
+        how = (f" — identified from your cards, {g[1]*100:.0f}% of its "
+               f"{g[2]}-card core" if g else "")
+        print(f"\n  VS THE META  ({inc['lists']} lists of {r['archetype']}){how}")
+        for alt, ov, n_ in (r.get("archetype_alts") or []):
+            print(f"    also matches {alt} ({ov*100:.0f}% of {n_} core)")
         print(f"    {inc['core']} core cards, {inc['flex']} contested slots")
         if inc["off_meta"]:
             print("    cards in your list that no scraped list runs:")

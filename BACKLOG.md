@@ -60,6 +60,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Archetype auto-detection** (`meta_scrape.identify_archetype`). Walking the cold
+  first-run path showed `report` needed an archetype argument nobody importing their
+  own deck would know to pass. It is inferable: match against each archetype's CORE
+  cards (>=90% inclusion) rather than its whole pool, since the core is what makes a
+  deck that deck while flex slots are shared staples that match everything. Correctly
+  identifies all four test decks, and reports secondary matches for hybrids.
 - **Provenance on every measured number.** `report` printed a solve rate with no
   indication of which run or budget produced it, and a budget too low invents bricks
   (10s calls a hand dead that 60s solves in 9 actions). It now names the source file,

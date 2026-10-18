@@ -514,3 +514,34 @@ def drift(conn, archetype, old_label, new_label, fmt=DEFAULT_FORMAT,
         })
     rows.sort(key=lambda r: -abs(r["delta"]))
     return rows, note
+
+
+def identify_archetype(conn, deck, fmt=DEFAULT_FORMAT, min_overlap=0.5):
+    """Guess which scraped archetype a deck belongs to, from its cards.
+
+    Matches against each archetype's CORE cards (>=90% inclusion) rather
+    than its whole pool: the core is what makes a deck that deck, while
+    the flex slots are mostly shared staples that would match everything.
+
+    Returns [(archetype, overlap, n_core)] best first. The caller decides
+    whether the top score is good enough -- a 50% overlap on a 4-card
+    core is two staples and means nothing.
+    """
+    have = set(deck.main) | set(deck.extra)
+    rows = conn.execute(
+        """SELECT archetype, card_id, pct_lists FROM inclusion
+            WHERE format = ? AND section = 'main' AND pct_lists >= ?""",
+        (fmt, CORE_THRESHOLD),
+    ).fetchall()
+    core = {}
+    for r in rows:
+        core.setdefault(r["archetype"], set()).add(r["card_id"])
+
+    scored = []
+    for arch, cards in core.items():
+        if len(cards) < 3:          # too thin a core to identify anything
+            continue
+        hit = len(cards & have)
+        scored.append((arch, hit / len(cards), len(cards)))
+    scored.sort(key=lambda t: (-t[1], -t[2]))
+    return [s for s in scored if s[1] >= min_overlap] or scored[:1]

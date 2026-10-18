@@ -385,3 +385,42 @@ def test_latest_funnel_misses_cleanly(tmp_path, monkeypatch):
     (tmp_path / "results").mkdir()
     monkeypatch.setattr(engine, "ROOT", tmp_path)
     assert report_mod.latest_funnel("nope") == (None, None)
+
+
+# --- archetype identification --------------------------------------------
+# The headline use case is importing your own deck, where nobody knows to
+# pass an archetype name. It is inferable from the deck's own cards.
+
+def test_identify_matches_on_core_not_staples(tmp_path):
+    from skills import db, meta_scrape as ms
+    conn = db.connect(tmp_path / "t.db")
+    rows = []
+    # archetype A: a real 4-card core. B: one core card plus staples.
+    for cid in (101, 102, 103, 104):
+        rows.append(("A", "F", cid, "main", 1.0, 3.0, 50, "now"))
+    for cid in (201, 202, 203):
+        rows.append(("B", "F", cid, "main", 1.0, 3.0, 50, "now"))
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)", rows)
+    deck = Deck(main=[101, 102, 103, 104, 201], extra=[], side=[])
+    got = ms.identify_archetype(conn, deck, fmt="F")
+    assert got[0][0] == "A", "must match the deck whose whole core is present"
+    assert got[0][1] == pytest.approx(1.0)
+
+
+def test_identify_ignores_cores_too_thin_to_mean_anything(tmp_path):
+    from skills import db, meta_scrape as ms
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("Thin", "F", 1, "main", 1.0, 3.0, 50, "now"),
+             ("Thin", "F", 2, "main", 1.0, 3.0, 50, "now")])
+    deck = Deck(main=[1, 2], extra=[], side=[])
+    assert ms.identify_archetype(conn, deck, fmt="F") == [], (
+        "a 2-card core identifies nothing")

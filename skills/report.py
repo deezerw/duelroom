@@ -60,6 +60,8 @@ def deck_report(conn, path, archetype=None):
         "provenance": None,
         "hand_math": [],
         "archetype": archetype,
+        "archetype_guess": None,
+        "archetype_alts": [],
         "inclusion": None,
     }
 
@@ -94,6 +96,14 @@ def deck_report(conn, path, archetype=None):
         out["hand_math"].append(
             (name, copies, stats.open_chance(size, copies, 5))
         )
+
+    if archetype is None:
+        guesses = ms.identify_archetype(conn, deck)
+        if guesses and guesses[0][1] >= 0.5:
+            archetype = guesses[0][0]
+            out["archetype"] = archetype
+            out["archetype_guess"] = guesses[0]
+            out["archetype_alts"] = guesses[1:3]
 
     if archetype:
         n = ms.compute_inclusion(conn, archetype)
