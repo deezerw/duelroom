@@ -30,6 +30,17 @@ HANDTRAPS = {
     97268402: "Effect Veiler",
 }
 
+# Handtraps this metric structurally cannot judge. The question asked is
+# "did the line still reach its target", and these do not try to stop a
+# line -- Maxx "C" punishes one with cards, Droll shuts off searching
+# without necessarily preventing the target. A high survival against
+# them is the metric failing to see the card, not the deck being fine.
+BLIND_SPOTS = {
+    23434538: 'Maxx "C" draws them cards instead of stopping you',
+    94145021: "Droll shuts off searching; the target may not need a search",
+}
+
+
 # Common floodgates for the Stage 4 static check. Locals run these far more
 # than top tables do.
 FLOODGATES = {

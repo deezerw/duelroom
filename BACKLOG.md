@@ -54,6 +54,16 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Sign audit.** The same survival number means opposite things in two commands:
+  `matrix` reports OPPONENT decks where low is good for you, `report` reports YOUR
+  deck where low means you fold. `report` gave no direction, so a reader coming from
+  `matrix` would invert it. Now labelled "higher is better — this is YOUR deck",
+  ranked worst-first with verdicts, and it names your worst matchup card. Surfaced
+  that kewl-tune plays through Infinite Impermanence 0% of the time.
+- **Blind-spot cards no longer labelled "fine".** The first version of that fix called
+  Maxx "C" at 80% survival "fine"; the metric only asks whether a line reached its
+  target, which Maxx "C" never prevents. `scenarios.BLIND_SPOTS` names them and report
+  prints NOT MEASURABLE with the reason.
 - **Regression suite** (`tests/test_regressions.py`, 19 tests, 0.11s). Covers the bugs
   actually found here: hypergeometric identities, ydke/ydk round-trips, list_hash
   multiplicity, target ranking (extra-deck over frequency, built over dealt, one target

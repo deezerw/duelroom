@@ -227,3 +227,23 @@ def test_side_in_refuses_a_card_not_in_the_side_deck():
     assert 9 in ok.main and 1 in ok.side
     with pytest.raises(ValueError):
         optimizer.side_in(d, 2, 12345)
+
+
+# --- metric blind spots --------------------------------------------------
+# Bug: report labelled Maxx "C" at 80% survival as "fine". The metric asks
+# only whether the line reached its target, which Maxx "C" never prevents,
+# so a high number there is the metric missing the card.
+
+def test_blind_spot_cards_are_declared():
+    assert 23434538 in scenarios.BLIND_SPOTS, 'Maxx "C" must stay flagged'
+    assert 94145021 in scenarios.BLIND_SPOTS, "Droll must stay flagged"
+    for code, reason in scenarios.BLIND_SPOTS.items():
+        assert reason and isinstance(reason, str)
+
+
+def test_blind_spots_are_not_in_the_judgeable_set():
+    # the verdict logic must exclude them before picking a "worst" card
+    live = [(None, 23434538, 0.8), (None, 10045474, 0.0)]
+    judged = [t for t in live if int(t[1]) not in scenarios.BLIND_SPOTS]
+    assert len(judged) == 1
+    assert judged[0][1] == 10045474

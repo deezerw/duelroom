@@ -817,11 +817,42 @@ def cmd_report(conn, args):
         if ca.get("median") is not None:
             print(f"    line length   median {ca['median']} actions "
                   f"({ca.get('min')}-{ca.get('max')})")
-        for code, surv in (f.get("survival_given_line") or {}).items():
-            row = card_db.resolve(conn, int(code))
-            name = row["name"] if row else code
-            shown = "n/a" if surv is None else f"{surv*100:.0f}%"
-            print(f"    survives      {name}: {shown} of solved hands")
+        # Direction matters and is the opposite of `matrix`. There, a low
+        # survival is GOOD (the handtrap blanks an opponent). Here the
+        # deck is YOURS, so a low survival means you fold to that card.
+        # The same number printed without a direction invites the reader
+        # to carry over the wrong reading.
+        surv_rows = [
+            (card_db.resolve(conn, int(code)), code, s)
+            for code, s in (f.get("survival_given_line") or {}).items()
+        ]
+        live = [(r, c, s) for r, c, s in surv_rows if s is not None]
+        if live:
+            print("\n  PLAYS THROUGH (higher is better — this is YOUR deck)")
+            blind = []
+            for row, code, s in sorted(live, key=lambda t: t[2]):
+                name = row["name"] if row else code
+                if int(code) in scenarios.BLIND_SPOTS:
+                    blind.append((name, int(code)))
+                    verdict = "NOT MEASURABLE"
+                else:
+                    verdict = ("folds to it" if s <= 0.15 else
+                               "struggles" if s <= 0.5 else "fine")
+                print(f"    {s*100:4.0f}%  {name:<34} {verdict}")
+            judged = [t for t in live
+                      if int(t[1]) not in scenarios.BLIND_SPOTS]
+            if judged:
+                worst = min(judged, key=lambda t: t[2])
+                wname = worst[0]["name"] if worst[0] else worst[1]
+                print(f"    -> {wname} is your worst matchup card")
+            for name, code in blind:
+                print(f"    ! {name}: {scenarios.BLIND_SPOTS[code]}.")
+                print(f"      A high number here is the metric missing the card,")
+                print(f"      not your deck being fine.")
+        for row, code, s in surv_rows:
+            if s is None:
+                name = row["name"] if row else code
+                print(f"    n/a   {name:<34} never had a window")
         if hands and hands < 20:
             print(f"    ! only {hands} hands — the interval above is wide enough")
             print("      that most comparisons against it are noise")
