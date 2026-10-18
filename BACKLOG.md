@@ -25,10 +25,8 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Hand-level memoization `(deck_hash, opening_hand) -> result`. Named in CLAUDE.md
-      as a non-negotiable and never actually implemented. Biggest speed win available.
-- [ ] Scale up: gate/boards/matrix at 40+ hands now that long jobs are allowed. The 6-12
-      hand numbers currently in `results/` are too noisy to act on.
+- [ ] IN FLIGHT: 40-hand board library rebuild (`results/boards40.log`). Pick up the
+      result, load it, and re-derive targets from the bigger sample.
 - [ ] Nibiru count and Maxx "C" cost — the solver already tracks special summons per
       line, so these are nearly free and were promised in STAGE3.
 - [ ] Meta drift: diff inclusion rates across scrapes to surface rising tech cards.
@@ -36,6 +34,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - [ ] Push to GitHub (user approved).
 
 ## BLOCKED / WON'T DO
+
+- **Hand-level memoization.** Measured at 18.8% apparent hit rate, all of it from
+  re-running an identical gate — i.e. re-validation after a component bump, where a
+  cached answer would hide the very change being checked. A correct key needs budget,
+  target AND engine revisions, which drops it to ~zero. The optimizer gains nothing
+  either: a one-card swap changes the shuffle, so no hand is shared. CLAUDE.md's
+  "non-negotiable" claim was wrong and has been corrected.
 
 - **Handtrap pairs** (Ash + Imperm together). `--fire` takes one card per solver
   invocation and funnel_eval loops them separately. Not expressible; documented in

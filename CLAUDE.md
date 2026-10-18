@@ -113,9 +113,17 @@ meta deck to build an end-board library → scenarios test your deck against tha
 - **Paired seeds:** deck variants are always compared on identical shuffle seeds (common
   random numbers). This is the single biggest variance reduction available and it is
   mandatory, not optional.
-- **Hand-level memoization:** `(deck_hash, opening_hand) → best_line` is deterministic.
-  Opening hands repeat constantly across trials; this cache is the difference between
-  minutes and hours on 8 cores.
+- **Hand-level memoization: measured, and NOT worth building.** The original plan
+  called this non-negotiable on the assumption that opening hands repeat across
+  trials. They do not. A correct cache key must include the solver budget and the
+  target (10 s reports a brick where 60 s solves the same hand) and, for correctness,
+  the ygorl/CardScripts/BabelCDB revisions too. Measured over every run in `results/`:
+  18.8% apparent hits with budget and target keyed, and all of them were re-running
+  the same gate at identical settings -- which is re-validation after a component
+  bump, precisely the case where a cached answer would hide the change being checked
+  for. With revisions in the key the rate is about zero. The optimizer gets no benefit
+  either: swapping one card changes the deck multiset, so the shuffle and therefore
+  every dealt hand differs.
 - **Play/draw split:** every metric is reported split by going first vs going second.
   The die roll dominates modern Yu-Gi-Oh and an averaged number hides the answer.
 - **Locals weighting:** the gauntlet is weighted by a hand-maintained config, not by
