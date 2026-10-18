@@ -64,3 +64,61 @@ def test_session_cookie_is_not_the_flask_default():
     assert app.config["SESSION_COOKIE_NAME"] == "duelroom_session", (
         "stockroom and flipper both used the default and logged users "
         "between apps")
+
+
+# --- job queue -----------------------------------------------------------
+# Solver runs take hours and take 6 of 8 cores. The web app only
+# enqueues; a single worker process claims and runs, which makes
+# one-at-a-time structural rather than a convention.
+
+def _logged_in(client):
+    client.post("/login", data={"password": "pw"})
+    return client
+
+
+def test_only_known_job_kinds_can_be_queued(client):
+    _logged_in(client)
+    r = client.post("/deck/kewl-tune/run/rm-rf", follow_redirects=True)
+    assert b"Unknown job type" in r.data
+    from skills import db
+    from web import jobs
+    assert not any(j["kind"] == "rm-rf" for j in jobs.recent(db.connect(), 50))
+
+
+def test_queued_jobs_cancel_but_running_ones_do_not(tmp_path):
+    # Killing a running solver mid-sweep leaves partial records that read
+    # as complete — the exact bug this queue exists to avoid.
+    from skills import db
+    from web import jobs
+    conn = db.connect(tmp_path / "j.db")
+    qid = jobs.enqueue(conn, "gate", deck="d", hands=2)
+    assert jobs.cancel(conn, qid) is True
+    assert jobs.get(conn, qid)["state"] == "cancelled"
+
+    rid = jobs.enqueue(conn, "gate", deck="d", hands=2)
+    with conn:
+        conn.execute("UPDATE jobs SET state='running' WHERE id=?", (rid,))
+    assert jobs.cancel(conn, rid) is False, "a running job must not be cancellable"
+    assert jobs.get(conn, rid)["state"] == "running"
+
+
+def test_active_reports_the_running_job_for_views_to_check(tmp_path):
+    from skills import db
+    from web import jobs
+    conn = db.connect(tmp_path / "j2.db")
+    assert jobs.active(conn) is None
+    jid = jobs.enqueue(conn, "gate", deck="d")
+    with conn:
+        conn.execute("UPDATE jobs SET state='running' WHERE id=?", (jid,))
+    assert jobs.active(conn)["id"] == jid
+
+
+def test_claim_takes_the_oldest_queued_job_once(tmp_path):
+    from skills import db
+    from web import jobs
+    conn = db.connect(tmp_path / "j3.db")
+    first = jobs.enqueue(conn, "gate", deck="a")
+    jobs.enqueue(conn, "gate", deck="b")
+    got = jobs.claim(conn)
+    assert got["id"] == first
+    assert jobs.claim(conn)["deck"] == "b", "claim must not re-serve a running job"

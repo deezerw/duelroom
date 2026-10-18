@@ -55,6 +55,7 @@
   <nav>
     <a href="{{ url_for('views.index') }}">decks</a>
     <a href="{{ url_for('views.import_deck') }}">import</a>
+    <a href="{{ url_for('views.job_list') }}">jobs</a>
     <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
       <button style="padding:4px 10px;font-size:12px">log out</button></form>
   </nav>

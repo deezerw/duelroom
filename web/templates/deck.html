@@ -36,6 +36,24 @@
   {% endif %}
 {% endfor %}
 
+<h2>Analyse</h2>
+<div class="panel">
+  {% if running %}
+    <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
+      Anything you start now queues behind it.</div>
+  {% endif %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+  {% for kind, label, cost in runnable %}
+    <form method="post" action="{{ url_for('views.run_job', name=name, kind=kind) }}"
+          style="margin:0">
+      <button title="{{ cost }}">{{ label }} <span class="muted">{{ cost }}</span></button>
+    </form>
+  {% endfor %}
+  </div>
+  <p class="muted" style="margin:10px 0 0">These run on the worker, one at a
+    time. You can close the tab.</p>
+</div>
+
 <h2>Export</h2>
 <div class="panel">
   <p style="margin-top:0"><a class="btn"

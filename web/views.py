@@ -8,6 +8,7 @@ from flask import (Blueprint, Response, flash, redirect, render_template,
 from skills import card_db, db, importer, meta_scrape as ms
 from skills.deck import Deck
 
+from . import jobs
 from .auth import login_required
 
 bp = Blueprint("views", __name__)
@@ -66,6 +67,8 @@ def deck(name):
         archetype=guesses[0] if guesses and guesses[0][1] >= 0.5 else None,
         alts=guesses[1:3] if guesses else [],
         ydke=importer.to_ydke(d),
+        running=jobs.active(c),
+        runnable=[(k, v[1], v[2]) for k, v in jobs.KINDS.items() if k != "meta"],
     )
 
 
@@ -111,6 +114,56 @@ def import_deck():
     c.commit()
     flash(f"Imported {d.name} ({len(d.main)}/{len(d.extra)}/{len(d.side)})")
     return redirect(url_for("views.deck", name=path.stem))
+
+
+@bp.route("/jobs")
+@login_required
+def job_list():
+    c = conn()
+    return render_template("jobs.html", running=jobs.active(c),
+                           rows=jobs.recent(c), kinds=jobs.KINDS)
+
+
+@bp.route("/jobs/<int:job_id>")
+@login_required
+def job_detail(job_id):
+    c = conn()
+    job = jobs.get(c, job_id)
+    if not job:
+        flash("No such job")
+        return redirect(url_for("views.job_list"))
+    return render_template("job.html", job=job, progress=jobs.progress(job),
+                           partial=jobs.partial(job), kinds=jobs.KINDS)
+
+
+@bp.route("/jobs/<int:job_id>/cancel", methods=["POST"])
+@login_required
+def job_cancel(job_id):
+    c = conn()
+    if jobs.cancel(c, job_id):
+        flash(f"Job {job_id} cancelled")
+    else:
+        flash("Only queued jobs can be cancelled — killing a running solver "
+              "leaves partial records that read as complete.")
+    return redirect(url_for("views.job_list"))
+
+
+@bp.route("/deck/<name>/run/<kind>", methods=["POST"])
+@login_required
+def run_job(name, kind):
+    c = conn()
+    if kind not in jobs.KINDS:
+        flash("Unknown job type")
+        return redirect(url_for("views.deck", name=name))
+    hands = request.form.get("hands", type=int) or 12
+    job_id = jobs.enqueue(c, kind, deck=name, hands=hands)
+    running = jobs.active(c)
+    if running and running["id"] != job_id:
+        flash(f"Queued as job {job_id} — job {running['id']} "
+              f"({running['kind']}) is running first.")
+    else:
+        flash(f"Queued as job {job_id}.")
+    return redirect(url_for("views.job_detail", job_id=job_id))
 
 
 @bp.route("/deck/<name>/activate", methods=["POST"])

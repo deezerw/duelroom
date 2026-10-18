@@ -53,11 +53,16 @@ making uncertainty visible, and the easy version of this UI would undo it.
 - [x] **1 — skeleton, auth, decks.** App factory, hardened login, deck list, deck
       detail with archetype inference, import (ydke / URL / .ydk upload) with the
       engine preflight, ydk + ydke export.
-- [ ] **2 — job queue.** `jobs` table, one worker, strictly one solver job at a
+- [x] **2 — job queue.** `jobs` table, one worker, strictly one solver job at a
       time (the engine takes 6 of 8 cores). Live progress. Every view that reads
       derived numbers must know a job is mid-flight — the CLI shipped a bug where
       a half-written sweep was read as complete and reported 1 of 7 decks as the
-      whole meta.
+      whole meta. Built: `jobs` table, `web/worker.py` (run exactly one),
+      self-refreshing job page, partial optimize results from the checkpoint
+      ledger shown greyed while the run continues. A crashed worker resets
+      orphaned `running` rows on restart, or they would block the queue forever.
+      Running jobs cannot be cancelled from the UI — killing a solver mid-sweep
+      is what leaves partial records that read as complete.
 - [ ] **3 — the four views.** Report, handtrap matrix, threats, line drilling.
       This is where the uncertainty design actually lives.
 - [ ] **4 — deckbuilder.** Search 14.6k cards with meta ranking, live banlist

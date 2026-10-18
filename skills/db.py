@@ -144,6 +144,27 @@ CREATE TABLE IF NOT EXISTS inclusion_history (
 );
 CREATE INDEX IF NOT EXISTS idx_incl_hist ON inclusion_history(archetype, label);
 
+-- Work queued by the web UI and executed by a single worker process.
+-- One worker means one solver job at a time by construction: the engine
+-- takes 6 of 8 cores, and two concurrent sweeps make both slower and
+-- the machine unusable.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    deck        TEXT,
+    params      TEXT NOT NULL DEFAULT '{}',
+    state       TEXT NOT NULL DEFAULT 'queued'
+                CHECK(state IN ('queued','running','done','failed','cancelled')),
+    log_path    TEXT,
+    pid         INTEGER,
+    progress    TEXT,
+    error       TEXT,
+    queued_at   TEXT NOT NULL,
+    started_at  TEXT,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state, id);
+
 CREATE TABLE IF NOT EXISTS meta (
     key    TEXT PRIMARY KEY,
     value  TEXT

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Jobs</h1>
+{% if running %}
+  <div class="panel" style="border-color:#7aa2f744">
+    <strong>Running:</strong> job {{ running.id }} — {{ kinds[running.kind][1] }}
+    {% if running.deck %}on <code>{{ running.deck }}</code>{% endif %}
+    · <a href="{{ url_for('views.job_detail', job_id=running.id) }}">watch</a>
+    <p class="muted" style="margin:6px 0 0">One solver job runs at a time. The
+      engine takes 6 of 8 cores; two sweeps at once make both slower.</p>
+  </div>
+{% else %}
+  <p class="muted">Nothing running.</p>
+{% endif %}
+
+<div class="panel">
+<table>
+  <thead><tr><th>#</th><th>job</th><th>deck</th><th>state</th>
+    <th>queued</th><th></th></tr></thead>
+  <tbody>
+  {% for j in rows %}
+    <tr>
+      <td class="mono"><a href="{{ url_for('views.job_detail', job_id=j.id) }}">{{ j.id }}</a></td>
+      <td>{{ kinds[j.kind][1] if j.kind in kinds else j.kind }}
+          <span class="muted">{{ kinds[j.kind][2] if j.kind in kinds else '' }}</span></td>
+      <td class="muted">{{ j.deck or '—' }}</td>
+      <td>
+        {% if j.state == 'done' %}<span class="pill ok">done</span>
+        {% elif j.state == 'running' %}<span class="pill active">running</span>
+        {% elif j.state == 'failed' %}<span class="pill bad">failed</span>
+        {% else %}<span class="pill">{{ j.state }}</span>{% endif %}
+      </td>
+      <td class="muted mono">{{ j.queued_at[11:16] if j.queued_at else '' }}</td>
+      <td style="text-align:right">
+        {% if j.state == 'queued' %}
+        <form method="post" action="{{ url_for('views.job_cancel', job_id=j.id) }}"
+              style="margin:0"><button style="padding:3px 9px;font-size:12px">cancel</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No jobs yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
