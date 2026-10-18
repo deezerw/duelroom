@@ -20,12 +20,39 @@ source /home/deezer/duelroom/venv/bin/activate
 python daemon.py
 ```
 
-Interactive commands at the prompt:
-- `meta <format>` — scrape/refresh meta decklists and recompute inclusion rates
-- `goldfish <deck.ydk>` — consistency run for one deck
-- `scenarios <deck.ydk>` — handtrap matrix, board breaking, floodgate checks
-- `optimize <deck.ydk>` — flex-slot and side deck search
-- `quit` / `q` — exit
+Commands (checked against the CLI by `tools/check_docs.py`):
+
+```
+  cards                     refresh the card mirror from YGOPRODeck
+  meta [days] [n]           scrape recent tournament lists (default 120 days, 500)
+  archetypes [n]            what is being played, by tournament presence
+  flex <archetype> [side]   core / flex / fringe breakdown
+  hand <deck.ydk>           exact opening-hand math
+  check <deck.ydk>          legality and banlist check
+  decks                     list .ydk files in assets/decks/
+  import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
+  mydeck [name]             show or set the deck commands default to
+  ydke <deck>               export a deck as a ydke:// URI to paste elsewhere
+  report [deck] [archetype] everything known about a deck, in one view
+  drill [deck] [n]          export best lines as EDOPro replays to practise
+  export <archetype> [name] write a scraped list out as a .ydk
+  setup                     build the merged engine card database
+  engine                    engine setup status and pinned versions
+  solve <deck> [hands]      turn-1 line search: solve rate + board quality
+  ladder <deck> [hands]     calibrate the solver budget (run this first)
+  gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
+  boards [load]             meta end-board library (what you must break)
+  threats                   interruption counts + common pieces per archetype
+  snapshot [label]          freeze today's inclusion rates for later comparison
+  drift <archetype> [a] [b] what's rising or falling between two snapshots
+  targets                   derive solver targets from the board library
+  matrix                    handtrap matrix: which handtraps to main deck
+  locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
+  optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
+  second <theirs> <ours>    going second into their real board
+  floodgates <deck>         does the deck function under common floodgates
+  help / quit
+```
 
 ## Why No Duel AI (Yet)
 
@@ -101,7 +128,10 @@ meta deck to build an end-board library → scenarios test your deck against tha
 `scripts_version`, `started`, `finished`
 
 **`trials`** — `run_id`, `seed`, `opening_hand`, `completed`, `board_score`,
-`negates`, `special_summons`, `line` (JSON action sequence)
+`negates`, `special_summons`, `line` (JSON action sequence). **`special_summons` is
+never populated** -- the solver prints summon counts to stdout but none reach the
+JSONL, and the Maxx "C"-window shortcut for deriving them was wrong (those are
+response windows). Real counts need each line replayed through ygorl.
 
 **`boards`** — end-board library: `archetype`, `board_state` (JSON), `frequency`,
 `source_run`
@@ -184,9 +214,11 @@ Honest gaps, so nobody mistakes a limit for a result:
 - **Handtrap pairs are not supported.** `--fire` takes one card per invocation and
   funnel_eval loops them separately, so Ash + Imperm together cannot be tested. Locals
   players hold more than one, so the matrix understates how stoppable a deck is.
-- **Maxx "C" and Droll measure 0% stop** because the metric only asks whether the line
-  reaches its target. Maxx "C" punishes a combo with cards rather than stopping it; that
-  0% is a blind spot, not a verdict.
+- **Maxx "C" is a measurement blind spot.** The metric asks only whether a line
+  reached its target, and 94% of Maxx "C" windows convert, so lines do continue through
+  it -- what it actually costs you, the cards it hands over, is invisible here. Droll
+  was listed alongside it until the `survives` fix; it is not a blind spot (45/85
+  windows convert, 19 hands died to it) and the earlier 0% was a reading bug.
 - **`locals.toml` holds placeholder weights** covering 55% of a stated meta that is not
   yours. Every weighted ranking inherits whatever is in that file.
 - **The side plan and floodgate check are implemented but not run at scale.** Each side

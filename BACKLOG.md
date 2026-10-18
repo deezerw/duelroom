@@ -60,6 +60,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Doc rot audited and mechanized.** CLAUDE.md documented 3 commands that never
+  existed (`goldfish`, `scenarios`) and omitted 26 that do — the command list was
+  still the one from the original plan. Regenerated from the CLI banner, and
+  `tools/check_docs.py` now fails if a doc names a command the dispatch table lacks
+  (mutation-tested). Also corrected the Maxx "C"/Droll limitation, which still
+  asserted the pre-`survives` 0% figures, and flagged `trials.special_summons` as a
+  column nothing populates.
 - **Silent no-op in my own workflow.** The 40-hand matrix launched an hour earlier
   exited in 0.0s having done nothing: funnel_eval resumes by SKIPPING decks already
   present in the output file, and it was pointed at the 12-hand results. It reported
