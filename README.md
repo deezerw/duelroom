@@ -63,7 +63,12 @@ in its own output:
   reaches its target, and those cards punish a combo rather than stopping it.
 - **`locals.toml` is a stand-in** until you edit it with your actual room.
 
-`tools/audit_fields.py` checks for the specific bug class that produced most of the
+```bash
+venv/bin/pytest tests/ -q      # 19 regression tests, under a second
+```
+
+The suite covers bugs that were actually found here, not hypothetical ones, and each
+test was verified by reintroducing its bug and watching it fail. `tools/audit_fields.py` checks for the specific bug class that produced most of the
 above: code reading a record field that is never present, silently defaulting, and
 reporting a plausible number.
 

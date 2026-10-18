@@ -25,6 +25,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
+      runs in under a second; there is no excuse for skipping it.
+
 - [ ] IN FLIGHT: 40-hand board library rebuild (`results/boards40.log`). Pick up the
       result, load it, and re-derive targets from the bigger sample.
 - [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
@@ -51,6 +54,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Regression suite** (`tests/test_regressions.py`, 19 tests, 0.11s). Covers the bugs
+  actually found here: hypergeometric identities, ydke/ydk round-trips, list_hash
+  multiplicity, target ranking (extra-deck over frequency, built over dealt, one target
+  because a list is a conjunction), trivial_targets on saved specs, write_targets
+  merging, no_window not counted as survival, a never-live handtrap scoring zero,
+  hybrid weight splitting, best-not-last hill climbing, and 1-for-1 siding.
+  **Mutation-tested**: reintroducing three of the fixed bugs failed exactly the three
+  corresponding tests.
 - **Meta drift machinery** (`snapshot` / `drift`). Drift needs TIME: slicing the one
   scrape by date gives 25 decks in the last 30 days against 485 in 120, i.e. 2-5 lists
   per archetype, which measures noise. So `snapshot` freezes inclusion rates under a
