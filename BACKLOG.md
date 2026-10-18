@@ -34,7 +34,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
       sent to GY, and a plausible-but-wrong number is the failure mode this project
       keeps hitting. Do it properly when CPU is free.
 - [ ] Meta drift: diff inclusion rates across scrapes to surface rising tech cards.
-- [ ] Push to GitHub (user approved).
 
 ## BLOCKED / WON'T DO
 
@@ -51,6 +50,10 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Pushed to GitHub**: https://github.com/deezerw/duelroom (PRIVATE, 36 commits).
+  Secret-scanned before pushing; venv/vendor/data/results all excluded, so only the
+  33 source files went up. Added a README whose "read the numbers carefully" section
+  lists what the tool reports that is weaker than it looks.
 - **Bug sweep #2 (systematic).** Added `tools/audit_fields.py`: compares every record
   field the parser modules read against every field that actually exists in stored
   records. Three bugs tonight had that exact shape and none of them raised. Codebase
