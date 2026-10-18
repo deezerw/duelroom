@@ -369,14 +369,19 @@ def cmd_threats(conn, args):
     if not prof:
         print("board library empty — run `boards load`")
         return
+    mine = db.get_meta(conn, "active_deck")
     counts = sorted({n for d in prof.values() for n in d})
-    print("  share of end boards by interruption count\n")
+    print("  share of end boards by interruption count")
+    print("  These are decks you will SIT ACROSS FROM: a higher mean is a")
+    print("  harder board for you to break. The opposite reading applies to")
+    print("  any row marked (yours).\n")
     print("  " + "archetype".ljust(28) + "".join(f"{n:>7}" for n in counts) + "    mean")
     for arch, dist in sorted(prof.items(),
                              key=lambda kv: -sum(k*v for k, v in kv[1].items())):
         mean = sum(k * v for k, v in dist.items())
         cells = "".join(f"{dist.get(n,0)*100:6.0f}%" for n in counts)
-        print(f"  {arch.ljust(28)}{cells}  {mean:6.1f}")
+        tag = "  (yours)" if mine and config.slug(arch) == config.slug(mine) else ""
+        print(f"  {arch.ljust(28)}{cells}  {mean:6.1f}{tag}")
 
     print("\n  visible board vs cards held in hand\n")
     print("  " + "archetype".ljust(28) + "  on field   in hand")
@@ -497,6 +502,9 @@ def cmd_matrix(conn, args):
     print("  SURVIVAL — of the windows where the handtrap could be used,")
     print("  how often the line still completed. Lower is better for you.")
     print("  '-' means it never had a legal window in any solved hand.\n")
+    mine = db.get_meta(conn, "active_deck")
+    def _tag(deck):
+        return "  (yours: high is GOOD)" if mine and config.slug(deck) == config.slug(mine) else ""
     print("  " + "deck".ljust(26) + "".join(f"{short[c]:>10}" for c in codes))
     for deck, data in sorted(m.items()):
         cells = ""
@@ -504,7 +512,7 @@ def cmd_matrix(conn, args):
             cell = data["cells"].get(c)
             v = cell["survival"] if cell else None
             cells += "         -" if v is None else f"{v*100:9.0f}%"
-        print(f"  {deck.ljust(26)}{cells}")
+        print(f"  {deck.ljust(26)}{cells}{_tag(deck)}")
 
     print("\n  WINDOW RATE — how often it was live at all.")
     print("  A handtrap with no window is useless here for a different")

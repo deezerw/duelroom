@@ -289,7 +289,13 @@ def handtrap_matrix(records):
                 if st == "no_window":
                     continue
                 tested[code] += 1
-                if st == "solved":      # line still completed
+                # `survives` is authoritative. `status` reports whether the
+                # SEARCH succeeded, not whether the line lived: an entry can
+                # read status "solved" with windows 6, converted 3,
+                # survives False -- the solver searched fine and the line
+                # still died in half its windows. Reading status as survival
+                # flipped Infinite Impermanence from a correct 0% to 100%.
+                if f.get("survives"):
                     survived[code] += 1
         row = {}
         for code in offered:

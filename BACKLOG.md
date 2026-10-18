@@ -54,6 +54,17 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **SELF-CORRECTION: my no_window fix read the wrong field.** `status` on a fire entry
+  reports whether the SEARCH succeeded, not whether the line lived — an entry can read
+  status "solved" with windows 6, converted 3, survives False. I used status, which
+  flipped Infinite Impermanence from a correct 0% to a wrong 100%, and `report` and
+  `matrix` then disagreed about the same deck. Now uses the authoritative `survives`
+  boolean while keeping the no_window exclusion. The result agrees with upstream on 5
+  of 7 cards and differs on exactly the two where upstream is wrong (Nibiru: 0 windows,
+  upstream calls it 100% survival; Ghost Ogre: upstream counts 2 no-window hands as
+  survived). Caught only because two commands printed different numbers for one deck.
+- **Direction markers**: `threats` and `matrix` now tag your active deck "(yours)" and
+  state which way is good, since the same number inverts depending on whose deck it is.
 - **Sign audit.** The same survival number means opposite things in two commands:
   `matrix` reports OPPONENT decks where low is good for you, `report` reports YOUR
   deck where low means you fold. `report` gave no direction, so a reader coming from

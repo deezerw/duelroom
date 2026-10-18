@@ -149,22 +149,39 @@ def test_write_targets_merges_instead_of_clobbering(tmp_path):
 # Bug: funnel_eval's summary counts a `no_window` outcome as a survival,
 # which inverts the answer (Nibiru read 90% survival on 9 no_window + 1 stop).
 
-def _funnel(deck, fire_statuses):
+def _funnel(deck, fire_entries):
+    """fire_entries: list of (status, survives)."""
     return {
-        "summary": {"deck": deck, "solved": len(fire_statuses), "hands": len(fire_statuses)},
+        "summary": {"deck": deck, "solved": len(fire_entries),
+                    "hands": len(fire_entries)},
         "hands": [
-            {"status": "solved", "fire": {"27204311": {"status": st}}}
-            for st in fire_statuses
+            {"status": "solved",
+             "fire": {"27204311": {"status": st, "survives": sv}}}
+            for st, sv in fire_entries
         ],
     }
 
 
 def test_no_window_is_not_counted_as_survival():
-    rec = _funnel("d", ["no_window"] * 9 + ["unsolved"])
+    rec = _funnel("d", [("no_window", False)] * 9 + [("unsolved", False)])
     cell = scenarios.handtrap_matrix([rec])["d"]["cells"][27204311]
     assert cell["tested"] == 1, "no_window must not count as a tested window"
     assert cell["survival"] == 0.0, "the one real window STOPPED the line"
     assert cell["window_rate"] == pytest.approx(0.1)
+
+
+def test_status_solved_does_not_mean_the_line_survived():
+    # A fire entry can read status "solved" (the SEARCH succeeded) with
+    # survives False (the line died in most of its windows). Reading
+    # status as survival flipped Infinite Impermanence from 0% to 100%.
+    rec = _funnel("d", [("solved", False)] * 10)
+    cell = scenarios.handtrap_matrix([rec])["d"]["cells"][27204311]
+    assert cell["tested"] == 10
+    assert cell["survival"] == 0.0, "status=solved must not imply survival"
+
+    rec2 = _funnel("d", [("solved", True)] * 4 + [("solved", False)] * 6)
+    cell2 = scenarios.handtrap_matrix([rec2])["d"]["cells"][27204311]
+    assert cell2["survival"] == pytest.approx(0.4)
 
 
 def test_handtrap_never_live_cannot_rank_well():
@@ -247,3 +264,16 @@ def test_blind_spots_are_not_in_the_judgeable_set():
     judged = [t for t in live if int(t[1]) not in scenarios.BLIND_SPOTS]
     assert len(judged) == 1
     assert judged[0][1] == 10045474
+
+
+# --- direction labelling -------------------------------------------------
+# Bug: handtrap survival means the opposite thing for your own deck
+# (high is good) versus an opponent's (low is good), and `report` and
+# `threats` printed it with no direction at all.
+
+def test_slug_matches_deck_names_across_spellings():
+    # the "(yours)" marker depends on this matching file stems to the
+    # archetype names used in tables
+    assert config.slug("Kewl Tune") == config.slug("kewl-tune")
+    assert config.slug("Light and Darkness Ritual") == "light-and-darkness-ritual"
+    assert config.slug("kewl-tune") == "kewl-tune"
