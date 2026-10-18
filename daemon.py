@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, engine, gate,
-                    meta_scrape as ms, optimizer, scenarios, stats)
+                    importer, meta_scrape as ms, optimizer, scenarios,
+                    stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +30,9 @@ duelroom — Yu-Gi-Oh! deck laboratory
   hand <deck.ydk>           exact opening-hand math
   check <deck.ydk>          legality and banlist check
   decks                     list .ydk files in assets/decks/
+  import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
+  mydeck [name]             show or set the deck commands default to
+  ydke <deck>               export a deck as a ydke:// URI to paste elsewhere
   export <archetype> [name] write a scraped list out as a .ydk
   setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
@@ -51,7 +55,20 @@ def _since(days):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
-def _resolve_deck(arg):
+def _resolve_deck(arg, conn=None):
+    """Find a deck by path or name, falling back to the active deck.
+
+    Passing nothing is the common case once `mydeck` is set, so every
+    command that takes a deck accepts being called bare.
+    """
+    if not arg:
+        if conn is None:
+            return None
+        name = db.get_meta(conn, "active_deck")
+        if not name:
+            return None
+        cand = DECKS / f"{name}.ydk"
+        return cand if cand.exists() else None
     p = Path(arg)
     if p.exists():
         return p
@@ -127,10 +144,10 @@ def cmd_flex(conn, args):
 
 
 def cmd_hand(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: hand <deck.ydk>")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -159,10 +176,10 @@ def cmd_hand(conn, args):
 
 
 def cmd_check(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: check <deck.ydk>")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -213,10 +230,10 @@ def cmd_engine(conn, args):
 
 
 def cmd_solve(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: solve <deck.ydk> [hands]")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -235,10 +252,10 @@ def cmd_solve(conn, args):
 
 
 def cmd_ladder(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: ladder <deck.ydk> [hands]")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -258,10 +275,10 @@ def cmd_ladder(conn, args):
 
 
 def cmd_gate(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: gate <deck.ydk> [hands] [solve_ms]")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -451,7 +468,7 @@ def cmd_optimize(conn, args):
     if len(args) < 2:
         print("usage: optimize <deck.ydk> <archetype> [hands] [rounds]")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -506,7 +523,7 @@ def cmd_second(conn, args):
     if len(args) < 2:
         print("usage: second <their_deck> <our_deck> [hands]")
         return
-    theirs, ours = _resolve_deck(args[0]), _resolve_deck(args[1])
+    theirs, ours = _resolve_deck(args[0], conn), _resolve_deck(args[1], conn)
     if not theirs or not ours:
         print("deck not found")
         return
@@ -539,10 +556,10 @@ def cmd_second(conn, args):
 
 
 def cmd_floodgates(conn, args):
-    if not args:
+    if not args and not db.get_meta(conn, "active_deck"):
         print("usage: floodgates <deck.ydk> [hands]")
         return
-    path = _resolve_deck(args[0])
+    path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
@@ -593,6 +610,80 @@ def cmd_export(conn, args):
     print(f"wrote {name}.ydk — {row['title']} ({row['placement']}) {d}")
 
 
+def cmd_import(conn, args):
+    if not args:
+        print("usage: import <.ydk path | ydke://... | ygoprodeck deck URL> [name]")
+        print("  the ydke:// form is what most deckbuilders put on your clipboard")
+        return
+    source = args[0]
+    name = " ".join(args[1:]) if len(args) > 1 else None
+    try:
+        deck = importer.load(source, name)
+    except Exception as e:
+        print(f"import failed: {e}")
+        return
+
+    unresolved = deck.canonicalise(conn)
+    path = importer.save(deck, name)
+    print(f"imported {deck!r} -> {path}")
+    if unresolved:
+        print(f"  warning: {len(unresolved)} passcode(s) not in the card mirror "
+              f"— run `cards` to refresh")
+
+    problems = deck.validate(conn)
+    if problems:
+        print("  legality:")
+        for p in problems:
+            print(f"    ! {p}")
+    else:
+        print("  legality: legal")
+
+    bad = carddb.check_deck(deck)
+    if bad:
+        print(f"  ! {len(bad)} card(s) the ENGINE cannot load — solver runs on this")
+        print("    deck would segfault. Try `setup` to rebuild the merged database.")
+
+    db.set_meta(conn, "active_deck", deck.name)
+    conn.commit()
+    print(f"  set as your active deck (`mydeck` to change)")
+
+
+def cmd_mydeck(conn, args):
+    if args:
+        path = _resolve_deck(args[0], conn)
+        if not path:
+            print(f"no such deck: {args[0]} (see `decks`)")
+            return
+        db.set_meta(conn, "active_deck", path.stem)
+        conn.commit()
+        print(f"active deck is now {path.stem}")
+        return
+    name = db.get_meta(conn, "active_deck")
+    if not name:
+        print("no active deck — `import` one, or `mydeck <name>` to pick an existing")
+        return
+    path = DECKS / f"{name}.ydk"
+    if not path.exists():
+        print(f"active deck {name!r} no longer on disk")
+        return
+    deck = Deck.from_ydk(path)
+    deck.canonicalise(conn)
+    print(f"{deck!r}")
+    problems = deck.validate(conn)
+    print("  legality:", "legal" if not problems else "")
+    for p in problems:
+        print(f"    ! {p}")
+    print("\n  commands that take a deck will use this one when called bare")
+
+
+def cmd_ydke(conn, args):
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print("usage: ydke <deck>  (or set one with `mydeck`)")
+        return
+    print(importer.to_ydke(Deck.from_ydk(path)))
+
+
 def cmd_decks(conn, args):
     DECKS.mkdir(parents=True, exist_ok=True)
     files = sorted(DECKS.glob("*.ydk"))
@@ -611,6 +702,9 @@ COMMANDS = {
     "hand": cmd_hand,
     "check": cmd_check,
     "decks": cmd_decks,
+    "import": cmd_import,
+    "mydeck": cmd_mydeck,
+    "ydke": cmd_ydke,
     "export": cmd_export,
     "setup": cmd_setup,
     "engine": cmd_engine,
