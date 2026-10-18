@@ -58,6 +58,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **`engine.duel` parameters verified.** It is used by nothing today, so it was
+  unverified surface a bot-vs-bot stage would rest on. seed, first, agent_a/agent_b
+  and max_turns each demonstrably change the result. `max_turns` is consistently OFF
+  BY ONE against the obvious reading — the game stops as turn N+1 begins, so
+  max_turns=1 gives two turns — which is upstream's contract, now documented and
+  pinned by a test so a change upstream is noticed.
 - **Corrected a claim I made twice.** I wrote — when killing memoization, and again
   in CLAUDE.md — that a one-card swap changes every dealt hand. Measured over 80
   (candidate, seed) pairs it leaves the hand UNCHANGED 55% of the time. The

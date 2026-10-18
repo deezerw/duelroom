@@ -171,6 +171,17 @@ def duel(deck_a, deck_b, seed=0, agent_a="greedy", agent_b="greedy",
 
     Used for Stage 4+ gauntlets. The solitaire work goes through
     `solve_blocking` instead -- it needs no opponent at all.
+
+    `max_turns` is OFF BY ONE against the obvious reading, consistently:
+    the game stops as turn N+1 begins, so max_turns=1 reports two turns
+    and max_turns=6 reports seven, each with reason "turn_limit". That
+    is upstream's contract, not a defect, but anyone capping at 1 to
+    goldfish a single turn gets two. Verified for N in 1, 2, 4, 6.
+
+    Every parameter here was checked to actually take effect -- seed,
+    first, agent_a/agent_b and max_turns each change the result -- after
+    a configuration value elsewhere in this project turned out to be
+    written and then ignored.
     """
     require()
     # Resolved: subprocesses run with cwd=VENDOR, so relative paths from

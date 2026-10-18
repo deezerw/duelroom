@@ -727,3 +727,22 @@ def test_a_one_card_swap_often_leaves_the_hand_unchanged():
     assert total and same > 0, (
         "a one-card swap must sometimes leave the hand identical; if this "
         "ever reads 0 the paired-comparison reasoning needs revisiting")
+
+
+# --- engine.duel parameter contract --------------------------------------
+# duel() is currently used by nothing, which makes it unverified surface
+# that a bot-vs-bot stage would rest on. Each knob was checked to take
+# effect; max_turns has a surprising contract worth pinning.
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parent.parent / "vendor" / "ygorl").exists(),
+    reason="engine not built")
+def test_max_turns_is_off_by_one_and_stays_that_way():
+    from skills import engine
+    A = "assets/decks/kewl-tune.ydk"
+    B = "assets/decks/sky-striker.ydk"
+    r = engine.duel(A, B, seed=0, max_turns=2)
+    assert r["reason"] == "turn_limit"
+    assert r["turns"] == 3, (
+        "upstream stops as turn N+1 begins; if this becomes 2 the contract "
+        "changed and callers capping turns need revisiting")
