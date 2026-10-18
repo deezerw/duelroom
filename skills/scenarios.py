@@ -76,9 +76,19 @@ def derive_targets(jsonl_path, per_deck=1, min_hits=1):
     you manage to set a card" measures nothing, and every downstream
     number inherits that emptiness.
 
-    So targets are scored first by where they end up -- a monster you
-    assembled beats a card you set, which beats a card merely in hand --
-    and then by how often the deck reaches them.
+    The strongest signal is whether the target lives in the EXTRA deck.
+    An extra-deck monster is available whenever the engine works; a
+    main-deck one-of has to be DRAWN, so making it the goal measures draw
+    luck rather than the deck. Blitzclique derived "Called by the Grave",
+    a main-deck 1-of, and then gated at 0/12 -- while the same deck
+    solved 6/6 under per-hand automatic targets. Six of the seven meta
+    decks that behave well target an extra-deck monster; the one that
+    does not (elfnote, on a main-deck Ars Magna) was quietly suspect for
+    the same reason.
+
+    After that: where the target ends up -- a monster you assembled beats
+    a card you set, which beats a card merely in hand -- and then how
+    often the deck reaches it.
 
     Frequency, not line length, is the right second key. Line length is
     only available per RECORD, so every target in one record shares a
@@ -98,12 +108,14 @@ def derive_targets(jsonl_path, per_deck=1, min_hits=1):
         for l in Path(jsonl_path).read_text().splitlines()
         if l.strip()
     ]
-    stats = {}
+    stats, extras = {}, {}
     for r in records:
         if r.get("status") != "solved":
             continue
         d = r.get("deck")
         name = d.get("name") if isinstance(d, dict) else str(d)
+        if isinstance(d, dict):
+            extras.setdefault(name, set()).update(d.get("extra") or [])
         lines = r.get("lines") or []
         actions = max((len(l.get("actions") or []) for l in lines), default=0)
         for t in (r.get("targets") or []):
@@ -117,7 +129,9 @@ def derive_targets(jsonl_path, per_deck=1, min_hits=1):
         scored = []
         for spec, acc in cand.items():
             mean_actions = sum(acc["actions"]) / len(acc["actions"])
+            code = int(spec.split("@")[0])
             scored.append((
+                1 if code in extras.get(deck, ()) else 0,  # always makeable
                 _zone_rank(spec),          # built > set > held
                 acc["hits"],               # the deck's characteristic payoff
                 mean_actions,              # weak tiebreak, see below
@@ -125,13 +139,14 @@ def derive_targets(jsonl_path, per_deck=1, min_hits=1):
             ))
         scored.sort(reverse=True)
         kept = [spec for *_, spec in scored[:per_deck]
-                if cand[spec]["hits"] >= min_hits] or [scored[0][3]]
+                if cand[spec]["hits"] >= min_hits] or [scored[0][-1]]
         best = scored[0]
         out[deck] = {
             "targets": kept,
             "fire": sorted(HANDTRAPS),
-            "_zone_rank": best[0],
-            "_mean_actions": round(best[1], 1),
+            "_extra": best[0],
+            "_zone_rank": best[1],
+            "_mean_actions": round(best[3], 1),
         }
     return out
 
@@ -150,6 +165,10 @@ def trivial_targets(derived):
             continue
         rank = spec.get("_zone_rank", 3)
         acts = spec.get("_mean_actions", 99)
+        if not spec.get("_extra", 1):
+            bad.append((deck, "best target is a main-deck card that must be "
+                              "DRAWN — measures draw luck, not the deck"))
+            continue
         # Zone is the trustworthy signal. The action count is only
         # available per record, so every target in a record shares one
         # number -- relying on it alone flagged branded's Mirrorjade as
@@ -165,18 +184,32 @@ def trivial_targets(derived):
 
 
 def write_targets(jsonl_path, out_path, per_deck=1, min_hits=2):
+    """Refresh targets from a solve run, MERGING into what is already there.
+
+    This must not clobber. The file holds two kinds of entry: meta decks
+    derived from the board library, and user decks derived on demand by
+    `ensure_target` at the cost of a solve pass each. Rebuilding it
+    wholesale from the board library silently deleted every user deck --
+    import your list, spend minutes deriving its target, run `targets` to
+    refresh the meta, and it is gone with no error.
+    """
     targets = derive_targets(jsonl_path, per_deck, min_hits)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     for spec in targets.values():
         for k in ("_built_targets", "_zone_rank", "_mean_actions"):
             spec.pop(k, None)
+
+    existing = load_targets(out_path)
+    existing.pop("_comment", None)
+    kept = {k: v for k, v in existing.items() if k not in targets}
     payload = {
         "_comment": (
-            "Derived by duelroom from solve_blocking results: the targets "
-            "each deck actually reached most often. Regenerate after a "
-            "meta refresh."
+            "Derived by duelroom: the substantive target each deck reaches "
+            "most often. Refreshing merges — entries for decks absent from "
+            "the latest solve run are preserved."
         ),
+        **kept,
         **targets,
     }
     out_path.write_text(json.dumps(payload, indent=1))

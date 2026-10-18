@@ -25,8 +25,10 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Run `gate Blitzclique` end-to-end now that targets resolve, to confirm the whole
-      user-deck path works. Expect weak numbers — its target is flagged trivial.
+- [ ] VERIFY `results/blitz_retarget.log` — a 16-hand solve looking for an EXTRA-deck
+      target for Blitzclique. If one is found, re-run `gate Blitzclique` (it was 0/12
+      on the main-deck target). If none is found, that deck genuinely has no reliable
+      payoff board and its numbers should stay flagged.
 - [ ] Bug sweep: grep for the patterns that already bit us —
       `.get(` on a `sqlite3.Row`, metrics that count a missing window as a success,
       any place a list is treated as alternatives when it is a conjunction.
@@ -50,6 +52,15 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **Targets must be EXTRA-deck** — the strongest signal, now the top ranking key. A
+  main-deck one-of has to be DRAWN, so targeting it measures draw luck: Blitzclique
+  derived "Called by the Grave" and gated 0/12 while the same deck solved 6/6 under
+  per-hand automatic targets. Six of seven working meta targets were already extra
+  deck; the exception (elfnote on main-deck Ars Magna) was quietly suspect and is now
+  fixed to Mediclius.
+- **write_targets MERGES** instead of rebuilding. It was deleting every on-demand user
+  deck target on a meta refresh — import a list, spend minutes deriving its target,
+  run `targets`, lose it silently.
 - **Target quality** — derived targets are now ranked by SUBSTANCE (zone: a monster you
   assembled > a card you set > a card in hand), then by how often the deck reaches
   them. Frequency, not line length, is the right second key: line length is only
