@@ -387,6 +387,12 @@ def cmd_targets(conn, args):
     print(f"derived targets for {len(t)} decks -> {out}\n")
     for deck, named in scenarios.describe_targets(conn, t):
         print(f"  {deck:28} {', '.join(named)}")
+    weak = scenarios.trivial_targets(scenarios.derive_targets(src))
+    if weak:
+        print("\n  weak targets — these decks build little, so their solve rate")
+        print("  and handtrap survival mean less than the numbers suggest:")
+        for deck, reason in weak:
+            print(f"    {deck}: {reason}")
 
 
 def cmd_locals(conn, args):

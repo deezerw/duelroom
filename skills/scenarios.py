@@ -41,60 +41,127 @@ FLOODGATES = {
 }
 
 
-def derive_targets(jsonl_path, per_deck=1, min_hits=2):
+# How much a target's zone implies you actually BUILT something.
+# Higher is more substantive. A monster you assembled on the field is a
+# payoff; a card you set from your hand is a draw plus one action.
+ZONE_RANK = {
+    "atk": 3, "def": 3, "": 3,          # on the field, summoned
+    "grave": 2, "banished": 2, "removed": 2,
+    "szone": 1, "szone:fd": 1,          # set backrow
+    "hand": 0,                           # not built at all
+}
+
+# Below this many actions a target is reached incidentally rather than
+# worked towards, and firing a handtrap at it measures nothing.
+TRIVIAL_ACTIONS = 4
+
+
+def _zone_of(spec):
+    return spec.split("@", 1)[1] if "@" in spec else ""
+
+
+def _zone_rank(spec):
+    return ZONE_RANK.get(_zone_of(spec), 1)
+
+
+def derive_targets(jsonl_path, per_deck=1, min_hits=1):
     """Build a funnel_eval targets file from solve_blocking results.
 
-    Counts the targets each deck actually reached and keeps the most
-    common. A target reached once in twelve hands is noise, so `min_hits`
-    filters those out unless nothing else qualifies.
+    Ranked by SUBSTANCE, not frequency. ygorl's automatic target planner
+    will happily propose "Droll in hand" or "Called by the Grave set
+    face-down" for a deck with no real payoff board, and taking the most
+    common proposal then picks exactly those: Blitzclique derived
+    "Called by the Grave@szone:fd", reached in 6 actions, with the whole
+    six-hand solve finishing in two seconds. Firing Ash Blossom at "did
+    you manage to set a card" measures nothing, and every downstream
+    number inherits that emptiness.
 
-    ONE target per deck by default. A targets list is a CONJUNCTION -- the
-    final board must contain every entry (batch.py checks it with
-    `board_summary_missing`, and `_check_targets` counts all of them) --
-    so two targets demands both at once, which is far harder than either
-    and reads as a brick when they rarely co-occur. Measured: branded went
-    from 11/12 solved with per-hand auto targets to bricking repeatedly on
-    a two-target conjunction. ygorl's own curated file uses a single
-    target for nine of its ten decks; the exception is labrynth, whose
-    real board genuinely is a pair. Raise `per_deck` only when a deck's
-    signature board is itself a combination.
+    So targets are scored first by where they end up -- a monster you
+    assembled beats a card you set, which beats a card merely in hand --
+    and then by how often the deck reaches them.
+
+    Frequency, not line length, is the right second key. Line length is
+    only available per RECORD, so every target in one record shares a
+    number and it cannot discriminate within a hand; ordering by it
+    picked generic extra-deck monsters that happen to sit in long lines
+    (S:P Little Knight for Sky Striker, F.A. Dawn Dragster for
+    Fiendsmith) over each deck's own boss. Frequency recovers Sky Striker
+    Ace = Zero, Fiendsmith's Desirae, Kewl Tune RS and Red-Eyes Dark
+    Dragoon -- the cards those decks are actually trying to make.
+
+    A targets list is also a CONJUNCTION -- the final board must contain
+    every entry -- so one per deck by default. ygorl's own curated file
+    uses a single target for nine of its ten decks.
     """
     records = [
         json.loads(l)
         for l in Path(jsonl_path).read_text().splitlines()
         if l.strip()
     ]
-    hits = {}
+    stats = {}
     for r in records:
         if r.get("status") != "solved":
             continue
         d = r.get("deck")
         name = d.get("name") if isinstance(d, dict) else str(d)
-        hits.setdefault(name, Counter()).update(r.get("targets") or [])
+        lines = r.get("lines") or []
+        actions = max((len(l.get("actions") or []) for l in lines), default=0)
+        for t in (r.get("targets") or []):
+            acc = stats.setdefault(name, {}).setdefault(
+                t, {"hits": 0, "actions": []})
+            acc["hits"] += 1
+            acc["actions"].append(actions)
 
     out = {}
-    for deck, counter in hits.items():
-        ranked = counter.most_common()
-        # Prefer targets that are BUILT over targets that are DEALT. An
-        # "@hand" target only asks that a card be in hand, which a draw can
-        # satisfy without the deck doing anything -- firing a handtrap at
-        # that measures nothing. Branded derived two @hand targets
-        # (Whisker Blitzclique, Droll) purely because it ends on almost no
-        # visible board.
-        built = [(t, n) for t, n in ranked if "@hand" not in t]
-        dealt = [(t, n) for t, n in ranked if "@hand" in t]
-        ordered = built + dealt
-
-        kept = [t for t, n in ordered if n >= min_hits][:per_deck]
-        if not kept and ordered:
-            kept = [ordered[0][0]]
-        if kept:
-            out[deck] = {
-                "targets": kept,
-                "fire": sorted(HANDTRAPS),
-                "_built_targets": sum(1 for t in kept if "@hand" not in t),
-            }
+    for deck, cand in stats.items():
+        scored = []
+        for spec, acc in cand.items():
+            mean_actions = sum(acc["actions"]) / len(acc["actions"])
+            scored.append((
+                _zone_rank(spec),          # built > set > held
+                acc["hits"],               # the deck's characteristic payoff
+                mean_actions,              # weak tiebreak, see below
+                spec,
+            ))
+        scored.sort(reverse=True)
+        kept = [spec for *_, spec in scored[:per_deck]
+                if cand[spec]["hits"] >= min_hits] or [scored[0][3]]
+        best = scored[0]
+        out[deck] = {
+            "targets": kept,
+            "fire": sorted(HANDTRAPS),
+            "_zone_rank": best[0],
+            "_mean_actions": round(best[1], 1),
+        }
     return out
+
+
+def trivial_targets(derived):
+    """Decks whose best available target is not worth measuring.
+
+    Returns [(deck, reason)]. These are not failures of the solver --
+    some decks genuinely do not build a board -- but their solve rate
+    and handtrap survival mean much less than they look like they do,
+    and saying so is better than quietly reporting a confident number.
+    """
+    bad = []
+    for deck, spec in derived.items():
+        if deck.startswith("_"):
+            continue
+        rank = spec.get("_zone_rank", 3)
+        acts = spec.get("_mean_actions", 99)
+        # Zone is the trustworthy signal. The action count is only
+        # available per record, so every target in a record shares one
+        # number -- relying on it alone flagged branded's Mirrorjade as
+        # "reached in 1 action", which is plainly false. It is used only
+        # to sharpen the message for targets already suspect by zone.
+        if rank <= 0:
+            bad.append((deck, "best target is only a card in hand"))
+        elif rank <= 1:
+            detail = (f", reached in about {acts:.0f} actions"
+                      if acts < TRIVIAL_ACTIONS else "")
+            bad.append((deck, f"best target is a set card, not a board{detail}"))
+    return bad
 
 
 def write_targets(jsonl_path, out_path, per_deck=1, min_hits=2):
@@ -102,7 +169,8 @@ def write_targets(jsonl_path, out_path, per_deck=1, min_hits=2):
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     for spec in targets.values():
-        spec.pop("_built_targets", None)
+        for k in ("_built_targets", "_zone_rank", "_mean_actions"):
+            spec.pop(k, None)
     payload = {
         "_comment": (
             "Derived by duelroom from solve_blocking results: the targets "
@@ -336,6 +404,11 @@ def ensure_target(deck, hands=6, solve_ms=None, path=None, log=print):
         log(f"  {name} reached no target in {hands} hands — it may brick a lot, "
             f"or need a bigger budget (`ladder {name}`)")
         return None
+
+    for _, reason in trivial_targets({name: spec}):
+        log(f"  ! {name}: {reason}. Solve rate and handtrap survival for this")
+        log(f"    deck will look better than they mean — there is little in")
+        log(f"    that line to interrupt.")
 
     allt = load_targets(path)
     allt[name] = {"targets": spec["targets"], "fire": sorted(HANDTRAPS)}

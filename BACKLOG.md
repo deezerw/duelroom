@@ -25,9 +25,8 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] VERIFY: `results/ensure_target.log` — background derivation for the imported
-      Blitzclique deck. If it found a target, run `gate Blitzclique` to confirm the
-      whole path works for a user deck. If it found none in 6 hands, try `ladder`.
+- [ ] Run `gate Blitzclique` end-to-end now that targets resolve, to confirm the whole
+      user-deck path works. Expect weak numbers — its target is flagged trivial.
 - [ ] Bug sweep: grep for the patterns that already bit us —
       `.get(` on a `sqlite3.Row`, metrics that count a missing window as a success,
       any place a list is treated as alternatives when it is a conjunction.
@@ -51,6 +50,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **Target quality** — derived targets are now ranked by SUBSTANCE (zone: a monster you
+  assembled > a card you set > a card in hand), then by how often the deck reaches
+  them. Frequency, not line length, is the right second key: line length is only
+  available per record so it cannot discriminate within a hand, and ordering by it
+  picked generic extra-deck monsters (S:P Little Knight, F.A. Dawn Dragster) over each
+  deck's own boss. All seven meta decks now derive their archetype payoff —
+  Mirrorjade, Desirae, Kewl Tune RS, Red-Eyes Dark Dragoon, Sky Striker Ace = Zero.
+  `trivial_targets` flags decks whose best target is not worth measuring.
 - **On-demand targets** (`scenarios.ensure_target`): a freshly imported deck had no
   target, so gate/optimize/second/floodgates died with a bare CalledProcessError that
   read like a crash. Now derives one via solve_blocking on first use and caches it.
