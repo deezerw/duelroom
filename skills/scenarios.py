@@ -48,7 +48,6 @@ BLIND_SPOTS = {
 }
 
 MAXX_C = 23434538
-NIBIRU_THRESHOLD = 5  # special summons before Nibiru can be used
 
 
 # Common floodgates for the Stage 4 static check. Locals run these far more
@@ -562,17 +561,34 @@ def target_is_extra(conn, deck_path, target):
     return 1 if code in set(d.extra) else 0
 
 
-# --- summon counts, for free -------------------------------------------
+NIBIRU = 27204311
 
-def summon_counts(records):
-    """Special summons per line, per deck.
+# window_anomalies() lived here. It flagged decks that "cleared 5 special
+# summons but reported zero Nibiru windows", and its summon count came
+# from Maxx "C" windows -- which are response windows, not summons. With
+# that premise gone the contradiction it detected was not one: kewl-tune
+# runs a 4-action line and may simply never make five special summons,
+# so zero Nibiru windows is a plausible measurement rather than an
+# artifact. Removed along with the ranking exclusion it justified.
 
-    Maxx "C" opens a window on every special summon, so the `windows`
-    count on its fire entry IS the summon count. STAGE3 deferred this as
-    needing each line replayed through ygorl; it was sitting in the
-    matrix data the whole time.
+# --- response windows -------------------------------------------
 
-    Returns {deck: {"mean", "max", "nibiru_rate", "n"}}.
+def response_windows(records):
+    """How many times the opponent gets to respond during a line.
+
+    NOT special summons. An earlier version of this claimed Maxx "C"
+    windows were the summon count, on the reasoning that Maxx "C" draws
+    on every special summon. That is what the card DOES once resolved;
+    its activation has no condition at all, so the solver offers it at
+    essentially every response window. Measured: the count correlates
+    with line length at r = 0.937, and branded averages 1.0 actions
+    against 6.8 "summons", which is not physically possible.
+
+    What it does measure is useful on its own terms -- the interruption
+    surface of a line. More windows is more chances for an opponent to
+    interact, independent of what they hold.
+
+    Returns {deck: {"mean", "max", "n"}}.
     """
     out = {}
     for rec in records:
@@ -591,47 +607,9 @@ def summon_counts(records):
         out[deck] = {
             "mean": sum(counts) / len(counts),
             "max": max(counts),
-            "nibiru_rate": sum(1 for c in counts
-                               if c >= NIBIRU_THRESHOLD) / len(counts),
             "n": len(counts),
         }
     return out
 
 
 NIBIRU = 27204311
-
-
-def window_anomalies(records):
-    """Decks whose Nibiru row contradicts their own summon count.
-
-    Nibiru needs five special summons. Maxx "C" opens a window on each
-    one, so its window count is a lower bound on how many summons
-    happened. When a deck clears five by that count and Nibiru still
-    reports zero legal windows, the two measurements disagree and
-    Nibiru's row cannot be read as "never live" -- kewl-tune averages
-    8.4 summons per line and reports no Nibiru window at all, while
-    fiendsmith at 20.1 reports 90.
-
-    The cause is upstream in how the solver offers that window and is
-    not resolved here. Flagging it is the honest move: an unexplained
-    zero presented as a measurement is worse than one presented as a
-    contradiction.
-
-    Returns [(deck, summons_per_line, nibiru_windows)].
-    """
-    out = []
-    counts = summon_counts(records)
-    for rec in records:
-        deck = (rec.get("summary") or {}).get("deck")
-        if not deck or deck not in counts:
-            continue
-        nib = 0
-        for h in rec.get("hands") or []:
-            if h.get("status") != "solved":
-                continue
-            f = (h.get("fire") or {}).get(str(NIBIRU)) or {}
-            nib += f.get("windows") or 0
-        mean = counts[deck]["mean"]
-        if mean >= NIBIRU_THRESHOLD and nib == 0:
-            out.append((deck, mean, nib))
-    return out

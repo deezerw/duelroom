@@ -25,9 +25,10 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] ROOT CAUSE still unknown for the Nibiru window gap: fiendsmith gets 90 windows
-      at 20.1 summons/line but kewl-tune gets 0 at 8.4. Detected and excluded, not
-      explained. Needs a look at how the solver offers that response window.
+- [ ] Nibiru and Maxx "C" cost still need REAL special-summon counts, which means
+      replaying each line through ygorl and counting summon actions. The shortcut via
+      Maxx "C" windows was wrong. Do it when CPU is free.
+
 
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
@@ -58,20 +59,23 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
-- **Nibiru window contradiction detected and quarantined.** Decks clearing 5 summons
-  every line while reporting zero Nibiru windows now get flagged, and those cells are
-  excluded from the weighted ranking instead of counted as zeros. Nibiru moves
-  13.7% -> 32.6% stop, last place to fifth — the artifact had been burying a card that
-  is genuinely strong against combo.
+- **RETRACTED: the "Nibiru contradiction" was my own error.** It rested on reading
+  Maxx "C" windows as special summons. They are RESPONSE windows — Maxx "C" has no
+  activation condition, so the solver offers it nearly everywhere; the count
+  correlates with line length at r=0.937 and branded showed 1.0 actions against 6.8
+  "summons", which is impossible. With the premise gone there was no contradiction:
+  kewl-tune's 4-action line may simply never make five special summons, so zero
+  Nibiru windows is plausible. Detector, ranking exclusion and the 32.6% figure all
+  removed; Nibiru is back to 13.7%.
 - **BLIND_SPOTS re-examined on evidence.** Maxx "C" stays (856/908 windows convert, so
   lines continue through it and the cards surrendered are invisible to a
   "did the line finish" metric). **Droll removed** — only 45/85 convert and 19 hands
   died to it, so the metric does capture it; it was only labelled unmeasurable because
   the buggy `status` reading scored it a spurious 0%.
-- **Special summons per line, for free.** Maxx "C" opens a window per special summon,
-  so its `windows` count IS the summon count — STAGE3 deferred this as needing a
-  replay pass and it was in the matrix data all along. elfnote 22.6/line, fiendsmith
-  20.1, branded 6.8.
+- **`response_windows`** (renamed from the bogus summon count). Measures the
+  interruption surface of a line — how often the opponent gets to respond — which is
+  real and useful under the correct name. elfnote 22.6 windows/line, branded 6.8.
+  Nibiru/Maxx "C" summon counts remain genuinely unavailable without replaying lines.
 - **SELF-CORRECTION: my no_window fix read the wrong field.** `status` on a fire entry
   reports whether the SEARCH succeeded, not whether the line lived — an entry can read
   status "solved" with windows 6, converted 3, survives False. I used status, which

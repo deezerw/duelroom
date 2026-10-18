@@ -386,16 +386,14 @@ def cmd_threats(conn, args):
     recs_path = ROOT / "results" / "handtrap_matrix.jsonl"
     if recs_path.exists():
         recs = [json.loads(l) for l in recs_path.read_text().splitlines() if l.strip()]
-        sc = scenarios.summon_counts(recs)
-        if sc:
-            print("\n  special summons per line (from Maxx \"C\" windows)\n")
-            print("  " + "archetype".ljust(28) + "  SS/line   max   Nibiru-able")
-            for deck, v in sorted(sc.items(), key=lambda kv: -kv[1]["mean"]):
-                print(f"  {deck.ljust(28)}{v['mean']:8.1f}{v['max']:6}"
-                      f"{v['nibiru_rate']*100:12.0f}%")
-            print("\n  (Nibiru-able = share of lines passing 5 summons. Every deck")
-            print("   here clears it, yet Nibiru reports few legal windows in the")
-            print("   matrix — worth checking how ygorl offers that window.)")
+        rw = scenarios.response_windows(recs)
+        if rw:
+            print("\n  interruption surface: times the opponent gets to respond\n")
+            print("  " + "archetype".ljust(28) + "  windows/line   max")
+            for deck, v in sorted(rw.items(), key=lambda kv: -kv[1]["mean"]):
+                print(f"  {deck.ljust(28)}{v['mean']:13.1f}{v['max']:6}")
+            print("\n  (Not special summons — Maxx \"C\" has no activation")
+            print("   condition, so its window count tracks line length, r=0.94.)")
 
     print("\n  visible board vs cards held in hand\n")
     print("  " + "archetype".ljust(28) + "  on field   in hand")
@@ -528,17 +526,6 @@ def cmd_matrix(conn, args):
             cells += "         -" if v is None else f"{v*100:9.0f}%"
         print(f"  {deck.ljust(26)}{cells}{_tag(deck)}")
 
-    recs_p = ROOT / "results" / "handtrap_matrix.jsonl"
-    if recs_p.exists():
-        _recs = [json.loads(l) for l in recs_p.read_text().splitlines() if l.strip()]
-        anomalies = scenarios.window_anomalies(_recs)
-        if anomalies:
-            print("\n  ! Nibiru's row is NOT trustworthy for these decks — they clear")
-            print("    5 special summons every line yet report zero legal windows:")
-            for deck, mean, _ in anomalies:
-                print(f"      {deck}: {mean:.1f} summons/line, 0 Nibiru windows")
-            print("    Read those cells as unmeasured, not as 'Nibiru does nothing'.")
-
     print("\n  WINDOW RATE — how often it was live at all.")
     print("  A handtrap with no window is useless here for a different")
     print("  reason than one that gets played through.\n")
@@ -551,11 +538,7 @@ def cmd_matrix(conn, args):
         print(f"  {deck.ljust(26)}{cells}")
 
     w = config.weights()
-    excl = set()
-    if recs_p.exists():
-        excl = {(deck, scenarios.NIBIRU)
-                for deck, _, _ in scenarios.window_anomalies(_recs)}
-    ranking = scenarios.weighted_handtrap_ranking(m, w, exclude=excl)
+    ranking = scenarios.weighted_handtrap_ranking(m, w)
     covered, missing = config.coverage(m.keys())
     if ranking:
         print("\n  WHICH HANDTRAPS TO MAIN — weighted by locals.toml")
@@ -565,10 +548,6 @@ def cmd_matrix(conn, args):
             print(f"    {score*100:5.1f}%  {cov*100:5.1f}%   {name}")
         print("\n    stop% = weighted chance it both has a window and stops the line")
         print("    live% = weighted chance it has a window at all")
-        if excl:
-            print(f"    ({len(excl)} deck/card cell(s) excluded as artifacts, so"
-                  f" those cards are")
-            print("     scored over the decks they were actually measured on)")
         if missing:
             print(f"\n    no measured deck for: {', '.join(missing)}")
 
