@@ -698,3 +698,32 @@ def test_hill_climb_checkpoints_every_trial(tmp_path, monkeypatch):
     assert len(lines) >= 2, "base plus each trial must be on disk as it finishes"
     assert json.loads(lines[0])["label"] == "base"
     assert "fire" in json.loads(lines[0]), "record which handtraps scored it"
+
+
+def test_a_one_card_swap_often_leaves_the_hand_unchanged():
+    # Recorded because the opposite was asserted twice in this project's
+    # own docs. Measured 55% unchanged over 80 (candidate, seed) pairs.
+    # It matters in two directions: it is why the optimizer's paired
+    # comparison is tighter than shuffle luck would allow, and it is NOT
+    # a reason memoization would work — the decks still differ by a card
+    # and the solver searches the deck.
+    from skills import breaking, db, optimizer
+    from ygorl.solver.batch import sample_hand
+    conn = db.connect()
+    deck = Deck.from_ydk("assets/decks/kewl-tune.ydk")
+    deck.canonicalise(conn)
+    outs = optimizer.removable(conn, deck, "Kewl Tune")
+    pool = optimizer.candidate_pool(conn, "Kewl Tune", deck, limit=2)
+    if not outs or not pool:
+        pytest.skip("needs scraped inclusion data")
+    same = total = 0
+    for cand in pool:
+        swapped = optimizer.swap(deck, outs[0][0], cand["card_id"])
+        for seed in range(10):
+            a, _ = sample_hand(breaking.to_ydeck(deck), seed=seed)
+            b, _ = sample_hand(breaking.to_ydeck(swapped), seed=seed)
+            total += 1
+            same += (a == b)
+    assert total and same > 0, (
+        "a one-card swap must sometimes leave the hand identical; if this "
+        "ever reads 0 the paired-comparison reasoning needs revisiting")

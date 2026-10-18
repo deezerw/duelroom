@@ -58,6 +58,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Corrected a claim I made twice.** I wrote — when killing memoization, and again
+  in CLAUDE.md — that a one-card swap changes every dealt hand. Measured over 80
+  (candidate, seed) pairs it leaves the hand UNCHANGED 55% of the time. The
+  memoization conclusion survives but for a different reason: the hands coincide, the
+  solves do not, because the decks differ by a card and the solver searches the deck.
+  The same fact is good news for the optimizer — most trial hands are shared with the
+  base, so its paired comparison is tighter than shuffle luck would allow.
 - **The fire-list fix was itself a silent no-op.** It wrote `fire` into the per-trial
   targets file — and funnel_eval's `load_deck_targets` returns only `v["targets"]`,
   discarding every other key. Trials kept firing Ash alone while the file claimed

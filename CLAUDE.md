@@ -151,9 +151,19 @@ response windows). Real counts need each line replayed through ygorl.
   18.8% apparent hits with budget and target keyed, and all of them were re-running
   the same gate at identical settings -- which is re-validation after a component
   bump, precisely the case where a cached answer would hide the change being checked
-  for. With revisions in the key the rate is about zero. The optimizer gets no benefit
-  either: swapping one card changes the deck multiset, so the shuffle and therefore
-  every dealt hand differs.
+  for. With revisions in the key the rate is about zero.
+
+  The optimizer gets no benefit either, but NOT for the reason first written here.
+  Measured over 80 (candidate, seed) pairs, a one-card swap leaves the dealt hand
+  **unchanged 55% of the time** -- the claim that every hand differs was wrong. The
+  hands coincide; the solves still do not, because the two decks differ by a card and
+  the solver searches the deck, so a line available to one may not be available to
+  the other. A cache keyed on the hand alone would return answers from a deck that is
+  not the one being evaluated.
+
+  The same measurement is good news elsewhere: because most trial hands are shared
+  with the base deck, the optimizer's paired comparison is tighter than a shuffle-luck
+  argument would suggest.
 - **Play/draw split:** every metric is reported split by going first vs going second.
   The die roll dominates modern Yu-Gi-Oh and an averaged number hides the answer.
 - **Locals weighting:** the gauntlet is weighted by a hand-maintained config, not by
