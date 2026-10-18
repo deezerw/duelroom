@@ -25,10 +25,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] VERIFY `results/blitz_retarget.log` — a 16-hand solve looking for an EXTRA-deck
-      target for Blitzclique. If one is found, re-run `gate Blitzclique` (it was 0/12
-      on the main-deck target). If none is found, that deck genuinely has no reliable
-      payoff board and its numbers should stay flagged.
 - [ ] Bug sweep: grep for the patterns that already bit us —
       `.get(` on a `sqlite3.Row`, metrics that count a missing window as a success,
       any place a list is treated as alternatives when it is a conjunction.
@@ -52,6 +48,20 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **Blitzclique has no payoff board — settled, not a bug.** 16 hands: every solver
+  proposal stayed main-deck, and only 1 of 16 end boards held any monster at all.
+  `solve_blocking` plans towards INTERRUPTIONS, which for a backrow deck are all
+  main-deck cards, so no amount of extra hands can produce an extra-deck target.
+  Added `extra_target_from_boards` as a second source (reads what the deck actually
+  ends on; honestly returns None here) and `ensure_target` prefers it when the planner
+  only offers main-deck cards.
+- **gate now warns before it measures**, so a flagged deck no longer reports a
+  confident "0/12 (0%)" as if it were evidence the deck is bad.
+- **Output ordering fixed**: our prints were block-buffered while solver subprocesses
+  write unbuffered to the same fd, so a warning printed BEFORE a long solve appeared
+  after its results. stdout is line-buffered now.
+- **Crash fixed**: `survival_given_line` is None when nothing solved; gate crashed
+  formatting `None * 100`. Prints "n/a (no hand solved)".
 - **Targets must be EXTRA-deck** — the strongest signal, now the top ranking key. A
   main-deck one-of has to be DRAWN, so targeting it measures draw luck: Blitzclique
   derived "Called by the Grave" and gated 0/12 while the same deck solved 6/6 under

@@ -433,6 +433,21 @@ def ensure_target(deck, hands=6, solve_ms=None, path=None, log=print):
 
     derived = derive_targets(out, per_deck=1)
     spec = derived.get(name)
+
+    # Prefer what the deck actually ENDS ON over what the solver planned
+    # towards. The planner aims at interruptions, which for some decks are
+    # all main-deck cards, so it can never propose an extra-deck target no
+    # matter how many hands are solved. The end boards in the same records
+    # know better.
+    if spec and not spec.get("_extra"):
+        from .deck import Deck
+        d = Deck.from_ydk(deck)
+        board_target, share = extra_target_from_boards(out, d.extra)
+        if board_target:
+            log(f"  preferring {board_target} — on {share:.0%} of end boards "
+                f"and in the extra deck")
+            spec = {**spec, "targets": [board_target], "_extra": 1,
+                    "_zone_rank": 3}
     if not spec:
         log(f"  {name} reached no target in {hands} hands — it may brick a lot, "
             f"or need a bigger budget (`ladder {name}`)")
@@ -448,3 +463,55 @@ def ensure_target(deck, hands=6, solve_ms=None, path=None, log=print):
     path.write_text(json.dumps(allt, indent=1))
     log(f"  derived {spec['targets'][0]} for {name}")
     return spec["targets"][0]
+
+
+def extra_target_from_boards(jsonl_path, deck_extra, min_share=0.4):
+    """Find an extra-deck monster this deck reliably ENDS ON.
+
+    A second source of targets, independent of the solver's own planner.
+    `solve_blocking` plans towards interruptions, which for a backrow
+    deck are all main-deck cards, so its proposals can never yield an
+    extra-deck target no matter how many hands are solved -- Blitzclique
+    stayed on main-deck targets through sixteen.
+
+    The end boards in those same records say what the deck actually
+    makes. A monster appearing on at least `min_share` of solved end
+    boards is something the engine produces rather than something you
+    draw, which is exactly what a target should be.
+
+    Returns (spec, share) or (None, 0.0).
+    """
+    extra = set(deck_extra)
+    seen, solved = Counter(), 0
+    for line in Path(jsonl_path).read_text().splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("status") != "solved":
+            continue
+        solved += 1
+        for ln in (r.get("lines") or [])[:1]:
+            board = ln.get("board") or {}
+            for player in (board.get("players") or [])[:1]:
+                for m in player.get("mzone") or []:
+                    if m.get("code") in extra:
+                        seen[m["code"]] += 1
+    if not solved or not seen:
+        return None, 0.0
+    code, hits = seen.most_common(1)[0]
+    share = hits / solved
+    if share < min_share:
+        return None, share
+    return f"{code}@atk", share
+
+
+def target_is_extra(conn, deck_path, target):
+    """1 if the target lives in this deck's extra deck, else 0."""
+    from .deck import Deck
+    d = Deck.from_ydk(deck_path)
+    d.canonicalise(conn)
+    try:
+        code = int(str(target).split("@")[0])
+    except ValueError:
+        return 1
+    return 1 if code in set(d.extra) else 0

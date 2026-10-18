@@ -284,9 +284,18 @@ def cmd_gate(conn, args):
         return
     hands = int(args[1]) if len(args) > 1 else 12
     ms = int(args[2]) if len(args) > 2 else engine.SOLVE_MS
-    if not scenarios.ensure_target(path):
+    target = scenarios.ensure_target(path)
+    if not target:
         print(f"could not establish a target for {path.stem} — nothing to gate")
         return
+    spec = scenarios.load_targets().get(path.stem) or {}
+    weak = scenarios.trivial_targets(
+        {path.stem: {**spec, "_extra": scenarios.target_is_extra(conn, path, target)}})
+    if weak:
+        print(f"  ! WARNING: {weak[0][1]}")
+        print("    Numbers below describe reaching THAT target, which this deck")
+        print("    may simply never draw. A low solve rate here is not evidence")
+        print("    the deck is bad. Treat it as unmeasured.\n")
     print(f"gate: {path.stem}, {hands} hands, {ms/1000:.0f}s budget\n")
     rec = gate.run_funnel(path, hands=hands, solve_ms=ms,
                           targets=scenarios.merged_targets_file())
@@ -297,12 +306,16 @@ def cmd_gate(conn, args):
           f"({rep['solve_rate']*100:.0f}%, 95% CI {lo*100:.0f}-{hi*100:.0f}%)")
     print(f"  solver time {rep['solver_s']:.0f}s")
     ca = rep["combo_actions"]
-    if ca:
+    if ca and ca.get("min") is not None:
         print(f"  line length min {ca.get('min')}, median {ca.get('median')}, "
               f"max {ca.get('max')}")
     for code, surv in (rep["survival_given_line"] or {}).items():
         row = card_db.resolve(conn, int(code))
-        print(f"  survives {row['name'] if row else code}: {surv*100:.0f}% of solved hands")
+        name = row["name"] if row else code
+        # None when no hand solved: there is no "survival given a line"
+        # if there were no lines. Saying so beats crashing or printing 0%.
+        shown = "n/a (no hand solved)" if surv is None else f"{surv*100:.0f}% of solved hands"
+        print(f"  survives {name}: {shown}")
 
     print(f"\n  hand classes: {dict(gate.classify_hands(rec))}")
 
@@ -739,6 +752,14 @@ COMMANDS = {
 
 
 def main():
+    # Subprocesses write to this same fd unbuffered while our own prints
+    # sit in a block buffer until exit, so piped output arrives out of
+    # order -- a warning printed BEFORE a long solve showed up after its
+    # results, which makes it useless as a warning.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
     conn = db.connect()
     n = conn.execute("SELECT COUNT(*) AS n FROM cards").fetchone()["n"]
     if n == 0:
