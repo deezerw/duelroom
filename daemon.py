@@ -536,6 +536,14 @@ def cmd_threats(conn, args):
                       f"{v['nibiru_rate']*100:12.0f}%")
             print("\n  (Nibiru live = share of lines passing 5 summons. This")
             print("   explains its window counts: r=0.94 against them.)")
+            cost = scenarios.maxx_c_cost(ss)
+            print("\n  cards surrendered to Maxx \"C\" if they combo through\n")
+            print("  " + "archetype".ljust(28) + "  cards   worst")
+            for deck, v in sorted(cost.items(), key=lambda kv: -kv[1]["cards"]):
+                print(f"  {deck.ljust(28)}{v['cards']:7.1f}{v['worst']:8}")
+            print("\n  (The survival table cannot see this — those lines mostly")
+            print("   complete, which reads as 'fine'. Completing a line while")
+            print("   handing over eight cards is not beating Maxx \"C\".)")
 
     print("\n  visible board vs cards held in hand\n")
     print("  " + "archetype".ljust(28) + "  on field   in hand")
@@ -1040,8 +1048,20 @@ def cmd_report(conn, args):
                 print(f"    -> {wname} is your worst matchup card")
             for name, code in blind:
                 print(f"    ! {name}: {scenarios.BLIND_SPOTS[code]}.")
-                print(f"      A high number here is the metric missing the card,")
-                print(f"      not your deck being fine.")
+                if code == 23434538:
+                    cache = ROOT / "results" / "special_summons.json"
+                    cost = None
+                    if cache.exists():
+                        ss = json.loads(cache.read_text())
+                        if r["name"] in ss:
+                            cost = ss[r["name"]]
+                    if cost:
+                        print(f"      Measured separately: comboing through it hands "
+                              f"them {cost['mean']:.1f} cards")
+                        print(f"      on average, {cost['max']} at worst. Surviving it "
+                              f"is not beating it.")
+                    else:
+                        print(f"      Run `threats` for the cards it actually costs you.")
         for row, code, s in surv_rows:
             if s is None:
                 name = row["name"] if row else code

@@ -54,6 +54,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Maxx "C" cost measured** — the other half of the STAGE3 promise, free once summons
+  were counted: Maxx "C" draws on every special summon, so the replayed count IS the
+  cost. fiendsmith hands over 8.4 cards comboing through it (15 at worst), kewl-tune
+  2.5. The survival table shows kewl-tune "surviving" Maxx "C" 76% of the time, which
+  reads as fine; the cost column is the question that can see what it actually does.
+  BLIND_SPOTS now points at the measurement rather than just declaring the gap.
 - **Real special-summon counts, and they CLOSE the Nibiru question.** Replayed every
   stored line through the core counting MSG_SPSUMMONED — cheap, since the line is
   known and no search is involved. fiendsmith 8.4/line, elfnote 6.1, kewl-tune 2.5,

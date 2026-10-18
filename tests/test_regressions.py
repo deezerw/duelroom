@@ -599,3 +599,13 @@ def test_special_summons_are_replayed_not_inferred():
     assert "SpSummoned" in src, "must count the engine's own summon message"
     assert "replay" in src, "must replay the line rather than infer"
     assert "23434538" not in src, 'must not read Maxx "C" windows'
+
+
+def test_maxx_c_cost_is_the_summon_count():
+    # Maxx "C" draws on every special summon, so the replayed count IS
+    # the cost. The survival metric cannot see it; this is the separate
+    # question that can.
+    got = scenarios.maxx_c_cost({"d": {"mean": 8.4, "max": 15,
+                                       "nibiru_rate": 1.0, "n": 40}})
+    assert got["d"]["cards"] == pytest.approx(8.4)
+    assert got["d"]["worst"] == 15

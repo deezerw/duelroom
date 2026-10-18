@@ -62,8 +62,10 @@ in its own output:
   60s solves in 9 actions. Run `ladder <deck>` per deck rather than assuming.
 - **Some decks have no measurable target.** If a deck does not build a board, its
   solve rate is about a goal it never meant to reach. `report` flags this.
-- **Maxx "C" and Droll score 0% stop** because the metric asks only whether a line
-  reaches its target, and those cards punish a combo rather than stopping it.
+- **Maxx "C" needs two numbers, not one.** Its survival row reads as "fine" because
+  lines do complete through it. What it costs you is a separate measurement — the
+  replayed special-summon count, which is exactly the cards it draws them. Surviving
+  it while handing over eight cards is not beating it.
 - **`locals.toml` is a stand-in** until you edit it with your actual room.
 
 ```bash

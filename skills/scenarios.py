@@ -43,9 +43,26 @@ HANDTRAPS = {
 # does capture what Droll does. It was only labelled unmeasurable
 # because the earlier status-based reading scored it a spurious 0%.
 BLIND_SPOTS = {
-    23434538: ("lines convert 94% of its windows, so this measures "
-               "completion, not the cards it hands them"),
+    23434538: ("lines convert 94% of its windows, so SURVIVAL measures "
+               "completion, not cost — see the Maxx \"C\" cost column"),
 }
+
+
+def maxx_c_cost(summon_counts_by_deck):
+    """Cards a deck hands the opponent if it combos through Maxx "C".
+
+    Maxx "C" draws on every special summon, so the replayed summon count
+    IS the cost. The survival metric cannot see this -- lines convert 94%
+    of its windows, which reads as "fine" -- but the cost is measurable,
+    just by a different question. A deck that plays through Maxx "C"
+    while giving up eight cards has not beaten it.
+
+    Takes the output of `special_summons`.
+    """
+    return {
+        deck: {"cards": v["mean"], "worst": v["max"]}
+        for deck, v in summon_counts_by_deck.items()
+    }
 
 MAXX_C = 23434538
 
