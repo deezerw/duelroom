@@ -60,6 +60,11 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Provenance on every measured number.** `report` printed a solve rate with no
+  indication of which run or budget produced it, and a budget too low invents bricks
+  (10s calls a hand dead that 60s solves in 9 actions). It now names the source file,
+  hand count and budget, and warns when the budget is under the 60s default. The
+  Blitzclique 0/2 now carries three caveats — trivial target, low budget, tiny sample.
 - **`doctor`** — one command running every self-check: engine readiness and pinned
   versions, row counts for each table, all four guards, and the weakest dataset in the
   project. Reports what is MISSING as loudly as what is broken, since an empty

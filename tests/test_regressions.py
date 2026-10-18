@@ -358,3 +358,30 @@ def test_matrix_reader_prefers_newest_but_callers_must_see_the_count(tmp_path):
     # the reader must surface how many decks it actually got
     assert "deck(s))" in src, "matrix must print how many decks it read"
     assert "looks PARTIAL" in src, "a half-written sweep must be called out"
+
+
+# --- provenance ----------------------------------------------------------
+# A solve rate without its budget is close to meaningless: 10s reports a
+# brick where 60s solves the same hand in nine actions, and two runs look
+# identical on screen.
+
+def test_latest_funnel_returns_its_source(tmp_path, monkeypatch):
+    from skills import engine, report as report_mod
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "run_a.jsonl").write_text(json.dumps({
+        "summary": {"deck": "d", "solved": 1, "hands": 1},
+        "config": {"solve_ms": 60000, "hands": 1},
+    }) + "\n")
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    rec, src = report_mod.latest_funnel("d")
+    assert rec is not None
+    assert src is not None and src.name == "run_a.jsonl", (
+        "callers need the source to state the budget a number came from")
+
+
+def test_latest_funnel_misses_cleanly(tmp_path, monkeypatch):
+    from skills import engine, report as report_mod
+    (tmp_path / "results").mkdir()
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    assert report_mod.latest_funnel("nope") == (None, None)

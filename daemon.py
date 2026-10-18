@@ -926,6 +926,15 @@ def cmd_report(conn, args):
     if not f:
         print("    no funnel run yet — `gate` to measure")
     else:
+        pv = r.get("provenance") or {}
+        ms = pv.get("solve_ms")
+        print(f"    source        {pv.get('file','?')}, "
+              f"{pv.get('hands','?')} hands at "
+              f"{(ms/1000) if ms else '?'}s/hand")
+        if ms and ms < 60000:
+            print(f"    ! that budget is below the 60s default — a budget too low")
+            print(f"      invents bricks. Re-run `gate` or `ladder` before trusting")
+            print(f"      the brick rate below.")
         solved, hands = f.get("solved") or 0, f.get("hands") or 0
         p, lo, hi = stats.wilson(solved, hands)
         print(f"    solved        {solved}/{hands}  "

@@ -15,8 +15,14 @@ from .deck import Deck
 
 
 def latest_funnel(deck_name):
-    """Most recent funnel record for a deck, or None."""
-    best, best_mtime = None, -1
+    """Most recent funnel record for a deck, with where it came from.
+
+    Returns (record, source_path) so callers can state provenance. A
+    solve rate is close to meaningless without the budget it was run
+    at -- 10s reports a brick where 60s solves the same hand in nine
+    actions -- and two runs of the same deck look identical on screen.
+    """
+    best, best_mtime, best_src = None, -1, None
     for p in (engine.ROOT / "results").glob("*.jsonl"):
         try:
             mtime = p.stat().st_mtime
@@ -33,9 +39,9 @@ def latest_funnel(deck_name):
                 continue
             s = rec.get("summary") or {}
             if s.get("deck") == deck_name:
-                best, best_mtime = rec, mtime
+                best, best_mtime, best_src = rec, mtime, p
                 break
-    return best
+    return best, best_src
 
 
 def deck_report(conn, path, archetype=None):
@@ -51,6 +57,7 @@ def deck_report(conn, path, archetype=None):
         "target": None,
         "target_warning": None,
         "funnel": None,
+        "provenance": None,
         "hand_math": [],
         "archetype": archetype,
         "inclusion": None,
@@ -71,9 +78,16 @@ def deck_report(conn, path, archetype=None):
         if weak:
             out["target_warning"] = weak[0][1]
 
-    rec = latest_funnel(deck.name)
+    rec, src = latest_funnel(deck.name)
     if rec:
         out["funnel"] = rec["summary"]
+        cfg = rec.get("config") or {}
+        out["provenance"] = {
+            "file": src.name if src else "?",
+            "solve_ms": cfg.get("solve_ms"),
+            "hands": cfg.get("hands") or rec["summary"].get("hands"),
+            "targets": rec.get("targets"),
+        }
 
     size = len(deck.main)
     for name, copies in deck.named(conn, "main")[:6]:
