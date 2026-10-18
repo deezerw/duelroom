@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from skills import card_db, db, engine, gate, meta_scrape as ms, stats
+from skills import card_db, carddb, db, engine, gate, meta_scrape as ms, stats
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -28,6 +28,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   check <deck.ydk>          legality and banlist check
   decks                     list .ydk files in assets/decks/
   export <archetype> [name] write a scraped list out as a .ydk
+  setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
   solve <deck> [hands]      turn-1 line search: solve rate + board quality
   ladder <deck> [hands]     calibrate the solver budget (run this first)
@@ -165,6 +166,27 @@ def cmd_check(conn, args):
         return
     for p in problems:
         print(f"  ! {p}")
+
+
+def cmd_setup(conn, args):
+    """Build the merged card database the engine needs.
+
+    BabelCDB ships recent sets as separate release-*.cdb files that ygorl
+    never loads, and a deck holding one of those cards segfaults the solver
+    instead of erroring. Run this after any submodule bump.
+    """
+    print("building merged card database ...")
+    path, added, total = carddb.build(force=bool(args and args[0] == "force"))
+    for name in added:
+        print(f"  merged {name}")
+    print(f"  {total} cards -> {path}")
+    print(f"  BabelCDB revision {carddb.source_revision()}")
+    problems = engine.check()
+    print("\n" + ("engine ready" if not problems else "still not ready:"))
+    for p in problems:
+        print(f"  ! {p}")
+    print("\nNote: BabelCDB and CardScripts must be bumped together — cards")
+    print("without their Lua scripts load fine and then do nothing.")
 
 
 def cmd_engine(conn, args):
@@ -341,6 +363,7 @@ COMMANDS = {
     "check": cmd_check,
     "decks": cmd_decks,
     "export": cmd_export,
+    "setup": cmd_setup,
     "engine": cmd_engine,
     "solve": cmd_solve,
     "ladder": cmd_ladder,

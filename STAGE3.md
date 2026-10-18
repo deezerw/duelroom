@@ -58,6 +58,17 @@ Observed cost at 60 s: 60–130 s/hand on 6 workers. 1000 hands per deck is most
 day. Plan runs accordingly, and prefer more decks at 100 hands over one deck at
 1000 until the pipeline is trusted.
 
+## 2b. Card database — run `setup` before anything
+
+BabelCDB is not one file. Recent sets ship as separate `release-*.cdb` which ygorl
+never loads, and a deck holding one of those cards **segfaults the solver** after five
+misleading diagnostics rather than erroring cleanly. `daemon.py setup` builds a merged
+database in a shadow tree; `engine.preflight()` refuses unloadable decks up front.
+
+**Bump BabelCDB and CardScripts together.** Cards present without their Lua scripts
+load fine and then do nothing — a deck whose engine is inert looks exactly like a deck
+that cannot combo. Re-run the gate after any bump.
+
 ## 3. Store results in `data/duelroom.db`
 
 Right now output lands in `results/*.jsonl` and `results/*.json`. Load it into the
@@ -95,7 +106,7 @@ win because they opened badly.
 1. A passing validation gate, with the deck and line named in the commit.
 2. `runs` / `trials` / `boards` populated, with version pins recorded.
 3. Brick rate, hand classification, per-card liveliness, interruption distribution.
-4. End-board library for the top 8 archetypes by `locals.toml` weight.
+4. End-board library for the top archetypes by `locals.toml` weight.
 
 ---
 Delete this file when the stage is complete and verified.
