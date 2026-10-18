@@ -34,6 +34,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   ladder <deck> [hands]     calibrate the solver budget (run this first)
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   boards [load]             meta end-board library (what you must break)
+  threats                   interruption counts + common pieces per archetype
   help / quit
 """
 
@@ -317,6 +318,36 @@ def cmd_boards(conn, args):
                 print(f"            {i}")
 
 
+def cmd_threats(conn, args):
+    prof = gate.threat_profile(conn)
+    if not prof:
+        print("board library empty — run `boards load`")
+        return
+    counts = sorted({n for d in prof.values() for n in d})
+    print("  share of end boards by interruption count\n")
+    print("  " + "archetype".ljust(28) + "".join(f"{n:>7}" for n in counts) + "    mean")
+    for arch, dist in sorted(prof.items(),
+                             key=lambda kv: -sum(k*v for k, v in kv[1].items())):
+        mean = sum(k * v for k, v in dist.items())
+        cells = "".join(f"{dist.get(n,0)*100:6.0f}%" for n in counts)
+        print(f"  {arch.ljust(28)}{cells}  {mean:6.1f}")
+
+    print("\n  visible board vs cards held in hand\n")
+    print("  " + "archetype".ljust(28) + "  on field   in hand")
+    bh = gate.board_vs_hand(conn)
+    for arch, v in sorted(bh.items(), key=lambda kv: -kv[1]["field"]):
+        print(f"  {arch.ljust(28)}{v['field']:9.1f}{v['hand']:10.1f}")
+    print("\n  (going second you can play around a visible negate; you cannot")
+    print("   play around a handtrap you have not seen. Break rates weight the")
+    print("   first column, survival weights the second.)")
+
+    print("\n  most common interruptions (share of that deck's boards)\n")
+    for arch, pieces in sorted(gate.common_pieces(conn).items()):
+        print(f"  {arch}")
+        for name, share in pieces:
+            print(f"      {share*100:4.0f}%  {name}")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -369,6 +400,7 @@ COMMANDS = {
     "ladder": cmd_ladder,
     "gate": cmd_gate,
     "boards": cmd_boards,
+    "threats": cmd_threats,
 }
 
 

@@ -302,3 +302,177 @@ def board_library(conn, fmt="Tournament Meta Decks"):
             "negates": r["negates"],
         })
     return out
+
+
+def split_zones(pieces):
+    """Separate interruptions you can see from ones you cannot.
+
+    ygorl labels each end-board interruption with its zone: "(field,
+    negate)", "(set, negate)", "(hand, negate)". Counting them together
+    overstates how hard a board is to break, and understates how much of
+    the difficulty is hidden information. Going second you can play around
+    a visible negate; you cannot play around a handtrap you have not seen.
+
+    Branded is the clear case: its single most common "interruption" is
+    Whisker Blitzclique in HAND at 64%, which is not a board at all.
+    """
+    visible, hidden = [], []
+    for p in pieces:
+        (hidden if "(hand" in p else visible).append(p)
+    return visible, hidden
+
+
+def threat_profile(conn, fmt="Tournament Meta Decks"):
+    """Per-archetype distribution over interruption COUNT, not exact board.
+
+    The exact interruption set is too fine to weight against: 12 hands per
+    deck produced 69 distinct boards, so almost every board is a sample of
+    one and its "frequency" is noise. What Stage 4 actually asks is "can I
+    break a 3-interruption board", and the count distribution answers that
+    at a sample size we can afford.
+
+    Keep `board_library` for reading what the boards contain; use this for
+    weighting.
+    """
+    rows = conn.execute(
+        """SELECT archetype, negates, SUM(frequency) AS share
+             FROM boards WHERE format = ?
+         GROUP BY archetype, negates ORDER BY archetype, negates""",
+        (fmt,),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["archetype"], {})[r["negates"]] = r["share"]
+    for arch, dist in out.items():
+        total = sum(dist.values()) or 1
+        out[arch] = {k: v / total for k, v in sorted(dist.items())}
+    return out
+
+
+def common_pieces(conn, fmt="Tournament Meta Decks", top=5):
+    """Which interruptions actually show up, per archetype.
+
+    Robust where exact boards are not: a card appearing in 60% of an
+    archetype's end boards is a real fact at 12 hands, even though the
+    board it sits in is a sample of one. This is the list your side deck
+    has to answer.
+    """
+    out = {}
+    for r in conn.execute(
+        "SELECT archetype, board_state, frequency FROM boards WHERE format = ?",
+        (fmt,),
+    ):
+        bucket = out.setdefault(r["archetype"], Counter())
+        for piece in json.loads(r["board_state"]):
+            bucket[piece] += r["frequency"]
+    return {a: c.most_common(top) for a, c in out.items()}
+
+
+def board_vs_hand(conn, fmt="Tournament Meta Decks"):
+    """Mean visible-board interruptions vs mean hand-held ones, per deck.
+
+    The first number is what a board breaker has to get through. The second
+    is what it has to survive. Optimising against their sum is optimising
+    against a board that does not exist.
+    """
+    out = {}
+    for r in conn.execute(
+        "SELECT archetype, board_state, frequency FROM boards WHERE format = ?",
+        (fmt,),
+    ):
+        vis, hid = split_zones(json.loads(r["board_state"]))
+        acc = out.setdefault(r["archetype"], {"field": 0.0, "hand": 0.0, "w": 0.0})
+        acc["field"] += len(vis) * r["frequency"]
+        acc["hand"] += len(hid) * r["frequency"]
+        acc["w"] += r["frequency"]
+    return {
+        a: {"field": v["field"] / (v["w"] or 1), "hand": v["hand"] / (v["w"] or 1)}
+        for a, v in out.items()
+    }
+
+
+def load_blocking(conn, jsonl_path, scenario="blocking"):
+    """Store solve_blocking per-hand records into `runs` / `trials`.
+
+    funnel_eval and solve_blocking emit different shapes -- the former one
+    record per deck with a `hands` list, the latter one record per hand.
+    Both end up in the same two tables so Stage 5 has a single place to
+    read per-card liveliness from.
+    """
+    records = [json.loads(l) for l in Path(jsonl_path).read_text().splitlines() if l.strip()]
+    by_deck = {}
+    for r in records:
+        # `deck` is a dict {name, main, extra} here, unlike funnel_eval's
+        # per-deck record where the name sits in `summary.deck`.
+        d = r.get("deck")
+        name = d.get("name") if isinstance(d, dict) else str(d)
+        by_deck.setdefault(name, []).append(r)
+
+    v = engine.versions()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    run_ids = {}
+    with conn:
+        for deck, hands in by_deck.items():
+            cur = conn.execute(
+                """INSERT INTO runs
+                     (deck_hash, deck_name, scenario, seed_base, n_trials,
+                      going_first, engine_version, scripts_version,
+                      cdb_version, started, finished)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (deck, deck, scenario, 0, len(hands), 1,
+                 f"ygorl {v['ygorl']} / core {v['ygopro_core']}",
+                 v["card_scripts"], v["babel_cdb"], now, now),
+            )
+            rid = cur.lastrowid
+            run_ids[deck] = rid
+            rows = []
+            for h in hands:
+                lines = h.get("lines") or []
+                pieces = []
+                if lines:
+                    best = max(lines, key=lambda l: len(l.get("interruptions") or []))
+                    pieces = best.get("interruptions") or []
+                rows.append((
+                    rid,
+                    str(h.get("hand_seed", 0)),
+                    json.dumps(h.get("hand") or []),
+                    1 if h.get("status") == "solved" else 0,
+                    len(pieces),
+                    len(pieces),
+                    None,
+                    json.dumps({"status": h.get("status"),
+                                "interruptions": pieces}),
+                ))
+            conn.executemany(
+                """INSERT INTO trials
+                     (run_id, seed, opening_hand, completed, board_score,
+                      negates, special_summons, line)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                rows,
+            )
+    return run_ids
+
+
+def liveliness_from_db(conn, deck_name, conn_cards=None):
+    """Per-card solve rate for a deck, read back out of `trials`."""
+    rows = conn.execute(
+        """SELECT t.opening_hand, t.completed FROM trials t
+             JOIN runs r ON r.id = t.run_id
+            WHERE r.deck_name = ?""",
+        (deck_name,),
+    ).fetchall()
+    solved, total = Counter(), Counter()
+    for r in rows:
+        for c in set(json.loads(r["opening_hand"])):
+            total[c] += 1
+            if r["completed"]:
+                solved[c] += 1
+    out = []
+    for c, n in total.items():
+        out.append({
+            "name": (card_db.resolve(conn, c) or {"name": f"<{c}>"})["name"],
+            "seen": n,
+            "solved": solved[c],
+            "solve_rate": solved[c] / n,
+        })
+    return sorted(out, key=lambda r: (r["solve_rate"], -r["seen"]))
