@@ -310,3 +310,105 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
             "hand": hand,
         })
     return rows
+
+
+# --- floodgate check ------------------------------------------------------
+
+def floodgate_start(floodgate, our_deck, seed, scratch, solve_ms=None):
+    """A start replay where the opponent has set one floodgate.
+
+    The opponent's deck is 40 copies of the floodgate, so turn 1 reliably
+    ends with one set. Targeting it face-down (`@szone:fd`) rather than
+    face-up is the realistic case and the only legal one: a Continuous
+    Trap cannot activate the turn it is set, so what you actually face
+    going second is a set card that flips during your turn.
+    """
+    import subprocess
+    from ygorl.engine.duel import Deck as YDeck
+    from ygorl.engine.replay import Replay, load_yrp
+    from ygorl.solver.combo_solver import Workdir
+    from ygorl.solver.demo import convert_line
+
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    wd = Workdir.create(scratch / "workdir")
+    sols = scratch / "sol"
+    sols.mkdir(exist_ok=True)
+
+    flood_deck = YDeck((int(floodgate),) * 40, (), (), f"flood-{floodgate}")
+    ydk = scratch / "flood.ydk"
+    ydk.write_text("#created by duelroom\n#main\n"
+                   + "\n".join([str(floodgate)] * 40)
+                   + "\n#extra\n!side\n")
+
+    tpl = template_vs(scratch / "tpl.yrpX", flood_deck, our_deck, seed=seed)
+    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
+    for d in wd.scriptdirs:
+        cmd += ["--scriptdir", str(d)]
+    cmd += ["--no-ref", "--deck", str(ydk.resolve()),
+            "--hand", "|".join([str(floodgate)] * 5),
+            "--target", f"{floodgate}@szone:fd",
+            "--solve-ms", str(solve_ms or engine.SOLVE_MS),
+            "--threads", "1", "--outdir", str(sols)]
+    subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
+
+    found = sorted(sols.glob("*.yrp"))
+    if not found:
+        return None
+    line = convert_line(load_yrp(found[0]), [f"{floodgate}@szone:fd"],
+                        close_turn=True)
+    base = Replay.from_yrp(found[0])
+    ext = Replay(seed=base.seed, first=base.first, rule_flags=base.rule_flags,
+                 player=base.player, shuffle_decks=base.shuffle_decks,
+                 decks=base.decks, responses=list(line.responses),
+                 seed_words=base.seed_words)
+    out = scratch / f"flood_{floodgate}_{seed}.yrpX"
+    ext.to_yrpx(out, names=(f"flood-{floodgate}", "us"))
+    return out
+
+
+def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
+                    solve_ms=None, scratch=None):
+    """Does the deck still function under each common floodgate?
+
+    Locals run floodgates far more than top tables do, and this is cheap
+    next to a full gauntlet.
+    """
+    import subprocess
+    from ygorl.solver.batch import sample_hand
+    from ygorl.solver.combo_solver import Workdir
+    from .scenarios import FLOODGATES
+
+    floodgates = floodgates or FLOODGATES
+    scratch = Path(scratch or (engine.ROOT / "results" / "floodgate"))
+    ours = to_ydeck(our_deck)
+    rows = []
+    for code, name in floodgates.items():
+        solved = tested = 0
+        for seed in range(hands):
+            sd = scratch / f"{code}_{seed}"
+            start = floodgate_start(code, our_deck, seed, sd, solve_ms)
+            if start is None:
+                continue
+            wd = Workdir.create(sd / "wd2")
+            out = sd / "gs"
+            out.mkdir(exist_ok=True)
+            hand, _ = sample_hand(ours, seed=2000 + seed, size=6)
+            cmd = [str(engine.SOLVER_BIN)] + going_second_args(
+                start, our_deck, hand, our_target, solve_ms)
+            cmd = [cmd[0], cmd[1], "--workdir", str(wd.path)]
+            for d in wd.scriptdirs:
+                cmd += ["--scriptdir", str(d)]
+            cmd += going_second_args(start, our_deck, hand, our_target,
+                                     solve_ms)[1:]
+            cmd += ["--threads", "2", "--outdir", str(out)]
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               env=engine.env())
+            if not searched(r.stdout or ""):
+                continue
+            tested += 1
+            solved += bool(list(out.glob("*.yrp")))
+        rows.append({"card": code, "name": name, "tested": tested,
+                     "functioned": solved,
+                     "rate": solved / tested if tested else None})
+    return rows

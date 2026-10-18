@@ -42,6 +42,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   locals                    your locals.toml weights and their coverage
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
   second <theirs> <ours>    going second into their real board
+  floodgates <deck>         does the deck function under common floodgates
   help / quit
 """
 
@@ -523,6 +524,34 @@ def cmd_second(conn, args):
         print("  ! some hands never entered a search — see breaking.searched()")
 
 
+def cmd_floodgates(conn, args):
+    if not args:
+        print("usage: floodgates <deck.ydk> [hands]")
+        return
+    path = _resolve_deck(args[0])
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    hands = int(args[1]) if len(args) > 1 else 2
+    tgt = json.loads((ROOT / "assets" / "derived_targets.json").read_text())
+    if path.stem not in tgt:
+        print(f"no derived target for {path.stem} — run `targets`")
+        return
+    our_target = tgt[path.stem]["targets"][0]
+    print(f"{path.stem} under floodgates, target {our_target}")
+    print("locals run these far more than top tables do\n")
+    rows = breaking.floodgate_check(path, our_target, hands=hands)
+    print(f"  {'functioned':>12}  floodgate")
+    for r in rows:
+        if not r["tested"]:
+            print(f"  {'untested':>12}  {r['name']}  (could not build the board)")
+        else:
+            print(f"  {r['functioned']}/{r['tested']:<10}  {r['name']}")
+    print("\n  'functioned' = still assembled its payoff with that card set")
+    print("  across from it. A set Continuous Trap cannot activate the turn")
+    print("  it is set, so this models it flipping during your turn.")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -581,6 +610,7 @@ COMMANDS = {
     "locals": cmd_locals,
     "optimize": cmd_optimize,
     "second": cmd_second,
+    "floodgates": cmd_floodgates,
 }
 
 
