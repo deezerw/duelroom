@@ -3,7 +3,7 @@
 **Rewritten after Stage 2.** The handtrap machinery exists upstream. Board breaking is
 the open question and is the real work of this stage.
 
-## 1. Handtrap matrix — mostly built
+## 1. Handtrap matrix — DONE (2026-10-18)
 
 `tools/funnel_eval.py` takes `--fire PASSWORD` (repeatable) and re-runs every solved
 hand with each handtrap fired, reporting survival. That is the handtrap matrix.
@@ -20,12 +20,29 @@ Weight the columns by `locals.toml` and you have a direct answer to **which hand
 main deck**. This is the most actionable output in the project and nobody does it
 systematically.
 
-Two things duelroom must add:
-- `funnel_eval` wants a per-deck `--targets` JSON. `solve_blocking` plans targets
-  automatically from card scripts instead. Either generate a targets file from a
-  `solve_blocking` pass, or add `--fire` handling to the blocking path.
-- Test the common **pairs** (Ash + Imperm), not only singles. Handtraps compound and
-  locals players hold more than one.
+Built in `skills/scenarios.py`, rendered by `daemon.py matrix`. Targets are derived
+from the board library rather than hand-written (`daemon.py targets`), so they track
+the meta.
+
+Measured over 7 decks x 12 hands, weighted by `locals.toml` (55% coverage):
+
+    stop%   live%   handtrap
+     56.2%   94.5%  Ash Blossom
+     36.0%   62.0%  Ghost Ogre
+     12.7%   17.7%  Nibiru          rarely live; stops ~72% when it is
+      8.3%   71.1%  Infinite Impermanence
+      5.0%   71.1%  Effect Veiler
+      0.0%  100.0%  Maxx "C"        metric blind spot, see below
+      0.0%   69.3%  Droll
+
+Still to add:
+- **Common pairs** (Ash + Imperm), not only singles. Handtraps compound and locals
+  players hold more than one. This is the main gap in the matrix.
+- More hands. Several cells rest on 1-3 tested windows.
+- A better answer for resource-punishment handtraps. Maxx "C" and Droll score 0% stop
+  because the metric asks only whether the line reaches its target, and Maxx "C" never
+  stops a combo -- it punishes one with cards. Scoring them needs a different question
+  (cards surrendered, or whether the line shortens), not a different budget.
 
 Nibiru counts and Maxx "C" cost fall out of the solver's special-summon tracking for
 free — emit them alongside.
@@ -74,6 +91,19 @@ Two notes for the implementation:
 
 For each board in the Stage 3 library: construct it, deal a going-second hand, and
 search for a break.
+
+**What is still missing, concretely.** `--start` wants a replay containing BOTH decks,
+and the stored demonstrations only contain the piloted one -- they were solved against
+a passive opponent, so there is no "our side" in them. So the work is:
+
+1. Build a two-deck duel (theirs first, ours second) with `ygorl.engine.duel`.
+2. Replay their stored line into it. `ygorl.solver.demo` has the pieces --
+   `read_jsonl`, `_duel_from`, `verify_line`, `iter_steps` -- but `_duel_from`
+   constructs the single-deck demo duel, so this needs its two-deck equivalent.
+3. Save that as a replay, then `--start` it with `--player 1 --turns 2` and
+   `--board-remove` their key interruption.
+
+Step 2 is the real work. Everything either side of it is verified.
 
 Report per archetype:
 - Break rate with Wilson CI (`stats.wilson`)
