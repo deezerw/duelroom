@@ -32,6 +32,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   solve <deck> [hands]      turn-1 line search: solve rate + board quality
   ladder <deck> [hands]     calibrate the solver budget (run this first)
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
+  boards [load]             meta end-board library (what you must break)
   help / quit
 """
 
@@ -271,6 +272,29 @@ def cmd_gate(conn, args):
     print(f"\n  stored as run {run_id} in data/duelroom.db")
 
 
+def cmd_boards(conn, args):
+    if args and args[0] == "load":
+        path = ROOT / "results" / "boards_summary.json"
+        if not path.exists():
+            print(f"no {path} — run solve_blocking over the meta decks first")
+            return
+        n = gate.load_boards(conn, path)
+        print(f"loaded {n} distinct boards")
+
+    lib = gate.board_library(conn)
+    if not lib:
+        print("board library empty — run `boards load`")
+        return
+    for archetype, boards in lib.items():
+        total = sum(b["frequency"] for b in boards)
+        mean = sum(b["negates"] * b["frequency"] for b in boards) / (total or 1)
+        print(f"\n  {archetype}  (mean {mean:.1f} interruptions)")
+        for b in boards:
+            print(f"    {b['frequency']*100:4.0f}%  {b['negates']} interrupts")
+            for i in b["interruptions"]:
+                print(f"            {i}")
+
+
 def cmd_export(conn, args):
     if not args:
         print("usage: export <archetype> [filename]")
@@ -321,6 +345,7 @@ COMMANDS = {
     "solve": cmd_solve,
     "ladder": cmd_ladder,
     "gate": cmd_gate,
+    "boards": cmd_boards,
 }
 
 

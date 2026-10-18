@@ -236,3 +236,69 @@ def classify_hands(record):
         a = h.get("combo_actions") or 99
         out["god" if a <= 6 else "strong" if a <= 9 else "normal"] += 1
     return out
+
+
+# --- end-board library ---------------------------------------------------
+
+def load_boards(conn, summary_path, fmt="Tournament Meta Decks", source_run=None):
+    """Store solve_blocking end boards into `boards`.
+
+    This is what replaces bot-vs-bot duelling. Each meta deck is goldfished
+    going first and the boards it actually assembles are recorded with their
+    frequency. Stage 4 then treats each as a static puzzle: deal yourself a
+    going-second hand and search for a break. No opponent AI anywhere.
+
+    Identical boards are collapsed and counted, so `frequency` is the share
+    of that deck's solved hands ending on that board -- which is what Stage
+    4 must weight break rates by. A board they assemble one time in ten is
+    not worth optimizing against.
+    """
+    summary = json.loads(Path(summary_path).read_text())
+    stored = 0
+    with conn:
+        for deck, d in (summary.get("decks") or {}).items():
+            boards = d.get("boards") or []
+            if not boards:
+                continue
+            # Collapse identical boards: the interruption set is the board's
+            # identity for our purposes.
+            groups = Counter()
+            negates = {}
+            for b in boards:
+                key = tuple(sorted(b.get("interruptions") or []))
+                groups[key] += 1
+                negates[key] = len(key)
+            total = sum(groups.values())
+            conn.execute(
+                "DELETE FROM boards WHERE archetype = ? AND format = ?",
+                (deck, fmt),
+            )
+            for key, n in groups.most_common():
+                conn.execute(
+                    """INSERT INTO boards
+                         (archetype, format, board_state, frequency, negates,
+                          source_run)
+                       VALUES (?,?,?,?,?,?)""",
+                    (deck, fmt, json.dumps(list(key)), n / total,
+                     negates[key], source_run),
+                )
+                stored += 1
+    return stored
+
+
+def board_library(conn, fmt="Tournament Meta Decks"):
+    """The stored library, most common board first per archetype."""
+    rows = conn.execute(
+        """SELECT archetype, board_state, frequency, negates
+             FROM boards WHERE format = ?
+         ORDER BY archetype, frequency DESC""",
+        (fmt,),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["archetype"], []).append({
+            "interruptions": json.loads(r["board_state"]),
+            "frequency": r["frequency"],
+            "negates": r["negates"],
+        })
+    return out

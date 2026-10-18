@@ -19,9 +19,15 @@ results into our database where Stages 4 and 5 can use them.
 
 Driven through `skills/engine.py` — `solve_blocking()` and `duel()`.
 
-## 1. The validation gate — do this first
+## 1. The validation gate — PASSED (2026-10-17)
 
-**Nothing downstream means anything until this passes.**
+snake_eye into Snake-Eyes Flamberge Dragon, 12 hands at 60 s: **10/12 solved**
+(83%, 95% CI 55-95%). Both bricks inspected and genuine -- hand 8 is five handtraps
+with zero engine, hand 9 is two Subversion plus Birch with no standalone starter.
+Conditional on holding a starter the solver is 10/10. Lines run 6-11 actions, median
+8.5. Run it again with `daemon.py gate <deck>` after any component bump.
+
+**Original text, kept because the procedure still applies to every new deck:**
 
 Point the solver at a deck with a well-documented combo line and assert it reproduces
 that line in ≥90% of hands containing the required starters. Export the line as `.yrpX`
@@ -34,16 +40,22 @@ line, and a pass rate.
 
 ## 2. Budgets — reproducibility over speed
 
+**Measured: upstream's 10 s does not transfer.** On this deck the ladder gives
+3/12 bricks at 10 s, 2/12 at 60 s, 2/12 at 120 s -- so 10 s invents a brick that
+solves in 9 actions given 28.5 s, and that hand's Ash survival flips from dead to
+2/4. Board quality moves too: kewl-tune averaged 3.0 interruptions at 10 s and 4-5
+at 60 s. `SOLVE_MS` is now 60 s and `daemon.py ladder <deck>` measures it per deck.
+
 Use `--max-rollouts` (a solver *count* budget), not `--solve-ms` alone. A wall-clock
 budget makes results depend on machine load, so the same deck scores differently on a
 busy box. A rollout budget is reproducible; set `--solve-ms` well above it as a backstop.
 
-`SOLVE_MS` is 10s and is **not a free knob**. Upstream measured 5s/hand producing
-systematic false bricks on long-combo decks — +17 to +19 percentage points of hands
-wrongly reported unsolvable. A cheaper run is a wrong run.
+Upstream's own measurement was 5 s producing +17 to +19 points of false bricks on
+long-combo decks; ours shows the same failure persisting at 10 s. A cheaper run is a
+wrong run, not a faster one.
 
-Observed cost here: 18–31 s/hand on 6 workers. 1000 hands per deck is 1.5–3 hours of
-wall clock. Plan runs accordingly, and prefer more decks at 100 hands over one deck at
+Observed cost at 60 s: 60–130 s/hand on 6 workers. 1000 hands per deck is most of a
+day. Plan runs accordingly, and prefer more decks at 100 hands over one deck at
 1000 until the pipeline is trusted.
 
 ## 3. Store results in `data/duelroom.db`
