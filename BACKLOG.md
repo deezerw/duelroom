@@ -25,13 +25,9 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] RE-EXAMINE `scenarios.BLIND_SPOTS`. It was added when Maxx "C" and Droll scored
-      0% stop under the buggy `status`-based reading. With the corrected `survives`
-      field they score 21.4% and 17.8%, so the claim that this metric structurally
-      cannot see them is now doubtful — a `survives: False` on Maxx "C" may be the
-      solver correctly declining to combo into a free draw engine, which is exactly
-      the real decision. Check the raw fire entries before keeping or dropping the
-      NOT MEASURABLE label; do not assert either way without looking.
+- [ ] Nibiru reports few legal windows in the matrix (0 for kewl-tune) even though
+      every deck makes 8-23 special summons per line. Check how ygorl offers that
+      window before trusting Nibiru's row either way.
 
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
@@ -62,6 +58,15 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **BLIND_SPOTS re-examined on evidence.** Maxx "C" stays (856/908 windows convert, so
+  lines continue through it and the cards surrendered are invisible to a
+  "did the line finish" metric). **Droll removed** — only 45/85 convert and 19 hands
+  died to it, so the metric does capture it; it was only labelled unmeasurable because
+  the buggy `status` reading scored it a spurious 0%.
+- **Special summons per line, for free.** Maxx "C" opens a window per special summon,
+  so its `windows` count IS the summon count — STAGE3 deferred this as needing a
+  replay pass and it was in the matrix data all along. elfnote 22.6/line, fiendsmith
+  20.1, branded 6.8.
 - **SELF-CORRECTION: my no_window fix read the wrong field.** `status` on a fire entry
   reports whether the SEARCH succeeded, not whether the line lived — an entry can read
   status "solved" with windows 6, converted 3, survives False. I used status, which

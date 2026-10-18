@@ -252,8 +252,12 @@ def test_side_in_refuses_a_card_not_in_the_side_deck():
 # so a high number there is the metric missing the card.
 
 def test_blind_spot_cards_are_declared():
+    # Maxx "C" only. Droll was removed after the `survives` fix: 45 of 85
+    # of its windows convert and 19 hands died to it, so the metric does
+    # capture it. Maxx "C" stays because 94% of its windows convert --
+    # lines continue through it and the cards it hands over are invisible
+    # to a "did the line finish" measurement.
     assert 23434538 in scenarios.BLIND_SPOTS, 'Maxx "C" must stay flagged'
-    assert 94145021 in scenarios.BLIND_SPOTS, "Droll must stay flagged"
     for code, reason in scenarios.BLIND_SPOTS.items():
         assert reason and isinstance(reason, str)
 
@@ -277,3 +281,44 @@ def test_slug_matches_deck_names_across_spellings():
     assert config.slug("Kewl Tune") == config.slug("kewl-tune")
     assert config.slug("Light and Darkness Ritual") == "light-and-darkness-ritual"
     assert config.slug("kewl-tune") == "kewl-tune"
+
+
+# --- summon counts -------------------------------------------------------
+# Maxx "C" opens a window per special summon, so its `windows` count is
+# the summon count. STAGE3 deferred this as needing a replay pass.
+
+def test_summon_counts_read_maxx_c_windows():
+    recs = [{
+        "summary": {"deck": "d"},
+        "hands": [
+            {"status": "solved",
+             "fire": {"23434538": {"status": "solved", "windows": w}}}
+            for w in (3, 7, 9)
+        ],
+    }]
+    got = scenarios.summon_counts(recs)["d"]
+    assert got["mean"] == pytest.approx((3 + 7 + 9) / 3)
+    assert got["max"] == 9
+    # 7 and 9 clear the 5-summon threshold; 3 does not
+    assert got["nibiru_rate"] == pytest.approx(2 / 3)
+
+
+def test_no_window_entries_excluded_from_summon_counts():
+    recs = [{
+        "summary": {"deck": "d"},
+        "hands": [
+            {"status": "solved",
+             "fire": {"23434538": {"status": "no_window", "windows": 0}}},
+            {"status": "solved",
+             "fire": {"23434538": {"status": "solved", "windows": 8}}},
+        ],
+    }]
+    got = scenarios.summon_counts(recs)["d"]
+    assert got["n"] == 1 and got["mean"] == 8
+
+
+def test_droll_is_no_longer_a_blind_spot():
+    # it was only labelled unmeasurable under the buggy status reading;
+    # 45/85 windows convert and 19 hands died to it
+    assert 94145021 not in scenarios.BLIND_SPOTS
+    assert 23434538 in scenarios.BLIND_SPOTS

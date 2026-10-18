@@ -35,10 +35,20 @@ HANDTRAPS = {
 # line -- Maxx "C" punishes one with cards, Droll shuts off searching
 # without necessarily preventing the target. A high survival against
 # them is the metric failing to see the card, not the deck being fine.
+# Re-examined against the raw fire entries after the `survives` fix.
+# Maxx "C" stays: 856 of 908 windows convert (94%), so lines do continue
+# through it, and the real cost -- the cards it hands the opponent -- is
+# not what "did the line reach its target" measures. Droll is REMOVED:
+# only 45 of 85 windows convert and 19 hands died to it, so the metric
+# does capture what Droll does. It was only labelled unmeasurable
+# because the earlier status-based reading scored it a spurious 0%.
 BLIND_SPOTS = {
-    23434538: 'Maxx "C" draws them cards instead of stopping you',
-    94145021: "Droll shuts off searching; the target may not need a search",
+    23434538: ("lines convert 94% of its windows, so this measures "
+               "completion, not the cards it hands them"),
 }
+
+MAXX_C = 23434538
+NIBIRU_THRESHOLD = 5  # special summons before Nibiru can be used
 
 
 # Common floodgates for the Stage 4 static check. Locals run these far more
@@ -540,3 +550,39 @@ def target_is_extra(conn, deck_path, target):
     except ValueError:
         return 1
     return 1 if code in set(d.extra) else 0
+
+
+# --- summon counts, for free -------------------------------------------
+
+def summon_counts(records):
+    """Special summons per line, per deck.
+
+    Maxx "C" opens a window on every special summon, so the `windows`
+    count on its fire entry IS the summon count. STAGE3 deferred this as
+    needing each line replayed through ygorl; it was sitting in the
+    matrix data the whole time.
+
+    Returns {deck: {"mean", "max", "nibiru_rate", "n"}}.
+    """
+    out = {}
+    for rec in records:
+        deck = (rec.get("summary") or {}).get("deck")
+        if not deck:
+            continue
+        counts = []
+        for h in rec.get("hands") or []:
+            if h.get("status") != "solved":
+                continue
+            f = (h.get("fire") or {}).get(str(MAXX_C))
+            if f and f.get("status") != "no_window":
+                counts.append(f.get("windows") or 0)
+        if not counts:
+            continue
+        out[deck] = {
+            "mean": sum(counts) / len(counts),
+            "max": max(counts),
+            "nibiru_rate": sum(1 for c in counts
+                               if c >= NIBIRU_THRESHOLD) / len(counts),
+            "n": len(counts),
+        }
+    return out

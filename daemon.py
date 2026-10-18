@@ -383,6 +383,20 @@ def cmd_threats(conn, args):
         tag = "  (yours)" if mine and config.slug(arch) == config.slug(mine) else ""
         print(f"  {arch.ljust(28)}{cells}  {mean:6.1f}{tag}")
 
+    recs_path = ROOT / "results" / "handtrap_matrix.jsonl"
+    if recs_path.exists():
+        recs = [json.loads(l) for l in recs_path.read_text().splitlines() if l.strip()]
+        sc = scenarios.summon_counts(recs)
+        if sc:
+            print("\n  special summons per line (from Maxx \"C\" windows)\n")
+            print("  " + "archetype".ljust(28) + "  SS/line   max   Nibiru-able")
+            for deck, v in sorted(sc.items(), key=lambda kv: -kv[1]["mean"]):
+                print(f"  {deck.ljust(28)}{v['mean']:8.1f}{v['max']:6}"
+                      f"{v['nibiru_rate']*100:12.0f}%")
+            print("\n  (Nibiru-able = share of lines passing 5 summons. Every deck")
+            print("   here clears it, yet Nibiru reports few legal windows in the")
+            print("   matrix — worth checking how ygorl offers that window.)")
+
     print("\n  visible board vs cards held in hand\n")
     print("  " + "archetype".ljust(28) + "  on field   in hand")
     bh = gate.board_vs_hand(conn)
