@@ -30,14 +30,29 @@ Two things duelroom must add:
 Nibiru counts and Maxx "C" cost fall out of the solver's special-summon tracking for
 free — emit them alongside.
 
-## 2. Board breaking — the open item
+## 2. Board breaking — VERIFIED available (2026-10-17)
 
-**This is the one Stage 2 deliverable not yet verified: constructing an arbitrary board
-and querying it back.** ygorl has arena snapshot/restore and `ygorl branch`, so the
-capability is almost certainly there, but duelroom has not exercised it.
+The open item is closed. `ygorl.engine.puzzle` is built for exactly this: a `Puzzle`
+takes `Placement(password, location, sequence, team, position)` tuples and creates a
+duel whose cards are added with `OCG_DuelNewCard` instead of shuffled decks. No draw,
+starts in player 0's Main Phase 1, deterministic like any other duel.
 
-Verify that first, then: for each board in the Stage 3 library, construct it, deal a
-going-second hand, and search for a break.
+Confirmed by construction: Apollousa in the opponent's monster zone, a set Infinite
+Impermanence in their spell/trap zone, Ash in our hand -- queried back as team 1
+monsters 1, team 1 spell/trap 1, team 0 hand 1. That is the exact shape every
+going-second puzzle needs.
+
+Two notes for the implementation:
+- `Puzzle.__init__` takes `cards, seed, lp, rule_flags` but no `snapshots` flag, so
+  `duel.snapshot()` raises "this duel was created without snapshots". Branch-and-return
+  over a puzzle therefore means re-running from the seed (deterministic, so correct,
+  just slower) unless the puzzle path is extended to pass the flag.
+- Bounds are checked before entering the core (player 0/1, exactly one `LOCATION_*`,
+  monster seq < 7, spell/trap seq < 8) and raise `ValueError`. The core itself does not
+  check and out-of-range writes corrupt memory, so do not bypass that layer.
+
+For each board in the Stage 3 library: construct it, deal a going-second hand, and
+search for a break.
 
 Report per archetype:
 - Break rate with Wilson CI (`stats.wilson`)
