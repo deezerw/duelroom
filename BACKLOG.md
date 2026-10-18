@@ -60,6 +60,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **`bootstrap.sh`** — the repo on GitHub carries source and decklists only, so a
+  fresh clone could not run a single solver command; the engine needed seven setup
+  steps that existed solely in a docstring. The script encodes all of them, with each
+  gotcha documented where it bites: `--recursive` submodules (ygopro-core nests Lua as
+  its own), upstream's conservative Python pin, `libsqlite3-dev`, and the merged card
+  database. `--check` reports state without changing anything. Prerequisite detection
+  verified by running it with the compilers absent.
 - **Bare-command audit.** Ran every command with no arguments. `gate`, `solve`,
   `ladder`, `floodgates`, `second` and `optimize` all began minutes-to-hours of solver
   work immediately, with nothing said about cost or about a sweep already running —

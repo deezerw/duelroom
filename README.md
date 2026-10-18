@@ -74,8 +74,24 @@ test was verified by reintroducing its bug and watching it fail. `tools/audit_fi
 above: code reading a record field that is never present, silently defaulting, and
 reporting a plausible number.
 
-## Requirements
+## Setup from a fresh clone
 
-Python 3.12, `libsqlite3-dev`, and a C++17 toolchain for the vendored engine. The
-vendored submodules and the merged card database are not in this repo; see the setup
-notes in `skills/engine.py` and run `daemon.py setup` after cloning.
+The repo carries source and decklists only. The rules engine, card scripts and card
+database are large third-party trees under `vendor/` and are gitignored, so a clone
+cannot run a solver command until they are fetched and built.
+
+```bash
+./bootstrap.sh            # full setup, safe to re-run
+./bootstrap.sh --check    # report what is missing, change nothing
+```
+
+Needs Python 3.12, a C++17 toolchain, cmake 3.20+, and `libsqlite3-dev`. The script
+checks for those first and prints the apt line if any are absent.
+
+It encodes several things that are not obvious and fail unhelpfully when skipped:
+submodules must be fetched `--recursive` (ygopro-core nests Lua as its own submodule,
+and without it the build reports "ygopro-core sources not found" while the directory
+looks populated); upstream's `>=3.11,<3.12` Python pin is conservative and is relaxed
+rather than installing a second interpreter; and the card database must be merged,
+because recent sets ship as separate `release-*.cdb` files that the engine never loads
+and a deck holding one of those cards segfaults the solver.
