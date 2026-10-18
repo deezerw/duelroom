@@ -25,10 +25,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] Auto-fill `locals.toml` from scraped shares (`daemon.py locals --auto`), keeping
-      a `rogue` slice since the scrape only sees tournament lists.
-
-## NEXT
 - [ ] Targets for a user deck that is not in the board library — `derive_targets` reads
       `results/boards.jsonl`, so a fresh deck has no target and `gate`/`optimize`/
       `second` all refuse it. Needs a solve_blocking pass on demand.
@@ -55,6 +51,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## DONE
 
+- **locals.toml auto-fill** (`daemon.py locals auto [rogue%]`). Each DECK contributes
+  one unit of weight split across its tags: raw tag counts would sum to 166% of the
+  deck count (1.66 tags/deck, one list carries five) and inflate hybrid-heavy
+  archetypes. 25% reserved for rogue since the scrape only sees decks that TOPPED
+  something. Coverage 55% -> 58%; the handtrap ranking is unchanged under the new
+  weights, so that conclusion was not an artifact of the placeholders.
 - Stages 1-5 all implemented (see CLAUDE.md and git log).
 - **Deck authoring** (`skills/importer.py`): import from .ydk path, `ydke://` URI, or
   YGOPRODeck URL; `mydeck` sets an active deck that every deck-taking command falls

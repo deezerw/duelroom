@@ -43,7 +43,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   threats                   interruption counts + common pieces per archetype
   targets                   derive solver targets from the board library
   matrix                    handtrap matrix: which handtraps to main deck
-  locals                    your locals.toml weights and their coverage
+  locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
   second <theirs> <ours>    going second into their real board
   floodgates <deck>         does the deck function under common floodgates
@@ -386,6 +386,17 @@ def cmd_targets(conn, args):
 
 
 def cmd_locals(conn, args):
+    if args and args[0] == "auto":
+        rogue = float(args[1]) / 100 if len(args) > 1 else config.DEFAULT_ROGUE
+        if not 0 <= rogue < 1:
+            print("rogue share must be between 0 and 100 (percent)")
+            return
+        written = config.autofill(conn, rogue=rogue)
+        if not written:
+            print("no scraped lists to derive from — run `meta` first")
+            return
+        print(f"wrote locals.toml from the scrape, {rogue:.0%} reserved for rogue\n")
+
     w = config.weights()
     if not w:
         print("locals.toml has no weights — edit it with your room's spread")
