@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · duelroom{% endblock %}
+{% block body %}
+<h1>{{ name }}</h1>
+<p class="muted">
+  {{ deck.main|length }} main · {{ deck.extra|length }} extra ·
+  {{ deck.side|length }} side
+  {%- if archetype %} · {{ archetype[0] }}
+    <span class="muted">({{ '%.0f'|format(archetype[1]*100) }}% of its
+    {{ archetype[2] }}-card core)</span>{% endif %}
+</p>
+{% for alt in alts %}
+  <p class="muted" style="margin:-6px 0 0">also matches {{ alt[0] }}
+    ({{ '%.0f'|format(alt[1]*100) }}% of {{ alt[2] }} core)</p>
+{% endfor %}
+
+{% if problems %}
+  <div class="flag bad"><strong>Not legal.</strong>
+    <ul style="margin:6px 0 0">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}
+{% if unresolved %}
+  <div class="flag">{{ unresolved|length }} passcode(s) unknown to the card
+    mirror — run <code>cards</code> to refresh.</div>
+{% endif %}
+
+{% for sec in ['main','extra','side'] %}
+  {% if sections[sec] %}
+  <h2>{{ sec }} deck <span class="muted">·
+    {{ sections[sec]|sum(attribute='copies') }} cards</span></h2>
+  <div class="panel"><div class="grid">
+    {% for c in sections[sec] %}
+      <div><span class="mono muted">{{ c.copies }}×</span> {{ c.name }}</div>
+    {% endfor %}
+  </div></div>
+  {% endif %}
+{% endfor %}
+
+<h2>Export</h2>
+<div class="panel">
+  <p style="margin-top:0"><a class="btn"
+     href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a></p>
+  <p class="muted" style="margin-bottom:4px">ydke:// — paste into EDOPro or any builder</p>
+  <textarea readonly onclick="this.select()">{{ ydke }}</textarea>
+</div>
+{% endblock %}

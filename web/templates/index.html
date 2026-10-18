@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Decks</h1>
+<p class="muted">{{ decks|length }} list{{ '' if decks|length == 1 else 's' }}
+  {%- if active %} · active: <strong>{{ active }}</strong>{% endif %}</p>
+
+<div class="panel">
+<table>
+  <thead><tr><th>deck</th><th>archetype</th><th>main</th><th>extra</th>
+    <th>side</th><th>legal</th><th></th></tr></thead>
+  <tbody>
+  {% for d in decks %}
+    <tr>
+      <td><a href="{{ url_for('views.deck', name=d.name) }}">{{ d.name }}</a>
+        {% if d.active %}<span class="pill active">active</span>{% endif %}</td>
+      <td class="muted">{{ d.archetype or '—' }}</td>
+      <td class="mono">{{ d.main }}</td>
+      <td class="mono">{{ d.extra }}</td>
+      <td class="mono">{{ d.side }}</td>
+      <td>{% if d.legal %}<span class="pill ok">legal</span>
+          {% else %}<span class="pill bad">illegal</span>{% endif %}</td>
+      <td style="text-align:right">
+        {% if not d.active %}
+        <form method="post" action="{{ url_for('views.activate', name=d.name) }}"
+              style="margin:0"><button style="padding:3px 9px;font-size:12px">
+          make active</button></form>
+        {% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">No decks yet —
+      <a href="{{ url_for('views.import_deck') }}">import one</a>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">Archetypes are inferred from each deck's cards, by overlap with
+  the scraped meta's core. Commands default to the active deck.</p>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Import a deck</h1>
+<form method="post" enctype="multipart/form-data">
+  <div class="panel">
+    <h2 style="margin-top:0">Paste</h2>
+    <textarea name="source" placeholder="ydke://...  or  https://ygoprodeck.com/deck/..."></textarea>
+    <p class="muted" style="margin:8px 0 0">
+      <code>ydke://</code> is what “copy deck” puts on your clipboard in EDOPro,
+      Master Duel importers and most builders — the shortest path from a list to
+      a measurement.</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Or upload a .ydk</h2>
+    <input type="file" name="file" accept=".ydk,text/plain">
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Name <span class="muted">(optional)</span></h2>
+    <input type="text" name="name" placeholder="defaults to the page title or filename">
+  </div>
+  <button class="primary">Import</button>
+</form>
+{% endblock %}

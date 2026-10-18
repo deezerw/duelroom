@@ -1,14 +1,21 @@
 anyio==4.15.1
 array-api-compat==1.15.0
+blinker==1.9.0
 certifi==2026.7.22
+click==8.5.0
 cloudpickle==3.1.2
 Deprecated==3.0.0
+Flask==3.1.3
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
+iniconfig==2.3.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
 joblib==1.6.0
 llvmlite==0.50.0
+MarkupSafe==3.0.4
 narwhals==2.27.1
 nashpy==0.0.43
 networkx==3.7
@@ -18,7 +25,10 @@ numpy-groupies==0.14.1
 packaging==26.3
 pandas==3.0.6
 pathspec==1.1.1
+pluggy==1.7.0
 pybind11==3.1.0
+Pygments==2.21.0
+pytest==9.1.1
 python-dateutil==2.9.0.post0
 ribs==0.12.0
 scikit-learn==1.9.1
@@ -28,5 +38,6 @@ six==1.17.0
 sortedcontainers==2.4.0
 threadpoolctl==3.7.0
 typing_extensions==4.16.0
+Werkzeug==3.1.9
 wrapt==2.5.1
 ygorl @ file:///home/deezer/duelroom/vendor/ygorl

@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>duelroom</title>
+<style>
+ body{margin:0;background:#11131a;color:#e6e8ef;display:grid;place-items:center;
+      min-height:100vh;font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
+ form{background:#1a1d26;border:1px solid #2a2f3d;border-radius:10px;padding:24px;
+      width:min(340px,92vw);display:grid;gap:12px}
+ h1{font-size:17px;margin:0} input{padding:9px 11px;background:#0d0f15;color:#e6e8ef;
+   border:1px solid #2a2f3d;border-radius:7px;font:inherit;width:100%;box-sizing:border-box}
+ button{padding:9px;border:0;border-radius:7px;background:#7aa2f7;color:#0d0f15;
+        font:inherit;font-weight:600;cursor:pointer}
+ .msg{color:#f7768e;font-size:13px}
+</style>
+<form method="post">
+  <h1>duelroom</h1>
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="msg">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  <input type="password" name="password" placeholder="password" autofocus
+         autocomplete="current-password">
+  <input type="hidden" name="next" value="{{ next or '' }}">
+  <button>enter</button>
+</form>

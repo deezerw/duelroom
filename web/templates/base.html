@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}duelroom{% endblock %}</title>
+<style>
+  :root{
+    --bg:#11131a; --panel:#1a1d26; --line:#2a2f3d; --ink:#e6e8ef;
+    --dim:#9aa3b8; --accent:#7aa2f7; --ok:#86d98b; --warn:#e0af68; --bad:#f7768e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  header{display:flex;gap:18px;align-items:center;padding:12px 20px;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header .brand{font-weight:650;letter-spacing:.3px}
+  header nav{display:flex;gap:16px;margin-left:auto;align-items:center}
+  main{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:28px 0 10px;
+     color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .panel{background:var(--panel);border:1px solid var(--line);
+         border-radius:10px;padding:16px 18px;margin:14px 0}
+  /* A panel whose numbers cannot be trusted is greyed with its reason
+     attached, rather than showing a confident value. */
+  .panel.untrusted{opacity:.62;border-style:dashed}
+  .flag{display:block;border-left:3px solid var(--warn);padding:8px 12px;
+        margin:10px 0;color:var(--warn);background:#e0af6810;border-radius:0 6px 6px 0}
+  .flag.bad{border-color:var(--bad);color:var(--bad);background:#f7768e10}
+  .muted{color:var(--dim)} .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:7px 10px}
+  th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase;
+     letter-spacing:.06em;border-bottom:1px solid var(--line)}
+  tbody tr{border-bottom:1px solid #ffffff0a} tbody tr:hover{background:#ffffff06}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;
+        border:1px solid var(--line);color:var(--dim)}
+  .pill.ok{color:var(--ok);border-color:#86d98b44}
+  .pill.bad{color:var(--bad);border-color:#f7768e44}
+  .pill.active{color:var(--accent);border-color:#7aa2f744}
+  input[type=text],input[type=password],textarea{width:100%;padding:9px 11px;
+    background:#0d0f15;border:1px solid var(--line);border-radius:7px;color:var(--ink);
+    font:inherit}
+  textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px;min-height:90px}
+  button,.btn{padding:8px 14px;border-radius:7px;border:1px solid var(--line);
+    background:#232838;color:var(--ink);font:inherit;cursor:pointer}
+  button:hover,.btn:hover{background:#2c3246;text-decoration:none}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#0d0f15;
+    font-weight:600}
+  .msg{border:1px solid #7aa2f744;background:#7aa2f714;color:var(--accent);
+       padding:9px 13px;border-radius:7px;margin:10px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  @media(max-width:620px){main{padding:16px 14px 50px} header{padding:10px 14px}}
+</style>
+<header>
+  <span class="brand">duelroom</span>
+  <nav>
+    <a href="{{ url_for('views.index') }}">decks</a>
+    <a href="{{ url_for('views.import_deck') }}">import</a>
+    <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
+      <button style="padding:4px 10px;font-size:12px">log out</button></form>
+  </nav>
+</header>
+<main>
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="msg">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</main>
