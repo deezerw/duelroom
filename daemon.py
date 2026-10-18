@@ -36,6 +36,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   report [deck] [archetype] everything known about a deck, in one view
   drill [deck] [n]          export best lines as EDOPro replays to practise
   export <archetype> [name] write a scraped list out as a .ydk
+  doctor                    run every self-check: engine, data, guards
   setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
   solve <deck> [hands]      turn-1 line search: solve rate + board quality
@@ -203,6 +204,87 @@ def cmd_check(conn, args):
         return
     for p in problems:
         print(f"  ! {p}")
+
+
+def cmd_doctor(conn, args):
+    """Everything that can be verified without burning solver time.
+
+    Four guards grew out of four different failure modes tonight and
+    none of them were wired together. This runs all of them plus the
+    engine and data checks, and reports what is MISSING as loudly as
+    what is broken -- an empty database passing every check is not a
+    healthy install.
+    """
+    import subprocess
+    ok = True
+
+    print("\n  ENGINE")
+    problems = engine.check()
+    if problems:
+        ok = False
+        for p in problems:
+            print(f"    ! {p}")
+    else:
+        v = engine.versions()
+        print(f"    ready — ygorl {v['ygorl']}, core {v['ygopro_core']}, "
+              f"scripts {v['card_scripts']}")
+        print(f"    budget {engine.SOLVE_MS/1000:.0f}s/hand, "
+              f"{engine.DEFAULT_WORKERS} workers")
+
+    print("\n  DATA")
+    counts = {
+        "cards": "SELECT COUNT(*) n FROM cards",
+        "scraped lists": "SELECT COUNT(*) n FROM decks",
+        "end boards": "SELECT COUNT(*) n FROM boards",
+        "solve trials": "SELECT COUNT(*) n FROM trials",
+    }
+    for label, q in counts.items():
+        n = conn.execute(q).fetchone()["n"]
+        flag = "" if n else "   <- empty, most commands will do nothing"
+        if not n:
+            ok = False
+        print(f"    {n:>6}  {label}{flag}")
+    decks = sorted((ROOT / "assets" / "decks").glob("*.ydk"))
+    print(f"    {len(decks):>6}  deck files")
+    active = db.get_meta(conn, "active_deck")
+    print(f"            active deck: {active or '(none — `import` or `mydeck`)'}")
+
+    print("\n  GUARDS")
+    for label, cmd in (
+        ("regression tests", [str(engine.ROOT / "venv/bin/pytest"), "tests/", "-q"]),
+        ("invariants", [str(engine.PYTHON), "tools/check_invariants.py"]),
+        ("field audit", [str(engine.PYTHON), "tools/audit_fields.py"]),
+        ("doc drift", [str(engine.PYTHON), "tools/check_docs.py"]),
+    ):
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
+        tail = (r.stdout or r.stderr).strip().splitlines()
+        summary = tail[-1] if tail else "(no output)"
+        mark = "ok  " if r.returncode == 0 else "FAIL"
+        if r.returncode != 0:
+            ok = False
+        print(f"    {mark}  {label:18} {summary[:60]}")
+
+    print("\n  WEAKEST DATA")
+    mpath = _latest_matrix()
+    if mpath:
+        recs = [json.loads(l) for l in mpath.read_text().splitlines() if l.strip()]
+        hands = min((r.get("summary", {}).get("hands") or 0) for r in recs) if recs else 0
+        n_decks = len(decks) - 2  # snake_eye and imported user decks are not swept
+        print(f"    handtrap matrix: {mpath.name}, {hands} hands/deck, "
+              f"{len(recs)} deck(s)")
+        if len(recs) < n_decks:
+            print(f"      ! only {len(recs)} of ~{n_decks} decks — this file is "
+                  f"PARTIAL (a sweep may still be running)")
+        if hands and hands < 20:
+            print("      ! under 20 hands — survival cells rest on a handful of windows")
+    nb = conn.execute("SELECT COUNT(DISTINCT archetype) n FROM boards").fetchone()["n"]
+    print(f"    board library covers {nb} archetypes")
+    covered, missing = config.coverage([p.stem for p in decks])
+    print(f"    locals.toml covers {covered*100:.0f}% of your stated meta")
+    if missing:
+        print(f"      no deck for: {', '.join(missing)}")
+
+    print(f"\n  {'all checks passed' if ok else 'SOMETHING NEEDS ATTENTION (see ! above)'}\n")
 
 
 def cmd_setup(conn, args):
@@ -511,7 +593,12 @@ def cmd_matrix(conn, args):
     if not path:
         print("no handtrap matrix yet — run scenarios.run_matrix first")
         return
-    print(f"  from {path.name}\n")
+    _n = len([l for l in path.read_text().splitlines() if l.strip()])
+    print(f"  from {path.name} ({_n} deck(s))")
+    if _n < 5:
+        print("  ! this file looks PARTIAL — a sweep may still be writing it.")
+        print("    Rows below cover only the decks finished so far.")
+    print()
     recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
     m = scenarios.handtrap_matrix(recs)
     if not m:
@@ -957,6 +1044,7 @@ COMMANDS = {
     "report": cmd_report,
     "drill": cmd_drill,
     "export": cmd_export,
+    "doctor": cmd_doctor,
     "setup": cmd_setup,
     "engine": cmd_engine,
     "solve": cmd_solve,

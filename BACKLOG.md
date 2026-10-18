@@ -60,6 +60,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **`doctor`** — one command running every self-check: engine readiness and pinned
+  versions, row counts for each table, all four guards, and the weakest dataset in the
+  project. Reports what is MISSING as loudly as what is broken, since an empty
+  database passes every check while being useless.
+- **Partial-sweep reads caught.** `doctor` reported "40 hands/deck" from a file a
+  running job was still writing — 1 of 7 decks. `matrix`, `threats` and `doctor` now
+  print how many decks a file actually contains and say plainly when it looks partial.
 - **Doc rot audited and mechanized.** CLAUDE.md documented 3 commands that never
   existed (`goldfish`, `scenarios`) and omitted 26 that do — the command list was
   still the one from the original plan. Regenerated from the CLI banner, and

@@ -345,3 +345,16 @@ def test_matrix_output_path_carries_the_hand_count():
         "runs at different sample sizes must not share an output file")
     assert "gained no records" in src, (
         "a run that skipped every deck must raise, not report success")
+
+
+# --- partial reads -------------------------------------------------------
+# Bug: _latest_matrix picks the newest file by mtime, which during a sweep
+# is the one still being written. Reading 1 of 7 decks as if complete
+# would silently narrow every conclusion to whichever deck finished first.
+
+def test_matrix_reader_prefers_newest_but_callers_must_see_the_count(tmp_path):
+    import re
+    src = (Path(__file__).resolve().parent.parent / "daemon.py").read_text()
+    # the reader must surface how many decks it actually got
+    assert "deck(s))" in src, "matrix must print how many decks it read"
+    assert "looks PARTIAL" in src, "a half-written sweep must be called out"
