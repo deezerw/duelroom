@@ -70,6 +70,42 @@ MUTATIONS = [
      "    if k > K or k > n or (n - k) > (N - K) or k < 0:",
      "    if k > K or k < 0:",
      "drop hypergeometric bounds checks"),
+
+    ("skills/scenarios.py",
+     "def derive_targets(jsonl_path, per_deck=1, min_hits=1):",
+     "def derive_targets(jsonl_path, per_deck=2, min_hits=1):",
+     "emit two targets per deck, which funnel_eval treats as a conjunction"),
+
+    ("skills/scenarios.py",
+     "        targets = spec.get(\"targets\") or []\n"
+     "        rank = (_zone_rank(targets[0]) if targets\n"
+     "                else spec.get(\"_zone_rank\", 3))",
+     "        rank = spec.get(\"_zone_rank\", 3)",
+     "read zone rank from a stripped key, so saved specs never flag"),
+
+    ("skills/scenarios.py",
+     "    exclude = set(exclude or ())",
+     "    exclude = set()",
+     "ignore the exclusion set in the handtrap ranking"),
+
+    ("skills/meta_scrape.py",
+     "        if len(cards) < 3:          # too thin a core to identify anything",
+     "        if False:",
+     "identify an archetype from a one or two card core"),
+
+    # Both boundaries, not one. Dropping only the left still blocks "Ra"
+    # inside "Dragon" because the right boundary sees the following "g",
+    # so a one-sided mutation survives without the behaviour being
+    # untested — the mutation was wrong, not the test.
+    ("skills/meta_scrape.py",
+     "    return re.compile(left + body + right, re.IGNORECASE)",
+     "    return re.compile(body, re.IGNORECASE)",
+     'plain substring tag matching, so "Ra" matches inside "Dragon"'),
+
+    ("skills/carddb.py",
+     "    out = sorted(babel.glob(\"release-*.cdb\"))",
+     "    out = []",
+     "stop merging recent set databases into the card db"),
 ]
 
 

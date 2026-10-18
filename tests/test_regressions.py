@@ -543,3 +543,48 @@ def test_hypergeometric_handles_impossible_arguments():
     assert stats.pmf(10, 8, 5, 1) == 0.0       # more misses than non-hits exist
     assert stats.at_least(40, 3, 5, 4) == 0
     assert stats.open_chance(40, 3, 5, want=4) == 0
+
+
+# --- gaps found by mutation testing --------------------------------------
+
+def test_tag_matching_respects_word_boundaries():
+    # Plain substring matching put "Ra" second in the meta because it hit
+    # inside "D(ra)gon", and "P" matched inside "Ten(p)ai". Punctuation
+    # tags must still work, so the boundary is only asserted on the sides
+    # that are alphanumeric.
+    from skills import meta_scrape as ms
+    vocab = ["Ra", "P", "Dragon", "Dark Magician", "@Ignister", "-Eyes Dragon"]
+    assert "Ra" not in ms.match_archetypes("Angelechy Tenpai Dragon", vocab)
+    assert "P" not in ms.match_archetypes("Angelechy Tenpai Dragon", vocab)
+    assert "Ra" in ms.match_archetypes("Ra Sphere Mode", vocab)
+    assert "@Ignister" in ms.match_archetypes("@Ignister Maliss", vocab)
+    assert "-Eyes Dragon" in ms.match_archetypes("Blue-Eyes Dragon", vocab)
+
+
+def test_excluded_cells_are_actually_excluded():
+    # The exclusion argument must do something: scoring a card over decks
+    # whose data we have decided not to believe drags it down with a zero.
+    matrix = {
+        "good": {"cells": {1: {"survival": 0.0, "tested": 4,
+                               "offered": 4, "window_rate": 1.0}}},
+        "bad": {"cells": {1: {"survival": None, "tested": 0,
+                              "offered": 5, "window_rate": 0.0}}},
+    }
+    w = {"good": 0.5, "bad": 0.5}
+    naive = scenarios.weighted_handtrap_ranking(matrix, w)[0][2]
+    excl = scenarios.weighted_handtrap_ranking(
+        matrix, w, exclude={("bad", 1)})[0][2]
+    assert naive == pytest.approx(0.5)
+    assert excl == pytest.approx(1.0), "exclude= must change the score"
+
+
+def test_recent_set_databases_are_merged():
+    # BabelCDB ships recent sets as separate release-*.cdb that ygorl
+    # never loads, and a deck holding one of those cards segfaults the
+    # solver after five misleading diagnostics.
+    from skills import carddb
+    extras = carddb.extra_cdbs()
+    assert extras, "no release-*.cdb found to merge — recent cards will be missing"
+    assert all(p.name.startswith("release-") for p in extras)
+    assert not any("prerelease" in p.name for p in extras), (
+        "pre-release sets are not tournament legal and must stay out")

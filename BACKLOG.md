@@ -60,6 +60,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Mutation list extended to 15** — every bug tonight that could be expressed as a
+  code reversal. Three more real gaps found and closed: the handtrap ranking's
+  `exclude` argument did nothing testable, word-boundary tag matching was untested
+  (the "Ra" inside "Dragon" bug that once put a non-archetype second in the meta),
+  and nothing checked that recent set databases get merged. One survivor turned out
+  to be a BAD MUTATION rather than a gap: dropping only the left word boundary still
+  blocks "Ra" in "Dragon" because the right boundary sees the following "g". All 15
+  now killed.
 - **`tools/mutation_test.py`** — reverses nine bugs this project actually had and
   checks the suite goes red for each. A green suite is not evidence; the only evidence
   is that it notices when the code is wrong. Found one genuine gap on the first run:
