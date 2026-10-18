@@ -33,9 +33,6 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
       runs in under a second; there is no excuse for skipping it.
 
-- [ ] IN FLIGHT (verified running, 6 solvers): 40-hand handtrap matrix ->
-      `results/handtrap_matrix_40h.jsonl`. The first launch silently did nothing;
-      check for actual records this time, not just that the process exited.
 - [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
       prints summon counts to stdout but nothing lands in the JSONL (no 'summon' key
       anywhere in a record). Exact counts need the line replayed through ygorl and
@@ -60,6 +57,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **40-hand handtrap matrix landed and promoted** (7/7 decks, 49 min). Unlike the
+  board library, these conclusions DID shift: Infinite Impermanence overtakes Ash for
+  first (93.4% vs 74.1%) and Effect Veiler overtakes Ghost Ogre for third. The
+  difference is effective sample size — a board-library hand yields one data point,
+  while a matrix cell only counts hands that SOLVED and then had a legal window, so
+  12 hands left several cells resting on 8-11 windows. The 12-hand file is archived
+  under results/archive/ rather than deleted.
 - **Mutation list extended to 15** — every bug tonight that could be expressed as a
   code reversal. Three more real gaps found and closed: the handtrap ranking's
   `exclude` argument did nothing testable, word-boundary tag matching was untested

@@ -54,7 +54,10 @@ common failure. Several things it reports are weaker than they look, and it says
 in its own output:
 
 - **Sample sizes are small** unless you have run a long batch. Under 20 hands the
-  confidence intervals overlap almost everything.
+  confidence intervals overlap almost everything. Measured: going from 12 to 40 hands
+  left the board library's conclusions unchanged but REORDERED the handtrap ranking's
+  top two, because a matrix cell only counts hands that solved and then had a legal
+  window. Trust the matrix least.
 - **A solver budget that is too low invents bricks.** 10s reports a hand dead that
   60s solves in 9 actions. Run `ladder <deck>` per deck rather than assuming.
 - **Some decks have no measurable target.** If a deck does not build a board, its
