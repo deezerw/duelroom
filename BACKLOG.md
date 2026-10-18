@@ -60,6 +60,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Bare-command audit.** Ran every command with no arguments. `gate`, `solve`,
+  `ladder`, `floodgates`, `second` and `optimize` all began minutes-to-hours of solver
+  work immediately, with nothing said about cost or about a sweep already running —
+  the audit itself started solver processes. They now warn when solvers are already
+  busy (joining a saturated machine slows both jobs). `flex` also falls back to the
+  active deck's archetype like `report` and `optimize`.
 - **Optimizer: archetype optional, and the CUT is no longer arbitrary.** `optimize`
   still demanded an archetype that `report` had stopped needing. More seriously, the
   hill climb evaluates one removal per candidate (6 slots x 30 candidates at minutes

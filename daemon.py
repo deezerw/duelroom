@@ -60,6 +60,31 @@ def _since(days):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
+def _busy_solvers():
+    """How many solver processes are already running.
+
+    Starting a second sweep while one is in flight oversubscribes the
+    cores and slows both; the engine already takes 6 of 8. Worth saying
+    before a command silently joins the queue.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(["pgrep", "-c", "-x", "combosolver"],
+                           capture_output=True, text=True, timeout=5)
+        return int((r.stdout or "0").strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def _warn_if_busy(what):
+    """Print a warning if the machine is already saturated. Never blocks."""
+    n = _busy_solvers()
+    if n:
+        print(f"  ! {n} solver process(es) already running — {what} will compete")
+        print(f"    for cores and both will be slower. Check with `doctor`.")
+    return n
+
+
 def _latest_matrix():
     """Newest handtrap matrix file, whatever hand count it used."""
     cands = sorted((ROOT / "results").glob("handtrap_matrix*.jsonl"),
@@ -133,8 +158,20 @@ def cmd_archetypes(conn, args):
 
 def cmd_flex(conn, args):
     if not args:
-        print("usage: flex <archetype> [main|side|extra]")
-        return
+        # fall back to the active deck's archetype, the same way report
+        # and optimize do — nobody importing a list knows its tag
+        path = _resolve_deck(None, conn)
+        if not path:
+            print("usage: flex <archetype> [main|side|extra]")
+            return
+        deck = Deck.from_ydk(path)
+        deck.canonicalise(conn)
+        guesses = ms.identify_archetype(conn, deck)
+        if not guesses or guesses[0][1] < 0.5:
+            print(f"could not identify an archetype for {path.stem} — pass one")
+            return
+        args = [guesses[0][0]]
+        print(f"({path.stem} identified as {args[0]})")
     section = args[-1] if args[-1] in ("main", "side", "extra") else "main"
     archetype = " ".join(args[:-1]) if args[-1] in ("main", "side", "extra") else " ".join(args)
 
@@ -326,6 +363,7 @@ def cmd_solve(conn, args):
     if not args and not db.get_meta(conn, "active_deck"):
         print("usage: solve <deck.ydk> [hands]")
         return
+    _warn_if_busy("this solve")
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
@@ -348,6 +386,7 @@ def cmd_ladder(conn, args):
     if not args and not db.get_meta(conn, "active_deck"):
         print("usage: ladder <deck.ydk> [hands]")
         return
+    _warn_if_busy("this ladder")
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
@@ -371,6 +410,7 @@ def cmd_gate(conn, args):
     if not args and not db.get_meta(conn, "active_deck"):
         print("usage: gate <deck.ydk> [hands] [solve_ms]")
         return
+    _warn_if_busy("this gate")
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
@@ -667,6 +707,7 @@ def cmd_optimize(conn, args):
         print("usage: optimize [deck] [archetype] [hands] [rounds]"
               "   (or set one with `mydeck`)")
         return
+    _warn_if_busy("this search")
     deck = Deck.from_ydk(path)
     deck.canonicalise(conn)
 
@@ -730,6 +771,7 @@ def cmd_second(conn, args):
     if len(args) < 2:
         print("usage: second <their_deck> <our_deck> [hands]")
         return
+    _warn_if_busy("this run")
     theirs, ours = _resolve_deck(args[0], conn), _resolve_deck(args[1], conn)
     if not theirs or not ours:
         print("deck not found")
@@ -772,6 +814,7 @@ def cmd_floodgates(conn, args):
     if not args and not db.get_meta(conn, "active_deck"):
         print("usage: floodgates <deck.ydk> [hands]")
         return
+    _warn_if_busy("this check")
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
         print(f"no such deck: {args[0]}")
