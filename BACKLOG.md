@@ -60,6 +60,12 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **`tools/mutation_test.py`** — reverses nine bugs this project actually had and
+  checks the suite goes red for each. A green suite is not evidence; the only evidence
+  is that it notices when the code is wrong. Found one genuine gap on the first run:
+  dropping the hypergeometric bounds checks left every stats test green, yet without
+  them "odds of opening 4 copies of a 3-of" raises ValueError instead of returning 0.
+  All nine now killed.
 - **Hill-climb control flow unit-tested** against a stubbed evaluator (no solver, no
   engine). A real optimize run is hours, so a control-flow bug is expensive to find
   by running it. Covers: the best candidate winning over a later one that also beats

@@ -529,3 +529,17 @@ def test_hill_climb_stops_when_nothing_improves(tmp_path, monkeypatch):
     best, history = optimizer.hill_climb(
         conn, base, "A", "1@atk", hands=4, rounds=3, log=lambda *a: None)
     assert best.label == "base", "a worse swap must not be accepted"
+
+
+def test_hypergeometric_handles_impossible_arguments():
+    # Found by mutation testing: dropping pmf's bounds checks left every
+    # existing stats test green, yet asking for more successes than cards
+    # drawn raises ValueError from math.comb rather than returning 0.
+    # These are reachable from real input — "what are the odds of opening
+    # 4 copies of a 3-of" is a question a user can ask.
+    assert stats.pmf(40, 30, 5, 7) == 0.0      # 7 hits from a 5-card draw
+    assert stats.pmf(40, 3, 5, 4) == 0.0       # 4 copies of a 3-of
+    assert stats.pmf(40, 3, 5, -1) == 0.0      # negative successes
+    assert stats.pmf(10, 8, 5, 1) == 0.0       # more misses than non-hits exist
+    assert stats.at_least(40, 3, 5, 4) == 0
+    assert stats.open_chance(40, 3, 5, want=4) == 0

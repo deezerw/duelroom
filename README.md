@@ -67,6 +67,7 @@ in its own output:
 venv/bin/pytest tests/ -q                 # regression tests, under a second
 venv/bin/python tools/check_invariants.py # facts that cannot all be true
 venv/bin/python tools/audit_fields.py     # fields read but never present
+venv/bin/python tools/mutation_test.py    # break the code, check something notices
 ```
 
 The suite covers bugs that were actually found here, not hypothetical ones, and each
