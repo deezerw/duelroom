@@ -88,15 +88,28 @@ def candidate_pool(conn, archetype, deck, fmt=ms.DEFAULT_FORMAT, limit=30):
 
 
 def removable(conn, deck, archetype, fmt=ms.DEFAULT_FORMAT):
-    """Cards in our list that top lists treat as optional.
+    """Cards in our list that top lists treat as optional, weakest first.
 
-    Never touches the core. If 95% of winning lists run three copies,
+    Never touches the core: if 95% of winning lists run three copies,
     cutting one is not a tuning decision, it is a different deck.
+
+    Ordered by how little the meta plays them, because the hill climb
+    evaluates only ONE removal per candidate -- 6 slots x 30 candidates
+    at minutes per evaluation is an overnight job on its own. It used to
+    take whichever card came first out of a dict, which made the single
+    most consequential choice in the search arbitrary. The least-played
+    non-core card is a defensible cut; dict order is not.
     """
     buckets = ms.classify(conn, archetype, fmt=fmt, section="main")
     core = {r["card_id"] for r in buckets["core"]}
+    pct = {r["card_id"]: r["pct"]
+           for b in buckets.values() for r in b}
     counts = deck.counts("main")
-    return [(cid, n) for cid, n in counts.items() if cid not in core]
+    out = [(cid, n) for cid, n in counts.items() if cid not in core]
+    # unknown to the meta sorts first: nobody plays it, so cutting it is
+    # the least radical change available
+    out.sort(key=lambda t: pct.get(t[0], 0.0))
+    return out
 
 
 def card_name(conn, code):
@@ -146,11 +159,15 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                rounds=3, pool_limit=12, solve_ms=None, log=print):
     """Greedy one-card swaps until nothing improves.
 
-    Returns (best Candidate, history). Every comparison runs on identical
-    hands, so differences are not shuffle luck -- but they are still
-    differences over `hands` hands, and `report` prints the interval so a
-    1-point "gain" inside a 4-point CI is visible as noise.
+    Each candidate is tried against the single weakest non-core slot
+    (see `removable`), not against every slot: the full cross product is
+    hours of solver time per round. That makes this a search over what
+    to ADD, with what to cut chosen by meta frequency.
     """
+    # Returns (best Candidate, history). Every comparison runs on
+    # identical hands, so differences are not shuffle luck -- but they
+    # are still differences over `hands` hands, and `report` prints the
+    # interval so a 1-point "gain" inside a 4-point CI reads as noise.
     objective = objective or Objective()
     base_summary = evaluate(deck, target, hands, solve_ms)
     best = Candidate(deck, "base", base_summary, objective.score(base_summary))

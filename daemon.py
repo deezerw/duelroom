@@ -662,25 +662,36 @@ def cmd_matrix(conn, args):
 
 
 def cmd_optimize(conn, args):
-    if len(args) < 2:
-        print("usage: optimize <deck.ydk> <archetype> [hands] [rounds]")
-        return
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
-        print(f"no such deck: {args[0]}")
+        print("usage: optimize [deck] [archetype] [hands] [rounds]"
+              "   (or set one with `mydeck`)")
         return
-    archetype = args[1]
-    hands = int(args[2]) if len(args) > 2 else 8
-    rounds = int(args[3]) if len(args) > 3 else 2
-
     deck = Deck.from_ydk(path)
     deck.canonicalise(conn)
+
+    rest = list(args[1:]) if args else []
+    archetype = rest[0] if rest and not rest[0].isdigit() else None
+    nums = [a for a in rest if a.isdigit()]
+    hands = int(nums[0]) if nums else 8
+    rounds = int(nums[1]) if len(nums) > 1 else 2
+
+    if archetype is None:
+        guesses = ms.identify_archetype(conn, deck)
+        if not guesses or guesses[0][1] < 0.5:
+            print(f"could not identify an archetype for {path.stem} — pass one")
+            return
+        archetype = guesses[0][0]
+        print(f"identified as {archetype} "
+              f"({guesses[0][1]*100:.0f}% of its {guesses[0][2]}-card core)")
     pool = optimizer.candidate_pool(conn, archetype, deck)
     outs = optimizer.removable(conn, deck, archetype)
     if not pool:
         print(f"no flex/fringe pool for {archetype!r} — run `meta` and check `archetypes`")
         return
+    cut = optimizer.card_name(conn, outs[0][0]) if outs else "?"
     print(f"{deck.name}: {len(outs)} non-core slots, {len(pool)} candidates")
+    print(f"each trial cuts {cut} (your least-played non-core card) and adds one")
     print(f"each trial is one funnel_eval run — {hands} hands at "
           f"{engine.SOLVE_MS/1000:.0f}s. This takes hours, not minutes.\n")
 

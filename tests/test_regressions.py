@@ -424,3 +424,28 @@ def test_identify_ignores_cores_too_thin_to_mean_anything(tmp_path):
     deck = Deck(main=[1, 2], extra=[], side=[])
     assert ms.identify_archetype(conn, deck, fmt="F") == [], (
         "a 2-card core identifies nothing")
+
+
+# --- optimizer removal choice --------------------------------------------
+# The hill climb evaluates ONE removal per candidate (the full cross
+# product is hours of solver time), so which card it cuts is the single
+# most consequential choice in the search. It used to take whatever came
+# first out of a dict.
+
+def test_removable_puts_the_least_played_card_first(tmp_path):
+    from skills import db, optimizer
+    from skills.meta_scrape import DEFAULT_FORMAT as FMT
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("A", FMT, 1, "main", 1.00, 3, 50, "now"),
+             ("A", FMT, 2, "main", 0.55, 1, 50, "now"),
+             ("A", FMT, 3, "main", 0.25, 1, 50, "now")])
+    deck = Deck(main=[1, 2, 3, 999], extra=[], side=[])
+    ids = [cid for cid, _ in optimizer.removable(conn, deck, "A")]
+    assert 1 not in ids, "core cards must never be cut"
+    assert ids[0] == 999, "a card no list plays is cut before a 25% card"
+    assert ids == [999, 3, 2], "weakest-first ordering"

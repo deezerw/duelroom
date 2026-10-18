@@ -60,6 +60,13 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 - **Board breaking via `--board-remove`.** It relaxes the goal rather than demanding
   destruction. Replaced by the going-second formulation in `breaking.py`.
 
+- **Optimizer: archetype optional, and the CUT is no longer arbitrary.** `optimize`
+  still demanded an archetype that `report` had stopped needing. More seriously, the
+  hill climb evaluates one removal per candidate (6 slots x 30 candidates at minutes
+  each is an overnight job), and it was cutting whichever card came first out of a
+  dict — making the single most consequential choice in the search arbitrary. Now
+  cuts the least-played non-core card and says which, so the search is over what to
+  ADD with a defensible removal.
 - **Archetype auto-detection** (`meta_scrape.identify_archetype`). Walking the cold
   first-run path showed `report` needed an archetype argument nobody importing their
   own deck would know to pass. It is inferable: match against each archetype's CORE
