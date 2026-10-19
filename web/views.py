@@ -1,6 +1,8 @@
 """Pages. Stage 1: deck list, deck detail, import."""
 
+import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from flask import (Blueprint, Response, abort, flash, redirect,
@@ -575,6 +577,25 @@ def run_deckless(kind):
 
 # --- pilot: one chosen hand ----------------------------------------------
 
+@bp.route("/pilot/<name>/r/<rid>")
+@login_required
+def pilot_report_view(name, rid):
+    """A stored report, by its own URL.
+
+    The "already measured" list used to link back to the picker, so
+    clicking a finished report just reloaded the form that made it.
+    """
+    if not deck_path(name) or not re.fullmatch(r"[0-9a-f]{8,32}", rid or ""):
+        flash("No such report")
+        return redirect(url_for("views.index"))
+    r = handlab.load(handlab.REPORTS / name / f"{rid}.json")
+    if r is None:
+        flash("That report is no longer stored.")
+        return redirect(url_for("views.pilot", name=name))
+    return render_template("pilot_report.html", r=r, name=name, stored=True,
+                           running=jobs.active(conn()))
+
+
 @bp.route("/pilot/<name>", methods=["GET", "POST"])
 @login_required
 def pilot(name):
@@ -655,12 +676,20 @@ def pilot(name):
           "play": play.get(code)}
          for code, n in counts.items()),
         key=lambda x: (-(x["play"]["rank"] if x["play"] else 0), x["name"]))
-    recent = sorted(
-        (handlab.REPORTS / name).glob("*.json"),
-        key=lambda p: -p.stat().st_mtime)[:8] if (handlab.REPORTS / name).exists() else []
+    folder = handlab.REPORTS / name
+    recent = []
+    if folder.exists():
+        for p in sorted(folder.glob("*.json"),
+                        key=lambda q: -q.stat().st_mtime)[:12]:
+            rep = handlab.load(p)
+            if rep:
+                rep["id"] = p.stem
+                rep["when"] = datetime.fromtimestamp(
+                    p.stat().st_mtime).strftime("%d %b %H:%M")
+                recent.append(rep)
     return render_template(
         "pilot.html", name=name, cards=cards, running=jobs.active(c),
         hand_size=handlab.HAND_SIZE, preset=preset, deal_seed=deal_seed,
         traps=sorted(scenarios.HANDTRAPS.items(), key=lambda kv: kv[1]),
         blind=scenarios.BLIND_SPOTS,
-        recent=[handlab.load(p) for p in recent])
+        recent=recent)

@@ -605,3 +605,44 @@ def test_a_dealt_hand_is_repeatable_from_its_link(loggedin):
         return json.loads(re.search(r"const hand = (\[.*?\])\.map", h).group(1))
     assert deal(42) == deal(42)
     assert deal(42) != deal(43)
+
+
+def test_a_stored_report_opens_from_its_own_url(loggedin, tmp_path, monkeypatch):
+    """The "already measured" list linked back to the picker, so clicking
+    a finished report just reloaded the form that produced it."""
+    import json
+    import re
+    from skills import handlab
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    folder = tmp_path / "my-despia"
+    folder.mkdir()
+    (folder / "abcdef0123456789.json").write_text(json.dumps(rep))
+
+    page = loggedin.get("/pilot/my-despia").get_data(as_text=True)
+    links = re.findall(r"/pilot/my-despia/r/([0-9a-f]+)", page)
+    assert links == ["abcdef0123456789"], "the listing does not link the report"
+
+    r = loggedin.get(f"/pilot/my-despia/r/{links[0]}")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "The line" in body and "Where it breaks" in body
+
+
+def test_a_report_id_cannot_be_a_path(loggedin, tmp_path, monkeypatch):
+    from skills import handlab
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    for bad in ("../../../etc/passwd", "..", "zz", "a" * 64, ""):
+        r = loggedin.get(f"/pilot/my-despia/r/{bad}")
+        assert r.status_code in (302, 404), f"{bad!r} -> {r.status_code}"
+
+
+def test_a_missing_report_says_so_rather_than_erroring(loggedin, tmp_path,
+                                                       monkeypatch):
+    from skills import handlab
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    r = loggedin.get("/pilot/my-despia/r/0123456789abcdef",
+                     follow_redirects=True)
+    assert r.status_code == 200
+    assert "no longer stored" in r.get_data(as_text=True)

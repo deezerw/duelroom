@@ -101,14 +101,27 @@
 {% if recent %}
 <h2>Already measured</h2>
 <div class="panel">
-  {% for r in recent %}{% if r %}
-    <div style="padding:4px 0">
-      <a href="{{ url_for('views.pilot', name=name) }}">{{ r.hand_names|join(', ') }}</a>
-      <span class="muted">— {{ r.status }}{% if r.interruptions is not none %},
-        {{ r.interruptions }} interruption(s){% endif %}
-        at {{ (r.solve_ms/1000)|int }}s</span>
-    </div>
-  {% endif %}{% endfor %}
+  <table>
+    <thead><tr><th>hand</th><th>result</th><th class="num">budget</th>
+      <th>measured</th></tr></thead>
+    <tbody>
+    {% for r in recent %}
+      <tr>
+        <td><a href="{{ url_for('views.pilot_report_view', name=name, rid=r.id) }}">{{
+          r.hand_names|join(' · ') }}</a>
+          {% if r.filled %}<span class="pill"
+            title="{{ r.filled|length }} card(s) dealt, not picked">part</span>{% endif %}
+          {% if (r.candidates or [])|length > 1 %}<span class="pill">{{
+            r.candidates|length }} lines</span>{% endif %}</td>
+        <td>{% if r.status == 'solved' %}
+              <span class="pill ok">{{ r.interruptions }} interruption(s)</span>
+            {% else %}<span class="pill bad">{{ r.status }}</span>{% endif %}</td>
+        <td class="num muted">{{ (r.solve_ms/1000)|int }}s</td>
+        <td class="muted mono">{{ r.when }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endif %}
 
