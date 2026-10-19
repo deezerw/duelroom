@@ -69,6 +69,29 @@ class LogFormatChanged(RuntimeError):
     """The solver's window report did not parse. Never swallow this."""
 
 
+# "=== --fire verdict: 3 window(s) out of 3 converted (3 full board, 0
+#  without the sacrificed card) ==="
+_VERDICT = re.compile(
+    r"--fire verdict:\s*(?P<conv>\d+)\s*window\(s\) out of\s*(?P<tot>\d+)"
+    r"\s*converted\s*\((?P<full>\d+)\s*full board,\s*(?P<part>\d+)\s*"
+    r"without the sacrificed card\)", re.IGNORECASE)
+
+
+def parse_verdict(log_text):
+    """{converted, windows, full, partial} from the solver's summary line.
+
+    `partial` is how many windows were only answerable by giving up the
+    spare card. It is always 0 unless --fire-spare was offered, which is
+    the difference between asking "can you rebuild this exact board" and
+    "how much of it can you keep".
+    """
+    m = _VERDICT.search(log_text or "")
+    if not m:
+        return None
+    return {"converted": int(m.group("conv")), "windows": int(m.group("tot")),
+            "full": int(m.group("full")), "partial": int(m.group("part"))}
+
+
 def _is_open(pos):
     return any(f.strip().lower() in _OPEN for f in pos.split(","))
 
@@ -298,7 +321,7 @@ def exposure(rows):
 
 
 def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
-            handtraps=None, fill_seed=0, pieces=3, log=None, candidates=1,
+            handtraps=None, fill_seed=0, pieces=4, log=None, candidates=1,
             threads=None):
     """The whole report for one chosen opening hand.
 
@@ -377,6 +400,22 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         out["reading"] = read_board(conn, rec)
         out["candidates"] = []
 
+        # The goal the climb settled on, so the LAST piece it added can be
+        # offered as expendable. Without a spare the fire test asks only
+        # "can you rebuild this exact board", and a line that keeps two
+        # of three interrupters reads identically to one that keeps none.
+        blocking = (rec.get("solver") or {}).get("blocking", {})
+        attempts = blocking.get("attempts") or []
+        chosen = attempts[blocking.get("chosen", 0)] if attempts else {}
+        goal = [t for t in (chosen.get("targets") or [])]
+        spare = goal[-1] if len(goal) > 1 else None
+        out["goal"] = goal
+        out["spare"] = spare
+        out["spare_name"] = (_name(conn, int(spare))
+                             if spare and str(spare).isdigit() else spare)
+        if spare:
+            say(f"offering {spare} as expendable, so a partial rebuild counts")
+
         traps = scenarios.HANDTRAPS if handtraps is None else handtraps
         # Each trap is an INDEPENDENT solver run, and running them one at
         # a time left most of the machine idle: thread-parallelism inside
@@ -384,7 +423,8 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         # replay and the fresh-replay verification of every candidate
         # line are serial. Processes over independent work is the model
         # the batch path already proves, so the traps are fired together.
-        for code, name, j in _fire_all(job, base, traps, threads, say):
+        for code, name, j in _fire_all(job, base, traps, threads, say,
+                                       spare=spare):
             meta = j.get("solver") or {}
             row = {"code": code, "name": name, "status": j.get("status"),
                    "windows": meta.get("windows"),
@@ -406,6 +446,10 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                             f"solver reported {declared} windows, parsed "
                             f"{len(detail)}")
                     row["detail"] = detail
+                    v = parse_verdict(logf.read_text())
+                    if v:
+                        row["full"] = v["full"]
+                        row["partial"] = v["partial"]
                 except (LogFormatChanged, ValueError) as e:
                     # Never return a short list that reads as "few windows".
                     row["parse_error"] = str(e)
@@ -661,7 +705,7 @@ def annotate_steps(report):
     return steps_, unplaced
 
 
-def solve_for_hand(job, hand, pieces=3, pair=True, cards=None, scripts=None,
+def solve_for_hand(job, hand, pieces=4, pair=True, cards=None, scripts=None,
                    say=None):
     """``blocking.solve_blocking``, but planning targets from the REAL hand.
 
@@ -706,12 +750,33 @@ def solve_for_hand(job, hand, pieces=3, pair=True, cards=None, scripts=None,
         say(f"  {label}: {demo.status} ({info['wall_s']:.0f}s)")
         return demo.status == "solved"
 
+    # Which interrupters the hand can reach at all, one at a time.
     solved_pieces = []
     for p in plan.pieces[:pieces]:
         if attempt([*plan.base, p.target], f"piece:{p.password}"):
             solved_pieces.append(p.target)
+
+    # Then CLIMB. Upstream stops at a pair, so the best board it ever
+    # asks for is base + 2 -- and a deck with four reachable interrupters
+    # is never asked whether it can make three. That is not the solver
+    # failing to find a good board; it is nobody requesting one, and it
+    # is why these reports keep coming back with two interruptions.
+    #
+    # Greedy: add the next piece to the best goal that still solves, and
+    # stop at the first refusal. Each rung costs one solve, so a deck
+    # with four pieces pays three extra at most, and only when the
+    # earlier rungs succeeded.
     if pair and len(solved_pieces) >= 2:
-        attempt([*plan.base, *solved_pieces[:2]], "pair")
+        goal = [solved_pieces[0]]
+        for nxt in solved_pieces[1:]:
+            trying = goal + [nxt]
+            label = "pair" if len(trying) == 2 else f"stack:{len(trying)}"
+            if not attempt([*plan.base, *trying], label):
+                break
+            goal = trying
+        say(f"  best goal reached: {len(goal)} interrupter(s) "
+            f"+ {len(plan.base)} from hand")
+
     if plan.base and not solved_pieces:
         attempt(list(plan.base), "base")
     if not results:
@@ -902,7 +967,7 @@ def _rank_candidates(conn, job, base, rec, traps, say):
         sub = dreplace(job, threads=per_threads,
                        scratch=Path(job.scratch) / f"c{k}")
         for code, _ in items:
-            tasks.append(((sub, only, code), k))
+            tasks.append(((sub, only, code, None), k))
 
     results = {}
     ctx = multiprocessing.get_context("spawn")
@@ -939,14 +1004,35 @@ def _rank_candidates(conn, job, base, rec, traps, say):
 
 
 def _fire_one(args):
-    """One hand trap against one line. Runs in its own process."""
-    from ygorl.solver.batch import solve_fire
+    """One hand trap against one line. Runs in its own process.
 
-    job, base, code = args
-    return code, solve_fire(job, base, code).to_json()
+    `spare` is a card the rebuilt board is allowed to be missing. ygorl's
+    SolveRequest has no field for it and its fire branch ignores
+    `targets` entirely, so the flag is injected around the call -- in the
+    CHILD, because that is where the request is built.
+    """
+    from ygorl.solver import batch as BT
+
+    job, base, code, spare = args
+    if not spare:
+        return code, BT.solve_fire(job, base, code).to_json()
+
+    orig = BT.SolveRequest
+
+    def with_spare(**kw):
+        if kw.get("fire") is not None:
+            kw["extra_args"] = tuple(kw.get("extra_args") or ()) + (
+                "--fire-spare", str(spare))
+        return orig(**kw)
+
+    BT.SolveRequest = with_spare
+    try:
+        return code, BT.solve_fire(job, base, code).to_json()
+    finally:
+        BT.SolveRequest = orig
 
 
-def _fire_all(job, base, traps, threads, say):
+def _fire_all(job, base, traps, threads, say, spare=None):
     """Fire every trap, several at once, yielding (code, name, json).
 
     One solver with N threads does not use N cores -- measured at 137% of
@@ -972,7 +1058,7 @@ def _fire_all(job, base, traps, threads, say):
     if len(items) <= 1:
         for code, name in items:
             say(f"firing {name} ...")
-            yield code, name, solve_fire(job, base, code).to_json()
+            yield code, name, _fire_one((job, base, code, spare))[1]
         return
 
     workers = max(1, min(len(items), engine.DEFAULT_WORKERS))
@@ -980,7 +1066,7 @@ def _fire_all(job, base, traps, threads, say):
     say(f"firing {len(items)} hand traps, {workers} at a time "
         f"({per} thread(s) each)")
     jobs_ = [(dreplace(job, threads=per,
-                       scratch=Path(job.scratch)), base, code)
+                       scratch=Path(job.scratch)), base, code, spare)
              for code, _ in items]
     names = dict(items)
     ctx = multiprocessing.get_context("spawn")

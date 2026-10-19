@@ -152,6 +152,12 @@
 {% endif %}
 
 <h2>Where it breaks</h2>
+{% if r.spare_name %}
+  <p class="muted" style="margin:-4px 0 8px">Recovery counts if you rebuild the
+    board <em>or</em> rebuild it without {{ r.spare_name }}. Asking only for an
+    identical rebuild made a line that keeps most of its board read the same as
+    one that keeps none.</p>
+{% endif %}
 <div class="flag">A window the solver could not convert means it found no
   recovery in {{ (r.fire_ms/1000)|int }}s of search. It is
   <strong>not</strong> a proof that the hand is dead there — the solver says
@@ -166,7 +172,10 @@
       <strong>{{ h.name }}</strong>
       {% if h.windows %}
         <span class="muted">live at {{ h.windows }} point(s) in this line —
-          {{ h.converted }} recovered,
+          {{ h.converted }} recovered{% if h.partial %}
+            <span class="pill">{{ h.full }} whole board,
+              {{ h.partial }} without {{ r.spare_name or 'a piece' }}</span>
+          {% endif %},
           <span class="{{ 'bad' if (h.windows - (h.converted or 0)) else 'ok' }}">
           {{ h.windows - (h.converted or 0) }} with no recovery found</span></span>
       {% else %}

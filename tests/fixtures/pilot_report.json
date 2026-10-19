@@ -56,7 +56,7 @@
     {
      "name": "Ash Blossom & Joyous Spring",
      "code": 14558127,
-     "survived": false,
+     "survived": true,
      "stale": false,
      "missing": [
       "Aluber the Jester of Despia"
@@ -103,7 +103,7 @@
     {
      "name": "Ash Blossom & Joyous Spring",
      "code": 14558127,
-     "survived": false,
+     "survived": true,
      "stale": false,
      "missing": [
       "Rindbrumm the Striking Dragon",
@@ -259,7 +259,7 @@
    "name": "Ash Blossom & Joyous Spring",
    "status": "solved",
    "windows": 3,
-   "converted": 0,
+   "converted": 2,
    "blind_spot": null,
    "detail": [
     {
@@ -267,7 +267,7 @@
      "over": "Branded Opening",
      "decision": 2,
      "after_summons": 0,
-     "survived": false,
+     "survived": true,
      "rollouts": 5621,
      "missing": [
       "Aluber the Jester of Despia"
@@ -281,7 +281,7 @@
      "over": "Aluber the Jester of Despia",
      "decision": 13,
      "after_summons": 1,
-     "survived": false,
+     "survived": true,
      "rollouts": 17393,
      "missing": [
       "Rindbrumm the Striking Dragon",
@@ -306,7 +306,9 @@
    "parse_error": null,
    "recovered_board": [],
    "recovered_reading": null,
-   "recovered_steps": []
+   "recovered_steps": [],
+   "full": 0,
+   "partial": 2
   },
   {
    "code": 23434538,
@@ -787,5 +789,11 @@
    ]
   }
  ],
- "unplaced": []
+ "unplaced": [],
+ "spare": "44146295",
+ "spare_name": "Mirrorjade the Iceblade Dragon",
+ "goal": [
+  "51409648",
+  "44146295"
+ ]
 }

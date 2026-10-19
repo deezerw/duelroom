@@ -213,8 +213,12 @@ def _print_pilot(r):
         if not w:
             print(f"\n  {h['name']}: no legal window in this line")
             continue
-        print(f"\n  {h['name']}: live at {w} point(s), "
-              f"{c if c is not None else '?'} recovered")
+        bits = f"{c if c is not None else '?'} recovered"
+        if h.get("partial"):
+            bits += (f" ({h.get('full', 0)} rebuilding the whole board, "
+                     f"{h['partial']} only by giving up "
+                     f"{r.get('spare_name') or 'a piece'})")
+        print(f"\n  {h['name']}: live at {w} point(s), {bits}")
         if h["blind_spot"]:
             print(f"      note: {h['blind_spot']}")
         if h["parse_error"]:

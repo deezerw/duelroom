@@ -744,3 +744,23 @@ def test_a_report_that_contradicts_itself_says_so(loggedin, tmp_path,
     h = loggedin.get("/pilot/my-despia/r/aabbccddeeff0011").get_data(as_text=True)
     assert "before a parser bug was fixed" in flat(h)
     assert "verdict not stored" in h, "a stale window still shows a verdict"
+
+
+def test_partial_recovery_is_shown_as_partial(loggedin):
+    """"No recovery found" was answering "can you rebuild the IDENTICAL
+    board", so a line keeping most of its board read like one keeping
+    none. Measured: Ash went from 0 of 3 to 2 of 4, both partial."""
+    import json
+    from pathlib import Path
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    app = loggedin.application
+    with app.test_request_context():
+        from flask import render_template
+        h = render_template("pilot_report.html", r=rep, name="my-despia",
+                            stored=True, running=None)
+    assert "Mirrorjade the Iceblade Dragon" in h
+    assert "without Mirrorjade" in flat(h), "the partial split is not shown"
+    assert "rebuild it without" in flat(h), "the caveat is missing"
+    # A trap with no partials must not grow a misleading badge.
+    assert "whole board" in flat(h)

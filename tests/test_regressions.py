@@ -1384,3 +1384,49 @@ def test_the_report_orders_hand_traps_by_name_not_by_who_finished():
            / "handlab.py").read_text()
     assert 'out["handtraps"].sort(key=lambda r: r["name"])' in src, (
         "the parallel results are appended but never reordered")
+
+
+def test_the_goal_climbs_past_a_pair():
+    """Upstream stops at base + 2 interrupters, so a deck with four
+    reachable ones is never asked whether it can make three. That is not
+    the solver failing to find a good board -- it is nobody requesting
+    one, and it is why these reports kept returning two interruptions."""
+    src = (Path(__file__).resolve().parent.parent / "skills"
+           / "handlab.py").read_text()
+    block = src[src.index("    solved_pieces = []"):src.index("    if not results")]
+    assert 'f"stack:{len(trying)}"' in block, "the climb is gone"
+    assert "solved_pieces[:2]" not in block, (
+        "still capped at the best two pieces")
+    # It must stop at the first refusal rather than grinding every subset.
+    assert "break" in block
+
+
+def test_the_fire_verdict_summary_is_parsed():
+    from skills import handlab
+    v = handlab.parse_verdict(CONVERTED_LOG.read_text())
+    assert v == {"converted": 3, "windows": 3, "full": 3, "partial": 0}
+    assert handlab.parse_verdict("nothing here") is None
+    made_up = ("=== --fire verdict: 5 window(s) out of 9 converted "
+               "(2 full board, 3 without the sacrificed card) ===")
+    assert handlab.parse_verdict(made_up) == {
+        "converted": 5, "windows": 9, "full": 2, "partial": 3}
+
+
+def test_a_spare_is_only_offered_when_the_board_has_one_to_spare():
+    """Offering the only interrupter as expendable asks nothing at all."""
+    src = (Path(__file__).resolve().parent.parent / "skills"
+           / "handlab.py").read_text()
+    assert "spare = goal[-1] if len(goal) > 1 else None" in src
+
+
+def test_the_spare_reaches_the_child_process():
+    """The pool runs solve_fire in a subprocess, so a flag injected in
+    the parent would never be seen. Checked structurally because the
+    alternative is a two-minute solver run per assertion."""
+    import inspect
+    from skills import handlab
+    src = inspect.getsource(handlab._fire_one)
+    assert "--fire-spare" in src
+    assert "job, base, code, spare = args" in src, (
+        "the spare is not carried into the worker")
+    assert "finally" in src, "the patched SolveRequest is never restored"
