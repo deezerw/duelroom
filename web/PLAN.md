@@ -93,8 +93,54 @@ making uncertainty visible, and the easy version of this UI would undo it.
       allowed — a list in progress usually is — but never silently, and
       the save path reuses `importer.save`'s filename sanitising and runs
       the same solver preflight as import.
-- [ ] **5 — images at full scale, hardening pass, deploy.** systemd unit,
-      gunicorn + TLS, matching the stockroom pattern.
+- [x] **5 — images at full scale, hardening pass, deploy.** Built.
+
+      *Images.* `skills/images.py` + an `images` CLI command fetch the pool
+      into `data/cardimg` at 10 req/s, resumable, meta-played first. Bodies
+      land under `<id>.jpg.part` and are renamed only when complete: a
+      truncated JPEG under the final name is skipped by every later run,
+      so that card is broken forever. A 404 goes in a `missing` ledger; a
+      timeout does not. An uncached card gets a placeholder SVG marked
+      `no-store`, never a broken image and never a request to their CDN.
+
+      *Hardening.* One real bug: the import upload interpolated the
+      browser-supplied filename into a path, and
+      `duelroom-upload-../../../../tmp/x` normalises to `/tmp/x` because
+      the prefix becomes a directory component the next `..` pops off.
+      Also: one `deck_path()` instead of four hand-built paths, an
+      allowlist on import URLs with redirects off, security headers, and a
+      login timing fix. Details in the git log.
+
+      *Deploy.* `tmux-start.sh` / `tmux-stop.sh` + `duelroom.service` and a
+      watchdog timer, matching the stockroom pattern — including its
+      lesson that killing the tmux session only SIGHUPs gunicorn, which
+      treats it as a reload and keeps holding the port. Leaf cert issued
+      from the existing local CA, so the browser that already trusts
+      stockroom trusts this. Verified under the real stack: TLS validates,
+      the cookie is Secure + HttpOnly + SameSite=Lax, all eight pages
+      serve, and **the login limiter held at 8 across two separate
+      gunicorn workers** — the exact failure the SQLite move was for,
+      now proven in the configuration that has it rather than in a test
+      client.
+
+## Turning it on
+
+Nothing is enabled: the one thing this cannot do for you is choose a
+password.
+
+```bash
+venv/bin/python web/manage.py set-password     # writes data/web.env, mode 600
+venv/bin/python web/manage.py check            # every row should say ok
+sudo systemctl enable --now duelroom.service duelroom-watchdog.timer
+```
+
+Then `https://10.0.0.96:8446/`. Port-forwarding 8446 at the router is the
+separate, deliberate step that makes it reachable from outside.
+
+```bash
+venv/bin/python web/manage.py unlock           # if you lock yourself out
+tmux attach -t duelroom                        # gunicorn and worker logs
+```
 
 ## Running it
 

@@ -1,0 +1,5 @@
+[v3_server]
+subjectAltName = IP:99.246.196.32,IP:10.0.0.96,DNS:localhost
+extendedKeyUsage = serverAuth
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment

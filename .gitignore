@@ -8,3 +8,6 @@ __pycache__/
 vendor/
 results/drills/
 data/cardimg/
+certs/key.pem
+certs/*.srl
+data/web.env

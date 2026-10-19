@@ -1,0 +1,7 @@
+[Unit]
+Description=Watchdog health check for duelroom.service
+After=duelroom.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/service-watchdog.sh duelroom

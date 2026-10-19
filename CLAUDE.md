@@ -63,10 +63,23 @@ stays as the debugging tool. Stages, settled decisions and the security history
 that shaped the login are in **`web/PLAN.md`**.
 
 ```bash
-export DUELROOM_PASSWORD_HASH='pbkdf2:sha256:...'   # see web/PLAN.md
+# development
+export DUELROOM_PASSWORD_HASH='pbkdf2:sha256:...'
 venv/bin/python web/run.py        # 127.0.0.1:8446
 venv/bin/python web/worker.py     # exactly one, runs the queued solver jobs
+
+# deployed: gunicorn TLS :8446 + worker in tmux session 'duelroom'
+venv/bin/python web/manage.py set-password
+sudo systemctl enable --now duelroom.service duelroom-watchdog.timer
 ```
+
+**Never `pkill -f` the gunicorn pattern.** `pgrep -f` matches whole command
+lines, so it also matches the shell that just typed it — that is the exit-144
+footgun, and it fired again while deploying this. `tmux-stop.sh` excludes the
+caller, its parent and its process group; use it.
+
+Card art lives in `data/cardimg` (gitignored, ~450 MB) and is served only from
+there — `daemon.py images small-all` fills it, resumable.
 
 The deckbuilder's two load-bearing rules: card search ranks on the **Wilson lower
 bound** of the inclusion rate, never the raw rate, and **legality is only ever
