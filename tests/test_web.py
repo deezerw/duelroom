@@ -411,16 +411,28 @@ def test_progress_reads_an_explicit_denominator(tmp_path):
 
 # --- hardening pass ------------------------------------------------------
 
-def test_an_uploaded_filename_cannot_escape_the_temp_directory(loggedin):
+def test_an_uploaded_filename_cannot_escape_the_temp_directory(
+        loggedin, tmp_path, monkeypatch):
     """"duelroom-upload-../../../etc/x" normalises to /etc/x, because the
-    prefix becomes a directory component the following ".." pops off."""
+    prefix becomes a directory component the following ".." pops off.
+
+    DECKS is redirected because the first version of this test imported
+    into the real assets/decks and left a deck called "evil" sitting in
+    the user's list.
+    """
     import io
     from pathlib import Path
+
+    from web import views
+    monkeypatch.setattr(views, "DECKS", tmp_path)
+    monkeypatch.setattr("skills.importer.DECKS", tmp_path)
     evil = "../../../../tmp/duelroom-pwned.ydk"
     loggedin.post("/import", data={
         "file": (io.BytesIO(b"#main\n46986414\n"), evil),
         "name": "evil"}, content_type="multipart/form-data")
     assert not Path("/tmp/duelroom-pwned.ydk").exists()
+    assert not (Path(__file__).parent.parent / "assets" / "decks"
+                / "evil.ydk").exists(), "the test wrote into the real deck list"
 
 
 def test_deck_routes_refuse_a_name_that_is_not_a_plain_filename(loggedin):
