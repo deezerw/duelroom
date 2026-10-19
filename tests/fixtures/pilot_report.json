@@ -1,0 +1,178 @@
+{
+ "deck": "my-despia",
+ "hand": [
+  1984618,
+  62962630,
+  30271097,
+  95515789,
+  36637374
+ ],
+ "hand_names": [
+  "Nadir Servant",
+  "Aluber the Jester of Despia",
+  "The Fallen & The Virtuous",
+  "Blazing Cartesia, the Virtuous",
+  "Branded Opening"
+ ],
+ "chosen": [
+  1984618,
+  62962630,
+  30271097
+ ],
+ "filled": [
+  95515789,
+  36637374
+ ],
+ "status": "solved",
+ "solve_ms": 60000,
+ "fire_ms": 30000,
+ "interruptions": 1,
+ "steps": [
+  {
+   "verb": "activate",
+   "code": 36637374,
+   "name": "Branded Opening",
+   "n": 1
+  },
+  {
+   "verb": "activate",
+   "code": 30271097,
+   "name": "The Fallen & The Virtuous",
+   "n": 2
+  },
+  {
+   "verb": "normal summon",
+   "code": 62962630,
+   "name": "Aluber the Jester of Despia",
+   "n": 3
+  },
+  {
+   "verb": "activate",
+   "code": 62962630,
+   "name": "Aluber the Jester of Despia",
+   "n": 4
+  },
+  {
+   "verb": "activate",
+   "code": 44362883,
+   "name": "Branded Fusion",
+   "n": 5
+  },
+  {
+   "verb": "special summon",
+   "code": 51409648,
+   "name": "Rindbrumm the Striking Dragon",
+   "n": 6
+  }
+ ],
+ "board": [
+  {
+   "zone": "monster",
+   "name": "Aluber the Jester of Despia",
+   "code": 62962630,
+   "set": false
+  },
+  {
+   "zone": "monster",
+   "name": "Rindbrumm the Striking Dragon",
+   "code": 51409648,
+   "set": true
+  },
+  {
+   "zone": "hand",
+   "name": "Blazing Cartesia, the Virtuous",
+   "code": 95515789,
+   "set": false
+  },
+  {
+   "zone": "hand",
+   "name": "Aluber the Jester of Despia",
+   "code": 62962630,
+   "set": false
+  }
+ ],
+ "handtraps": [
+  {
+   "code": 14558127,
+   "name": "Ash Blossom & Joyous Spring",
+   "status": "solved",
+   "windows": 3,
+   "converted": 0,
+   "blind_spot": null,
+   "detail": [
+    {
+     "window": 0,
+     "over": "Branded Opening",
+     "decision": 2,
+     "after_summons": 0,
+     "survived": false,
+     "rollouts": 5621,
+     "missing": [
+      "Aluber the Jester of Despia"
+     ],
+     "answers": [
+      "The Fallen & The Virtuous"
+     ]
+    },
+    {
+     "window": 1,
+     "over": "Aluber the Jester of Despia",
+     "decision": 13,
+     "after_summons": 1,
+     "survived": false,
+     "rollouts": 17393,
+     "missing": [
+      "Rindbrumm the Striking Dragon",
+      "Albion the Branded Dragon"
+     ],
+     "answers": []
+    },
+    {
+     "window": 2,
+     "over": "Branded Fusion",
+     "decision": 24,
+     "after_summons": 1,
+     "survived": false,
+     "rollouts": 19168,
+     "missing": [
+      "Rindbrumm the Striking Dragon",
+      "Albion the Branded Dragon"
+     ],
+     "answers": []
+    }
+   ],
+   "parse_error": null
+  },
+  {
+   "code": 23434538,
+   "name": "Maxx \"C\"",
+   "status": "solved",
+   "windows": 4,
+   "converted": 4,
+   "blind_spot": "lines convert 94% of its windows, so SURVIVAL measures completion, not cost",
+   "detail": [],
+   "parse_error": null
+  },
+  {
+   "code": 27204311,
+   "name": "Nibiru, the Primal Being",
+   "status": "no_window",
+   "windows": 0,
+   "converted": 0,
+   "blind_spot": null,
+   "detail": [],
+   "parse_error": null
+  },
+  {
+   "code": 97268402,
+   "name": "Effect Veiler",
+   "status": "solved",
+   "windows": 5,
+   "converted": 4,
+   "blind_spot": null,
+   "detail": [],
+   "parse_error": "solver reported 5 windows, parsed 3"
+  }
+ ],
+ "error": ""
+}

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}pilot {{ name }} · duelroom{% endblock %}
+{% block body %}
+<h1>Pilot a hand — {{ name }}</h1>
+<p class="muted">Pick up to {{ hand_size }} cards you are holding. The solver
+  searches that exact hand, shows the best board it can reach, the steps it
+  took, and every point a hand trap is live against the line.</p>
+
+{% if running %}
+  <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
+    This will queue behind it.</div>
+{% endif %}
+
+<form method="post" id="f">
+<div class="panel">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <strong>Your hand</strong>
+    <span id="slots" class="muted">nothing picked yet</span>
+    <span style="margin-left:auto">
+      <label class="muted">solve budget
+        <select name="solve_s">
+          <option value="60" selected>60s (project default)</option>
+          <option value="30">30s (faster, less reliable)</option>
+          <option value="120">120s</option>
+        </select></label>
+      <label class="muted">per window
+        <select name="fire_s">
+          <option value="30" selected>30s</option>
+          <option value="20">20s</option>
+          <option value="60">60s</option>
+        </select></label>
+    </span>
+    <button class="primary" id="go" disabled>Solve this hand</button>
+  </div>
+  <div id="picked" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"></div>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">
+    Fewer than {{ hand_size }} cards is fine — the rest are dealt from the deck
+    and labelled as not your pick. Budget is part of the result: the same hand
+    can be unsolved at 30s and solved at 60s.</p>
+</div>
+
+<h2>The deck</h2>
+<div class="panel">
+  <div class="pool">
+  {% for c in cards %}
+    <button type="button" class="pick" data-code="{{ c.code }}"
+            data-name="{{ c.name }}" data-max="{{ c.copies }}">
+      <img loading="lazy" alt=""
+           src="{{ url_for('views.card_image', size='small', card_id=c.code) }}">
+      <span class="nm">{{ c.name }}</span>
+      <span class="muted">{{ c.copies }}×{% if c.play %} ·
+        {{ (c.play.pct*100)|round|int }}%{% endif %}</span>
+    </button>
+  {% endfor %}
+  </div>
+</div>
+</form>
+
+{% if recent %}
+<h2>Already measured</h2>
+<div class="panel">
+  {% for r in recent %}{% if r %}
+    <div style="padding:4px 0">
+      <a href="{{ url_for('views.pilot', name=name) }}">{{ r.hand_names|join(', ') }}</a>
+      <span class="muted">— {{ r.status }}{% if r.interruptions is not none %},
+        {{ r.interruptions }} interruption(s){% endif %}
+        at {{ (r.solve_ms/1000)|int }}s</span>
+    </div>
+  {% endif %}{% endfor %}
+</div>
+{% endif %}
+
+<style>
+  .pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}
+  .pick{display:flex;gap:8px;align-items:center;text-align:left;padding:4px 7px;
+        background:none;border:1px solid transparent;border-radius:7px;width:100%}
+  .pick:hover{background:#ffffff0c;border-color:var(--line)}
+  .pick img{width:26px;height:38px;border-radius:3px;object-fit:cover;
+            background:#0d0f15;flex:none}
+  .pick .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+            white-space:nowrap}
+  .pick[disabled]{opacity:.35}
+  .chip{display:flex;gap:6px;align-items:center;padding:3px 9px;border-radius:999px;
+        border:1px solid #7aa2f755;background:#7aa2f714;cursor:pointer;font-size:13px}
+  .chip img{width:20px;height:29px;border-radius:2px;object-fit:cover}
+</style>
+
+<script>
+const MAX = {{ hand_size }};
+const hand = [];
+const f = document.getElementById('f');
+
+function count(code){ return hand.filter(c => c.code === code).length; }
+
+function draw(){
+  document.getElementById('picked').innerHTML = hand.map((c, i) =>
+    `<span class="chip" data-i="${i}" title="click to remove">
+       <img alt="" src="/img/small/${c.code}.jpg">${c.name}</span>`).join('');
+  document.getElementById('slots').textContent =
+    hand.length ? `${hand.length} of ${MAX} picked` : 'nothing picked yet';
+  document.getElementById('go').disabled = hand.length === 0;
+  for (const el of document.querySelectorAll('#picked .chip'))
+    el.onclick = () => { hand.splice(+el.dataset.i, 1); draw(); };
+  for (const b of document.querySelectorAll('.pick'))
+    b.disabled = hand.length >= MAX || count(+b.dataset.code) >= +b.dataset.max;
+  // The form posts plain fields, so the picks live in hidden inputs and a
+  // JS failure cannot silently submit an empty hand.
+  for (const old of document.querySelectorAll('input[name=card]')) old.remove();
+  for (const c of hand){
+    const i = document.createElement('input');
+    i.type = 'hidden'; i.name = 'card'; i.value = c.code;
+    f.appendChild(i);
+  }
+}
+for (const b of document.querySelectorAll('.pick'))
+  b.onclick = () => {
+    if (hand.length >= MAX) return;
+    hand.push({code: +b.dataset.code, name: b.dataset.name});
+    draw();
+  };
+draw();
+</script>
+{% endblock %}

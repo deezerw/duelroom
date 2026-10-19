@@ -10,8 +10,8 @@ from werkzeug.utils import secure_filename
 import json
 
 from skills import (builder, card_db, carddb, config, db, drill, gate,
-                    images, importer, meta_scrape as ms, report as report_mod,
-                    scenarios, stats)
+                    handlab, images, importer, meta_scrape as ms,
+                    report as report_mod, scenarios, stats)
 from skills.deck import Deck
 
 from . import jobs
@@ -298,7 +298,8 @@ def job_detail(job_id):
         flash("No such job")
         return redirect(url_for("views.job_list"))
     return render_template("job.html", job=job, progress=jobs.progress(job),
-                           partial=jobs.partial(job), kinds=jobs.KINDS)
+                           partial=jobs.partial(job), kinds=jobs.KINDS,
+                           pilot=jobs.pilot_report(job))
 
 
 @bp.route("/jobs/<int:job_id>/cancel", methods=["POST"])
@@ -570,3 +571,74 @@ def run_deckless(kind):
     if running and running["id"] != job_id:
         flash(f"Queued as job {job_id} — job {running['id']} is running first.")
     return redirect(url_for("views.job_detail", job_id=job_id))
+
+
+# --- pilot: one chosen hand ----------------------------------------------
+
+@bp.route("/pilot/<name>", methods=["GET", "POST"])
+@login_required
+def pilot(name):
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        flash("No such deck")
+        return redirect(url_for("views.index"))
+    d = Deck.from_ydk(path)
+    d.canonicalise(c)
+
+    if request.method == "POST":
+        codes, seen = [], []
+        for raw in request.form.getlist("card"):
+            try:
+                code = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if code in d.main:
+                codes.append(code)
+        if not codes:
+            flash("Pick at least one card from the deck.")
+            return redirect(url_for("views.pilot", name=name))
+        if len(codes) > handlab.HAND_SIZE:
+            flash(f"A hand is {handlab.HAND_SIZE} cards.")
+            return redirect(url_for("views.pilot", name=name))
+        # Picking the same card more copies than the deck runs is not a
+        # hand you could ever hold.
+        from collections import Counter
+        have = Counter(d.main)
+        for code, n in Counter(codes).items():
+            if n > have[code]:
+                flash(f"{card_db.resolve(c, code)['name']}: you picked {n} but "
+                      f"the deck runs {have[code]}.")
+                return redirect(url_for("views.pilot", name=name))
+
+        solve_s = min(max(request.form.get("solve_s", type=int) or 60, 10), 300)
+        fire_s = min(max(request.form.get("fire_s", type=int) or 30, 10), 300)
+        report = handlab.report_path(name, codes, solve_s * 1000, fire_s * 1000)
+        existing = handlab.load(report)
+        if existing and not request.form.get("again"):
+            # Same hand, same budget, already measured. Re-running it would
+            # also give a different answer -- the solver is time-budgeted --
+            # so offer the stored one rather than quietly replacing it.
+            return render_template("pilot_report.html", r=existing, name=name,
+                                   stored=True, running=jobs.active(c))
+        job_id = jobs.enqueue(
+            c, "pilot", deck=name,
+            cards=",".join(str(x) for x in codes),
+            solve_s=solve_s, fire_s=fire_s, report=str(report))
+        return redirect(url_for("views.job_detail", job_id=job_id))
+
+    counts = d.counts("main")
+    play = builder.play_index(c, (ms.identify_archetype(c, d) or [(None,)])[0][0])
+    cards = sorted(
+        ({"code": code, "copies": n,
+          "name": (card_db.resolve(c, code) or {})["name"],
+          "play": play.get(code)}
+         for code, n in counts.items()),
+        key=lambda x: (-(x["play"]["rank"] if x["play"] else 0), x["name"]))
+    recent = sorted(
+        (handlab.REPORTS / name).glob("*.json"),
+        key=lambda p: -p.stat().st_mtime)[:8] if (handlab.REPORTS / name).exists() else []
+    return render_template(
+        "pilot.html", name=name, cards=cards, running=jobs.active(c),
+        hand_size=handlab.HAND_SIZE,
+        recent=[handlab.load(p) for p in recent])

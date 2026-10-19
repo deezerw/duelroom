@@ -141,12 +141,14 @@ def cmd_pilot(conn, args):
     except ValueError as e:
         print(f"could not read the hand: {e}")
         return
-    solve_ms = int(float(args[2]) * 1000) if len(args) > 2 else 30_000
-    fire_ms = int(float(args[3]) * 1000) if len(args) > 3 else 20_000
+    solve_ms = int(float(args[2]) * 1000) if len(args) > 2 else engine.SOLVE_MS
+    fire_ms = int(float(args[3]) * 1000) if len(args) > 3 else 30_000
 
     r = handlab.analyse(conn, path, chosen, solve_ms=solve_ms, fire_ms=fire_ms,
                         log=lambda m: print(f"  {m}", flush=True))
+    out = handlab.save(r)
     _print_pilot(r)
+    print(f"\nsaved to {out.relative_to(ROOT)}")
 
 
 def _print_pilot(r):

@@ -39,6 +39,9 @@ KINDS = {
                 "scrape the meta", "~1 min"),
     "images":  (lambda d, p: ["images", p.get("scope", "small-all")],
                 "cache card art", "~25 min"),
+    "pilot":   (lambda d, p: ["pilot", d, p.get("cards", ""),
+                              str(p.get("solve_s", 60)), str(p.get("fire_s", 30))],
+                "solve one chosen hand", "~5 min"),
 }
 
 # Jobs that are about the installation rather than about one deck.
@@ -174,6 +177,16 @@ def progress(job):
                 or ": unsolved" in l or ": error" in l)
     return {"hands": hands, "line": last[:160],
             "note": f"{hands} hand(s) solved so far" if hands else "working"}
+
+
+def pilot_report(job):
+    """The structured report a finished pilot job wrote, if any."""
+    if job["kind"] != "pilot":
+        return None
+    from skills import handlab
+    params = json.loads(job["params"] or "{}")
+    path = params.get("report")
+    return handlab.load(path) if path else None
 
 
 def partial(job):

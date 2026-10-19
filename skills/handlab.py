@@ -30,6 +30,7 @@ partly in French. If the format moves, parsing must fail loudly rather
 than return an empty list that reads as "no windows".
 """
 
+import hashlib
 import json
 import re
 import shutil
@@ -195,7 +196,7 @@ def fill_hand(conn, deck, chosen, seed=0, size=HAND_SIZE):
     return list(chosen) + filler, filler
 
 
-def analyse(conn, deck_path, chosen, solve_ms=30_000, fire_ms=20_000,
+def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
             handtraps=None, fill_seed=0, pieces=3, log=None):
     """The whole report for one chosen opening hand.
 
@@ -210,6 +211,10 @@ def analyse(conn, deck_path, chosen, solve_ms=30_000, fire_ms=20_000,
     from .deck import Deck
 
     say = log or (lambda m: None)
+    # The project default, not something cheaper. A 30s budget reported
+    # this module's own demonstration hand as UNSOLVED on one run and
+    # solved on another -- a cheap run is a wrong run, not a fast one.
+    solve_ms = engine.SOLVE_MS if solve_ms is None else solve_ms
     engine.require()
     deck_path = Path(deck_path).resolve()
     deck = Deck.from_ydk(deck_path)
@@ -341,3 +346,73 @@ def parse_hand(conn, deck, text):
     if len(parts) > HAND_SIZE:
         raise ValueError(f"a hand is {HAND_SIZE} cards; you named {len(parts)}")
     return [resolve_in_deck(conn, deck, p) for p in parts]
+
+
+# --- where a report lives ------------------------------------------------
+#
+# The web UI runs this through the job queue, so the page that asked for a
+# report and the worker that produces it need to agree on the filename
+# without passing one around.
+
+REPORTS = ROOT / "results" / "pilot"
+
+
+def report_path(deck_name, chosen, solve_ms, fire_ms):
+    """Deterministic path for one (deck, hand, budget) report.
+
+    The budget is in the key on purpose. The same hand at 30s and at 60s
+    are different measurements -- this module's own demonstration hand
+    was unsolved at 30s and solved at 60s -- and overwriting one with the
+    other would make a report say something its budget line denies.
+    """
+    key = "|".join([deck_name, ",".join(str(c) for c in sorted(chosen)),
+                    str(solve_ms), str(fire_ms)])
+    return REPORTS / deck_name / f"{hashlib.sha256(key.encode()).hexdigest()[:16]}.json"
+
+
+def save(report, path=None):
+    path = Path(path) if path else report_path(
+        report["deck"], report["chosen"], report["solve_ms"], report["fire_ms"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=1))
+    return path
+
+
+def load(path):
+    path = Path(path)
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def annotate_steps(report):
+    """Hang each hand trap's windows on the step it interrupts.
+
+    The solver names the card a window lands "over", and the step list
+    names the card of every action, both in line order -- so the two can
+    be matched and the combo shown with its weak points marked in place,
+    which is the whole question: not "Ash beats this hand" but "Ash on
+    your Branded Opening beats this hand".
+
+    Matching is greedy and in order, because a card can be activated more
+    than once in one line. A window whose card appears in no step is
+    reported separately rather than attached to the wrong step -- a
+    threat pinned to the wrong action is worse than one left unplaced.
+    """
+    steps_ = [dict(s, threats=[]) for s in report.get("steps") or []]
+    unplaced = []
+    for h in report.get("handtraps") or []:
+        used = set()
+        for d in h.get("detail") or []:
+            over = d.get("over")
+            hit = next((i for i, s in enumerate(steps_)
+                        if s["name"] == over and i not in used), None)
+            entry = {"name": h["name"], "code": h["code"],
+                     "survived": d.get("survived"),
+                     "missing": d.get("missing") or [],
+                     "answers": d.get("answers") or [],
+                     "decision": d.get("decision")}
+            if hit is None:
+                unplaced.append(dict(entry, over=over))
+                continue
+            used.add(hit)
+            steps_[hit]["threats"].append(entry)
+    return steps_, unplaced

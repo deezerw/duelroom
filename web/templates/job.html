@@ -50,5 +50,10 @@
   </div>
 {% endif %}
 
+{% if pilot %}
+  <hr style="border:none;border-top:1px solid var(--line);margin:26px 0">
+  {% with r = pilot %}{% include "_pilot_body.html" %}{% endwith %}
+{% endif %}
+
 <p><a href="{{ url_for('views.job_list') }}">all jobs</a></p>
 {% endblock %}

@@ -42,6 +42,10 @@
 
 <h2>Analyse</h2>
 <div class="panel">
+  <p style="margin-top:0"><a class="btn" href="{{ url_for('views.pilot', name=name) }}">
+    Pilot a hand</a>
+    <span class="muted">— pick the cards you are holding and get the board,
+    the steps, and every point a hand trap is live.</span></p>
   {% if running %}
     <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
       Anything you start now queues behind it.</div>

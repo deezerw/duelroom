@@ -488,3 +488,63 @@ def test_a_job_cannot_be_queued_for_a_deck_that_does_not_exist(loggedin):
     before = len(jobs.recent(c, 200))
     loggedin.post("/deck/no-such-deck/run/gate")
     assert len(jobs.recent(c, 200)) == before
+
+
+# --- pilot ---------------------------------------------------------------
+
+def test_pilot_requires_login(client):
+    # `loggedin` is the same client object as `client`, so the gate check
+    # has to live in a test that never logs in.
+    assert client.get("/pilot/my-despia").status_code == 302
+    assert client.post("/pilot/my-despia", data={"card": "1"}).status_code == 302
+
+
+def test_pilot_page_renders(loggedin):
+    h = loggedin.get("/pilot/my-despia").get_data(as_text=True)
+    assert 'class="pick"' in h
+    assert "not your pick" in h, "the filled-slot caveat is missing"
+
+
+def test_pilot_report_template_renders_the_fixture(loggedin, monkeypatch):
+    """Every other test here would pass against a template Jinja cannot
+    compile. This one renders the real report shape."""
+    import json
+    from pathlib import Path
+    from web import views
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    app = loggedin.application
+    with app.test_request_context():
+        from flask import render_template
+        h = render_template("pilot_report.html", r=rep, name="my-despia",
+                            stored=True, running=None)
+    assert "Branded Opening" in h
+    assert "no recovery found" in h.lower()
+    assert "not</strong> a proof" in h, "the sampling caveat is missing"
+    assert "SURVIVAL measures completion" in h, "the Maxx C blind spot vanished"
+    assert "Per-window detail unavailable" in h, "a parse error was swallowed"
+    assert "no legal window" in h
+
+
+def test_pilot_refuses_a_hand_the_deck_cannot_hold(loggedin):
+    from skills import db
+    from web import jobs
+    c = db.connect()
+    before = len(jobs.recent(c, 200))
+    # Albion the Shrouded Dragon is a 1-of in my-despia.
+    one_of = c.execute("SELECT id FROM cards WHERE name = ?",
+                       ("Albion the Shrouded Dragon",)).fetchone()["id"]
+    r = loggedin.post("/pilot/my-despia", data={"card": [str(one_of)] * 2})
+    assert r.status_code == 302
+    assert len(jobs.recent(c, 200)) == before, "an impossible hand was queued"
+
+
+def test_pilot_refuses_six_cards_and_an_empty_hand(loggedin):
+    from skills import db
+    from web import jobs
+    c = db.connect()
+    before = len(jobs.recent(c, 200))
+    loggedin.post("/pilot/my-despia", data={"card": []})
+    loggedin.post("/pilot/my-despia", data={"card": ["1984618"] * 6})
+    loggedin.post("/pilot/my-despia", data={"card": ["999999999"]})
+    assert len(jobs.recent(c, 200)) == before

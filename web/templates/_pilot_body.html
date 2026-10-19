@@ -1,0 +1,96 @@
+<h1>{{ r.hand_names|join(' · ') }}</h1>
+<p class="muted">{{ r.deck }} ·
+  solve budget {{ (r.solve_ms/1000)|int }}s · {{ (r.fire_ms/1000)|int }}s per
+  hand-trap window</p>
+
+{% if r.filled %}
+  <div class="flag">You chose {{ r.chosen|length }} card(s). The other
+    {{ r.filled|length }} were dealt from the deck to complete the hand and
+    are <strong>not your pick</strong> — a different deal can change the
+    answer.</div>
+{% endif %}
+
+{% if r.status != 'solved' %}
+  <div class="panel untrusted">
+    <p style="margin:0"><strong>No line found.</strong> That is
+      {{ (r.solve_ms/1000)|int }}s of search, not a proof that the hand is
+      dead. {% if r.error %}<span class="muted">{{ r.error }}</span>{% endif %}</p>
+  </div>
+{% else %}
+
+<h2>End board <span class="muted">· {{ r.interruptions }} interruption(s)</span></h2>
+<div class="panel">
+  {% for b in r.board %}
+    <div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+      <img loading="lazy" alt="" width="24" height="35"
+           style="border-radius:3px;object-fit:cover;background:#0d0f15"
+           src="{{ url_for('views.card_image', size='small', card_id=b.code) }}">
+      <span class="muted mono" style="min-width:76px">{{ b.zone }}</span>
+      {{ b.name }}{% if b.set %} <span class="pill">set</span>{% endif %}
+    </div>
+  {% else %}<p class="muted" style="margin:0">no board recorded</p>{% endfor %}
+</div>
+
+<h2>The line</h2>
+<div class="panel">
+  <ol style="margin:0;padding-left:22px">
+  {% for s in r.steps %}
+    <li style="padding:2px 0"><span class="muted mono"
+      style="display:inline-block;min-width:118px">{{ s.verb }}</span>
+      {{ s.name }}</li>
+  {% endfor %}
+  </ol>
+</div>
+
+<h2>Where it breaks</h2>
+<div class="flag">A window the solver could not convert means it found no
+  recovery in {{ (r.fire_ms/1000)|int }}s of search. It is
+  <strong>not</strong> a proof that the hand is dead there — the solver says
+  so itself, and the same hand measured twice has given different counts.</div>
+
+{% for h in r.handtraps %}
+  <div class="panel{% if h.blind_spot %} untrusted{% endif %}">
+    <div style="display:flex;gap:10px;align-items:center">
+      <img loading="lazy" alt="" width="26" height="38"
+           style="border-radius:3px;object-fit:cover;background:#0d0f15"
+           src="{{ url_for('views.card_image', size='small', card_id=h.code) }}">
+      <strong>{{ h.name }}</strong>
+      {% if h.windows %}
+        <span class="muted">live at {{ h.windows }} point(s) in this line —
+          {{ h.converted }} recovered,
+          <span class="{{ 'bad' if (h.windows - (h.converted or 0)) else 'ok' }}">
+          {{ h.windows - (h.converted or 0) }} with no recovery found</span></span>
+      {% else %}
+        <span class="muted">no legal window in this line</span>
+      {% endif %}
+    </div>
+    {% if h.blind_spot %}<div class="flag">{{ h.blind_spot }}</div>{% endif %}
+    {% if h.parse_error %}
+      <div class="flag bad">Per-window detail unavailable:
+        {{ h.parse_error }}. The totals above still hold.</div>
+    {% endif %}
+    {% for d in h.detail %}
+      <div style="padding:5px 0 5px 36px;border-top:1px solid #ffffff0a">
+        on <strong>{{ d.over or 'an unnamed step' }}</strong>
+        <span class="muted mono">decision {{ d.decision }}{% if d.after_summons
+          is not none %} · after {{ d.after_summons }} summon(s){% endif %}</span>
+        {% if d.survived %}<span class="pill ok">you play through it</span>
+        {% else %}<span class="pill bad">no recovery found</span>{% endif %}
+        {% if d.missing and not d.survived %}
+          <div class="muted" style="font-size:12px">would have needed:
+            {{ d.missing|join(', ') }}</div>
+        {% endif %}
+        {% if d.answers %}
+          <div class="muted" style="font-size:12px">you can answer with:
+            {{ d.answers|join(', ') }}</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endfor %}
+{% endif %}
+
+<p style="margin-top:18px">
+  <a class="btn" href="{{ url_for('views.pilot', name=r.deck) }}">Try another hand</a>
+  <a class="btn" href="{{ url_for('views.deck', name=r.deck) }}">{{ r.deck }}</a>
+</p>

@@ -1029,3 +1029,50 @@ def test_a_card_not_in_the_deck_is_refused():
         handlab.parse_hand(c, d, "a, b, c, d, e, f")  # six cards
     got = handlab.parse_hand(c, d, "nadir, aluber")
     assert len(got) == 2
+
+
+PILOT_REPORT = Path(__file__).resolve().parent / "fixtures" / "pilot_report.json"
+
+
+def test_threats_are_pinned_to_the_step_they_interrupt():
+    """Not "Ash beats this hand" but "Ash on your Branded Opening"."""
+    from skills import handlab
+    r = json.loads(PILOT_REPORT.read_text())
+    steps, unplaced = handlab.annotate_steps(r)
+    assert not unplaced
+    marked = {s["name"]: [t["name"] for t in s["threats"]] for s in steps
+              if s["threats"]}
+    assert "Branded Opening" in marked
+    assert "Ash Blossom & Joyous Spring" in marked["Branded Opening"]
+    assert "The Fallen & The Virtuous" not in marked, \
+        "a step with no window was marked as threatened"
+    step = next(s for s in steps if s["name"] == "Branded Opening")
+    assert step["threats"][0]["missing"] == ["Aluber the Jester of Despia"]
+
+
+def test_a_card_played_twice_does_not_collect_both_windows():
+    """A line can activate the same card twice; the windows must land on
+    separate steps, in order, not pile onto the first match."""
+    from skills import handlab
+    r = {"steps": [{"n": 1, "verb": "activate", "name": "Foo"},
+                   {"n": 2, "verb": "activate", "name": "Bar"},
+                   {"n": 3, "verb": "activate", "name": "Foo"}],
+         "handtraps": [{"name": "Ash", "code": 1, "detail": [
+             {"over": "Foo", "survived": False, "decision": 2},
+             {"over": "Foo", "survived": True, "decision": 9}]}]}
+    steps, unplaced = handlab.annotate_steps(r)
+    assert not unplaced
+    assert len(steps[0]["threats"]) == 1 and len(steps[2]["threats"]) == 1
+    assert steps[0]["threats"][0]["survived"] is False
+    assert steps[2]["threats"][0]["survived"] is True
+
+
+def test_a_window_matching_no_step_is_reported_not_misattached():
+    """A threat pinned to the wrong action is worse than one left over."""
+    from skills import handlab
+    r = {"steps": [{"n": 1, "verb": "activate", "name": "Foo"}],
+         "handtraps": [{"name": "Ash", "code": 1, "detail": [
+             {"over": "Something Else", "survived": False, "decision": 4}]}]}
+    steps, unplaced = handlab.annotate_steps(r)
+    assert steps[0]["threats"] == []
+    assert len(unplaced) == 1 and unplaced[0]["over"] == "Something Else"
