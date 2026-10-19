@@ -1,9 +1,11 @@
 """Pages. Stage 1: deck list, deck detail, import."""
 
+import tempfile
 from pathlib import Path
 
 from flask import (Blueprint, Response, abort, flash, redirect,
                    render_template, request, send_from_directory, url_for)
+from werkzeug.utils import secure_filename
 
 import json
 
@@ -23,6 +25,22 @@ ROOT_RESULTS = ROOT / "results"
 
 def conn():
     return db.connect()
+
+
+def deck_path(name):
+    """The only way a URL segment becomes a filesystem path.
+
+    Flask will not match a "/" inside <name>, but ".." and friends still
+    arrive, and three routes built `DECKS / f"{name}.ydk"` by hand. One
+    helper that refuses anything `safe_name` would have rewritten means
+    there is a single place to be wrong.
+    """
+    if not name or builder.safe_name(name, "") != name:
+        return None
+    path = (DECKS / f"{name}.ydk").resolve()
+    if path.parent != DECKS.resolve():
+        return None
+    return path
 
 
 @bp.route("/")
@@ -50,8 +68,8 @@ def index():
 @bp.route("/deck/<name>")
 @login_required
 def deck(name):
-    path = DECKS / f"{name}.ydk"
-    if not path.exists():
+    path = deck_path(name)
+    if not path or not path.exists():
         flash(f"No deck named {name}")
         return redirect(url_for("views.index"))
     c = conn()
@@ -91,10 +109,15 @@ def import_deck():
 
     try:
         if upload and upload.filename:
-            tmp = Path("/tmp") / f"duelroom-upload-{upload.filename[:60]}"
-            upload.save(tmp)
-            d = importer.load(tmp, name)
-            tmp.unlink(missing_ok=True)
+            # The filename comes from the browser and is not sanitised by
+            # werkzeug. Interpolated into a path it is an arbitrary-write
+            # primitive: "duelroom-upload-../../../etc/x" normalises to
+            # /etc/x, because the prefix becomes a directory component
+            # that the following ".." pops straight back off.
+            with tempfile.TemporaryDirectory(prefix="duelroom-upload-") as tmpd:
+                tmp = Path(tmpd) / (secure_filename(upload.filename) or "deck.ydk")
+                upload.save(tmp)
+                d = importer.load(tmp, name)
         elif source:
             d = importer.load(source, name)
         else:
@@ -142,10 +165,11 @@ def _matrix_records():
 def report(name=None):
     c = conn()
     name = name or db.get_meta(c, "active_deck")
-    if not name or not (DECKS / f"{name}.ydk").exists():
+    path = deck_path(name) if name else None
+    if not path or not path.exists():
         flash("No deck selected — import one or pick one from the deck list.")
         return redirect(url_for("views.index"))
-    r = report_mod.deck_report(c, DECKS / f"{name}.ydk")
+    r = report_mod.deck_report(c, path)
 
     surv = []
     for code, s_ in (r["funnel"] or {}).get("survival_given_line", {}).items():
@@ -293,9 +317,13 @@ def job_cancel(job_id):
 @login_required
 def run_job(name, kind):
     c = conn()
-    if kind not in jobs.KINDS:
+    if kind not in jobs.KINDS or kind in jobs.DECKLESS:
         flash("Unknown job type")
         return redirect(url_for("views.deck", name=name))
+    path = deck_path(name)
+    if not path or not path.exists():
+        flash("No such deck")
+        return redirect(url_for("views.index"))
     hands = request.form.get("hands", type=int) or 12
     job_id = jobs.enqueue(c, kind, deck=name, hands=hands)
     running = jobs.active(c)
@@ -311,7 +339,8 @@ def run_job(name, kind):
 @login_required
 def activate(name):
     c = conn()
-    if not (DECKS / f"{name}.ydk").exists():
+    path = deck_path(name)
+    if not path or not path.exists():
         flash("No such deck")
         return redirect(url_for("views.index"))
     db.set_meta(c, "active_deck", name)
@@ -322,8 +351,8 @@ def activate(name):
 @bp.route("/deck/<name>/ydk")
 @login_required
 def download_ydk(name):
-    path = DECKS / f"{name}.ydk"
-    if not path.exists():
+    path = deck_path(name)
+    if not path or not path.exists():
         return "not found", 404
     return Response(
         path.read_text(), mimetype="text/plain",
@@ -358,14 +387,20 @@ def _sections_from(payload):
 @login_required
 def build(name=None):
     c = conn()
+    # A name the save path would rewrite must not become the working
+    # name here: you would type into one deck and save into another.
+    if name and builder.safe_name(name, "") != name:
+        flash(f"{name!r} is not a usable deck name.")
+        return redirect(url_for("views.build"))
     name = name or db.get_meta(c, "active_deck")
     d = Deck(name=name or "untitled")
     existing = False
     # A mistyped name must not quietly become a blank new deck that looks
     # like the one you meant to open.
     requested = bool(name)
-    if name and (DECKS / f"{name}.ydk").exists():
-        d = Deck.from_ydk(DECKS / f"{name}.ydk")
+    path = deck_path(name) if name else None
+    if path and path.exists():
+        d = Deck.from_ydk(path)
         d.canonicalise(c)
         existing = True
 

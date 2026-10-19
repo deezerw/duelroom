@@ -16,6 +16,7 @@ import base64
 import re
 import struct
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -33,6 +34,26 @@ HEADERS = {
 
 class ImportError_(ValueError):
     pass
+
+
+# `load` will fetch any URL it is handed, and the web UI hands it whatever
+# was pasted into a box. Without this the server is a request proxy onto
+# its own LAN -- this box also runs Pi-hole, qBittorrent, Nextcloud and
+# three other Flask apps, several on plain HTTP behind the firewall.
+ALLOWED_HOSTS = {"ygoprodeck.com", "www.ygoprodeck.com", "db.ygoprodeck.com"}
+
+
+def check_url(url):
+    """Raise unless this is a YGOPRODeck URL we are willing to fetch."""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        raise ImportError_(f"{p.scheme or 'that'} URLs are not fetched")
+    host = (p.hostname or "").lower()
+    if host not in ALLOWED_HOSTS:
+        raise ImportError_(
+            f"will only fetch decks from {', '.join(sorted(ALLOWED_HOSTS))} "
+            f"— got {host or 'no host'}")
+    return url
 
 
 # --- ydke:// --------------------------------------------------------------
@@ -94,7 +115,13 @@ def from_ygoprodeck(url, name=None):
     link inside a main/extra/side container, so order and duplicates
     survive.
     """
-    r = httpx.get(url, headers=HEADERS, timeout=60.0, follow_redirects=True)
+    check_url(url)
+    # follow_redirects stays off: an allowed host that 302s to an internal
+    # address would otherwise walk straight past the check above.
+    r = httpx.get(url, headers=HEADERS, timeout=60.0, follow_redirects=False)
+    if r.is_redirect:
+        raise ImportError_(
+            f"{url} redirected to {r.headers.get('location')!r}; not followed")
     r.raise_for_status()
     body = r.text
 

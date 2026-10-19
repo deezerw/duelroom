@@ -47,7 +47,35 @@ def create_app(config=None):
     from . import auth, views
     app.register_blueprint(auth.bp)
     app.register_blueprint(views.bp)
+    app.after_request(_headers)
     return app
+
+
+# Every page is inline style + inline script, so `unsafe-inline` is
+# unavoidable and this is NOT an XSS defence -- saying otherwise would be
+# the security equivalent of a confident wrong number. What it does
+# enforce is `default-src 'self'`: no resource on any of these pages can
+# come from another origin. That is the machine-checked version of "card
+# art is served from here, never hotlinked from YGOPRODeck", which their
+# terms require and which is otherwise only a promise in a comment.
+CSP = ("default-src 'self'; img-src 'self' data:; "
+       "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+       "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+       "base-uri 'none'")
+
+
+def _headers(resp):
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    # Card art is explicitly cacheable and says so for itself; everything
+    # else is behind a password and should not sit in a shared cache.
+    resp.headers.setdefault("Cache-Control", "no-store")
+    if bool(int(os.environ.get("DUELROOM_TLS", "0"))):
+        resp.headers.setdefault("Strict-Transport-Security",
+                                "max-age=31536000; includeSubDomains")
+    return resp
 
 
 def _secret_key():

@@ -5,19 +5,22 @@ exposed, so rate limiting is here from the first commit rather than
 added after an incident.
 """
 
-import hmac
 import time
 from functools import wraps
 from urllib.parse import urlparse
 
 from flask import (Blueprint, current_app, flash, redirect, render_template,
                    request, session, url_for)
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 bp = Blueprint("auth", __name__)
 
 WINDOW_S = 300
 MAX_ATTEMPTS = 8
+
+# Same KDF and parameters werkzeug's generate_password_hash defaults to,
+# so verifying against it costs what a real check costs.
+_DUMMY_HASH = generate_password_hash("duelroom-no-password-configured")
 
 
 def _conn():
@@ -97,10 +100,13 @@ def login():
 
         supplied = request.form.get("password", "")
         stored = current_app.config.get("PASSWORD_HASH") or ""
-        ok = bool(stored) and check_password_hash(stored, supplied)
-        # Compare a constant regardless, so a missing hash and a wrong
-        # password take the same path.
-        hmac.compare_digest(supplied, supplied)
+        # With no hash configured, returning immediately would answer
+        # "is this install even set up?" in a few microseconds. Verify
+        # against a throwaway hash instead, so both paths pay the same
+        # KDF cost. (The earlier version called hmac.compare_digest on a
+        # value with itself, which cost nothing and proved nothing.)
+        ok = (check_password_hash(stored, supplied) if stored
+              else (check_password_hash(_DUMMY_HASH, supplied) and False))
         if ok:
             session.clear()
             session["in"] = True

@@ -407,3 +407,72 @@ def test_progress_reads_an_explicit_denominator(tmp_path):
     log.write_text("starting\nprogress 300/14580 — 300 fetched\n")
     p = jobs.progress({"log_path": str(log)})
     assert (p["hands"], p["total"]) == (300, 14580)
+
+
+# --- hardening pass ------------------------------------------------------
+
+def test_an_uploaded_filename_cannot_escape_the_temp_directory(loggedin):
+    """"duelroom-upload-../../../etc/x" normalises to /etc/x, because the
+    prefix becomes a directory component the following ".." pops off."""
+    import io
+    from pathlib import Path
+    evil = "../../../../tmp/duelroom-pwned.ydk"
+    loggedin.post("/import", data={
+        "file": (io.BytesIO(b"#main\n46986414\n"), evil),
+        "name": "evil"}, content_type="multipart/form-data")
+    assert not Path("/tmp/duelroom-pwned.ydk").exists()
+
+
+def test_deck_routes_refuse_a_name_that_is_not_a_plain_filename(loggedin):
+    for name in ("..", "....", "%2e%2e", "a/../b"):
+        for route in (f"/deck/{name}", f"/deck/{name}/ydk", f"/report/{name}",
+                      f"/build/{name}"):
+            r = loggedin.get(route)
+            assert r.status_code in (302, 404, 308), f"{route} -> {r.status_code}"
+
+
+def test_import_will_not_fetch_arbitrary_urls(loggedin):
+    """This box also runs Pi-hole, qBittorrent and three other Flask apps,
+    several on plain HTTP behind the firewall."""
+    from skills import importer
+    for url in ("http://127.0.0.1:8446/", "http://10.0.0.96/admin",
+                "file:///etc/passwd", "http://evil.test/ygoprodeck.com"):
+        with pytest.raises(importer.ImportError_):
+            importer.check_url(url)
+    assert importer.check_url("https://ygoprodeck.com/deck/x-1")
+
+
+def test_import_url_rejection_reaches_the_user(loggedin):
+    r = loggedin.post("/import", data={"source": "http://10.0.0.96/admin"})
+    assert r.status_code == 400
+    assert "ygoprodeck" in r.get_data(as_text=True)
+
+
+def test_security_headers_are_set(loggedin):
+    r = loggedin.get("/")
+    csp = r.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "img-src 'self' data:" in csp, "card art could be hotlinked"
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+    assert "no-store" in r.headers["Cache-Control"]
+
+
+def test_card_art_keeps_its_own_cache_header(loggedin):
+    from pathlib import Path
+    from skills import images
+    have = sorted(images.dir_for("small").glob("*.jpg"))
+    if not have:
+        pytest.skip("no art cached yet")
+    r = loggedin.get(f"/img/small/{Path(have[0]).stem}.jpg")
+    assert "max-age=31536000" in r.headers["Cache-Control"], \
+        "the blanket no-store header clobbered the art cache"
+
+
+def test_a_job_cannot_be_queued_for_a_deck_that_does_not_exist(loggedin):
+    from skills import db
+    from web import jobs
+    c = db.connect()
+    before = len(jobs.recent(c, 200))
+    loggedin.post("/deck/no-such-deck/run/gate")
+    assert len(jobs.recent(c, 200)) == before
