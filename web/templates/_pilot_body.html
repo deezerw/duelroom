@@ -31,6 +31,45 @@
   {% else %}<p class="muted" style="margin:0">no board recorded</p>{% endfor %}
 </div>
 
+{% set rd = r.reading or {} %}
+{% if rd.interruptions or rd.follow_up %}
+<h2>What the board does</h2>
+<div class="panel">
+  {% if rd.interruptions %}
+    <div class="muted" style="font-size:12px;text-transform:uppercase;
+         letter-spacing:.06em;margin-bottom:6px">stops them</div>
+    {% for x in rd.interruptions %}
+      <div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+        <span class="pill {{ 'ok' if x.kind == 'negate' }}">{{ x.kind }}</span>
+        <span class="muted mono" style="min-width:58px">{{ x.where }}</span>
+        {{ x.name }}</div>
+    {% endfor %}
+  {% endif %}
+  {% if rd.follow_up %}
+    <div class="muted" style="font-size:12px;text-transform:uppercase;
+         letter-spacing:.06em;margin:12px 0 6px">can still act on their turn</div>
+    {% for x in rd.follow_up %}
+      <div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+        <span class="muted mono" style="min-width:58px">{{ x.where }}</span>
+        {{ x.name }}
+        <span class="muted">— {{ x.actions|join(', ') }}</span>
+        {% if x.also_interrupts %}<span class="pill">counted above</span>{% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+  {% if rd.resources %}
+    <div class="prov" style="margin-top:10px">left:
+      {{ rd.resources.hand }} in hand · {{ rd.resources.grave }} in grave ·
+      {{ rd.resources.banished }} banished · {{ rd.resources.deck }} deck ·
+      {{ rd.resources.extra }} extra</div>
+  {% endif %}
+  <p class="muted" style="margin:8px 0 0;font-size:12px">Read from the card
+    scripts the engine actually runs, not a hand-written list — so it covers
+    the graveyard and the cards still in your hand, and it says where each
+    one acts from.</p>
+</div>
+{% endif %}
+
 <h2>The line</h2>
 <div class="panel">
   <ol style="margin:0;padding-left:22px">

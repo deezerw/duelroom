@@ -250,6 +250,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                 "blocking", {}).get("interruptions"),
             "steps": [],
             "board": [],
+            "reading": {"interruptions": [], "follow_up": [], "resources": {}},
             "handtraps": [],
             "error": rec.get("error") or "",
         }
@@ -258,6 +259,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
 
         out["steps"] = steps(conn, rec)
         out["board"] = _board(conn, rec)
+        out["reading"] = read_board(conn, rec)
 
         for code, name in sorted((handtraps or scenarios.HANDTRAPS).items(),
                                  key=lambda kv: kv[1]):
@@ -509,3 +511,148 @@ def solve_for_hand(job, hand, pieces=3, pair=True, cards=None, scripts=None,
     }
     demo.solver["wall_s"] = round(sum(r[0]["wall_s"] for r in results), 2)
     return demo.to_json()
+
+
+# --- reading the end board ----------------------------------------------
+#
+# A list of card names is not an answer to "what does this board do".
+# ygorl already derives interruptions from the card SCRIPTS -- not from a
+# hand-written table -- and it covers the graveyard and the hand as well
+# as the field, which is most of what follow-up means. What it leaves out
+# is every quick effect that is not a negate or a disruption: a Spirit
+# Dragon tagging out, a searcher that still has its effect. Those come
+# from the same script facts, read for their categories instead.
+
+# Categories worth naming when a card can use them on the opponent's turn
+# but they are neither a negate nor a disruption.
+FOLLOW_UP = {
+    "SPECIAL_SUMMON": "special summon",
+    "FUSION_SUMMON": "fusion summon",
+    "SEARCH": "search",
+    "TOHAND": "add to hand",
+    "RECOVER": "recover",
+    "DRAW": "draw",
+    "TOGRAVE": "send to grave",
+    "LEAVE_GRAVE": "leave the grave",
+    "EQUIP": "equip",
+    "SET": "set",
+    "TOEXTRA": "return to extra",
+    "ATKCHANGE": "change ATK",
+    "COUNTER": "counters",
+}
+
+ZONE_WHERE = {"mzone": "field", "szone": "field", "hand": "hand",
+              "grave": "grave"}
+
+
+def quick_actions(password, cards):
+    """{where: [category names]} a card can use on the opponent's turn.
+
+    Mirrors ygorl's own place derivation so that "from the field" here
+    means the same thing it means in the interruption count, and reads
+    the categories instead of collapsing them to negate / disrupt.
+    """
+    from ygorl.build.scripts import load_constants
+    from ygorl.solver.blocking import script_facts
+
+    code = cards.canonical(password)
+    card = cards.get(code)
+    if card is None:
+        return {}
+    facts = script_facts(code)
+    if facts is None:
+        return {}
+    K = load_constants()
+    quick = K["EFFECT_TYPE_QUICK_O"] | K["EFFECT_TYPE_QUICK_F"]
+    monster = bool(card.type & K["TYPE_MONSTER"])
+    settable = bool(card.type & K["TYPE_TRAP"]) or bool(
+        card.type & K["TYPE_SPELL"] and card.type & K["TYPE_QUICKPLAY"])
+
+    out = {}
+    for eff in facts.effect_facts:
+        names = [label for key, label in FOLLOW_UP.items()
+                 if eff.categories & K.get(f"CATEGORY_{key}", 0)]
+        if not names:
+            continue
+        places = []
+        if eff.type & quick:
+            rng = eff.range or (K["LOCATION_MZONE"] if monster
+                                else K["LOCATION_SZONE"])
+            if rng & (K["LOCATION_MZONE"] | K["LOCATION_SZONE"]
+                      | K["LOCATION_FZONE"] | K["LOCATION_PZONE"]):
+                places.append("field")
+            if rng & K["LOCATION_HAND"]:
+                places.append("hand")
+            if rng & K["LOCATION_GRAVE"]:
+                places.append("grave")
+        elif eff.type & K["EFFECT_TYPE_ACTIVATE"] and settable:
+            places.append("set")
+        for w in places:
+            for n in names:
+                if n not in out.setdefault(w, []):
+                    out[w].append(n)
+    return out
+
+
+def read_board(conn, record, line_index=0):
+    """What the end board can actually DO, not just what is on it.
+
+    Returns {"interruptions": [...], "follow_up": [...], "resources": {...}}.
+    Every entry says where it acts from, because a negate on the field and
+    a negate in the graveyard are not the same card to play around.
+    """
+    from ygorl.engine import constants as C
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    lines = record.get("lines") or []
+    if not lines:
+        return {"interruptions": [], "follow_up": [], "resources": {}}
+    players = (lines[line_index].get("board") or {}).get("players") or []
+    if not players:
+        return {"interruptions": [], "follow_up": [], "resources": {}}
+    me = players[0]
+    cards = default_cards()
+
+    seats = []            # (code, where, face_up)
+    for c in me.get("mzone") or []:
+        if c.get("position", 0) & C.POS_FACEUP:
+            seats.append((c["code"], "field"))
+    for c in me.get("szone") or []:
+        seats.append((c["code"],
+                      "field" if c.get("position", 0) & C.POS_FACEUP else "set"))
+    for code in me.get("hand") or []:
+        seats.append((code, "hand"))
+    for code in me.get("grave") or []:
+        seats.append((code, "grave"))
+
+    interruptions, follow_up, seen_follow = [], [], set()
+    for code, where in seats:
+        hit = next((i for i in card_interruptions(code, cards)
+                    if i.where == where), None)
+        if hit is not None:
+            interruptions.append({
+                "name": _name(conn, code), "code": code, "where": where,
+                "kind": "negate" if hit.negate else "disrupt"})
+        acts = quick_actions(code, cards).get(where) or []
+        if acts and (code, where) not in seen_follow:
+            seen_follow.add((code, where))
+            follow_up.append({"name": _name(conn, code), "code": code,
+                              "where": where, "actions": acts,
+                              "also_interrupts": hit is not None})
+
+    order = {"field": 0, "set": 1, "hand": 2, "grave": 3}
+    interruptions.sort(key=lambda r: (order.get(r["where"], 9),
+                                      r["kind"] != "negate", r["name"]))
+    follow_up.sort(key=lambda r: (order.get(r["where"], 9), r["name"]))
+    return {
+        "interruptions": interruptions,
+        "follow_up": follow_up,
+        "resources": {
+            "hand": len(me.get("hand") or []),
+            "grave": len(me.get("grave") or []),
+            "banished": len(me.get("banished") or []),
+            "deck": me.get("deck_count"),
+            "extra": me.get("extra_count"),
+        },
+    }

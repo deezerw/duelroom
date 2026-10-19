@@ -545,6 +545,9 @@ def test_pilot_report_template_renders_the_fixture(loggedin, monkeypatch):
     assert "SURVIVAL measures completion" in h, "the Maxx C blind spot vanished"
     assert "Per-window detail unavailable" in h, "a parse error was swallowed"
     assert "no legal window" in h
+    assert "What the board does" in h, "the board reading is missing"
+    assert "Rindbrumm the Striking Dragon" in h
+    assert "can still act on their turn" in h
 
 
 def test_pilot_refuses_a_hand_the_deck_cannot_hold(loggedin):

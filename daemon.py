@@ -169,6 +169,23 @@ def _print_pilot(r):
     for b in r["board"]:
         print(f"  {b['zone']:10} {b['name']}{' (set)' if b['set'] else ''}")
 
+    rd = r.get("reading") or {}
+    if rd.get("interruptions"):
+        print("\nWHAT IT STOPS")
+        for x in rd["interruptions"]:
+            print(f"  {x['kind']:8} from {x['where']:6} {x['name']}")
+    if rd.get("follow_up"):
+        print("\nWHAT IT CAN STILL DO on their turn")
+        for x in rd["follow_up"]:
+            also = " (also interrupts)" if x["also_interrupts"] else ""
+            print(f"  from {x['where']:6} {', '.join(x['actions'])}"
+                  f" — {x['name']}{also}")
+    res = rd.get("resources") or {}
+    if res:
+        print(f"\n  left: {res.get('hand')} in hand, {res.get('grave')} in "
+              f"grave, {res.get('banished')} banished, {res.get('deck')} deck, "
+              f"{res.get('extra')} extra")
+
     print("\nTHE LINE")
     for s in r["steps"]:
         print(f"  {s['n']:2}. {s['verb']:16} {s['name']}")

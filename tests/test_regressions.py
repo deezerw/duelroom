@@ -1151,3 +1151,100 @@ def test_a_dealt_hand_can_be_dealt_again():
     # Two unseeded deals should not be the same hand every time.
     deals = {tuple(handlab.random_hand(d)[0]) for _ in range(12)}
     assert len(deals) > 1, "the deal is not random"
+
+
+def test_the_board_reader_finds_every_place_a_card_can_act_from():
+    """A negate on the field and a negate in the graveyard are not the
+    same card to play around, so "where" has to be real for all of them.
+
+    Guards against a reader that silently only ever looks at the field:
+    the first version found nothing in the graveyard across 271 stored
+    boards, and only a pool scan showed that was the decks' doing and not
+    a broken detector.
+    """
+    import random
+
+    from skills import engine
+    engine._export()
+    from skills import db, handlab
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    conn = db.connect()
+    cards = default_cards()
+    ids = [r["id"] for r in conn.execute("SELECT id FROM cards")]
+    random.Random(0).shuffle(ids)
+    places = set()
+    quick_places = set()
+    for cid in ids[:1500]:
+        places |= {i.where for i in card_interruptions(cid, cards)}
+        quick_places |= set(handlab.quick_actions(cid, cards))
+    assert {"field", "set", "hand", "grave"} <= places, (
+        f"no card interrupts from {{'field','set','hand','grave'}} - {places}")
+    assert "grave" in quick_places, "no graveyard follow-up is ever detected"
+
+
+def test_board_reading_separates_stopping_from_follow_up():
+    from skills import db, handlab
+    conn = db.connect()
+    rec = json.loads(PILOT_REPORT.read_text())
+    rd = rec["reading"]
+    assert rd["interruptions"] and rd["follow_up"]
+    stop = rd["interruptions"][0]
+    assert stop["kind"] in ("negate", "disrupt") and stop["where"] == "field"
+    # A card that both negates and does something else must say so rather
+    # than being counted twice as two separate pieces of follow-up.
+    dup = rd["follow_up"][0]
+    assert dup["name"] == stop["name"] and dup["also_interrupts"] is True
+    assert rd["resources"]["grave"] == 7
+
+
+def test_an_empty_board_reads_as_empty_not_as_an_error():
+    from skills import db, handlab
+    conn = db.connect()
+    assert handlab.read_board(conn, {"lines": []}) == {
+        "interruptions": [], "follow_up": [], "resources": {}}
+    assert handlab.read_board(conn, {"lines": [{"board": {}}]})["resources"] == {}
+
+
+def test_read_board_sees_the_graveyard_and_the_hand_not_just_the_field():
+    """The question was "a GY negate, a kept Ash" -- a reader that only
+    looks at the field answers "nothing" and looks right doing it.
+
+    Built from a synthetic board because the stored library happens to
+    contain no graveyard interrupter, which is exactly how a field-only
+    reader survived its first two tests.
+    """
+    from skills import db, engine
+    engine._export()
+    from skills import handlab
+
+    conn = db.connect()
+    FOX = 94919024        # Lunalight Crimson Fox: negates from the grave
+    ASH = 14558127        # kept in hand
+    MIRRORJADE = 44146295  # disrupts from the field
+    rec = {"lines": [{"board": {"players": [{
+        "mzone": [{"code": MIRRORJADE, "position": 1, "sequence": 0}],
+        "szone": [], "hand": [ASH], "grave": [FOX], "banished": [],
+        "deck_count": 30, "extra_count": 10}]}}]}
+    rd = handlab.read_board(conn, rec)
+    by_where = {x["where"]: x for x in rd["interruptions"]}
+    assert "grave" in by_where, "a graveyard negate was not seen"
+    assert by_where["grave"]["name"] == "Lunalight Crimson Fox"
+    assert by_where["grave"]["kind"] == "negate"
+    assert "hand" in by_where, "a hand trap kept in hand was not seen"
+    assert by_where["hand"]["name"] == "Ash Blossom & Joyous Spring"
+    assert "field" in by_where
+    assert rd["resources"]["grave"] == 1 and rd["resources"]["hand"] == 1
+
+
+def test_a_face_down_monster_is_not_read_as_an_active_negate():
+    from skills import db, engine
+    engine._export()
+    from skills import handlab
+    conn = db.connect()
+    MIRRORJADE = 44146295
+    face_down = {"lines": [{"board": {"players": [{
+        "mzone": [{"code": MIRRORJADE, "position": 8, "sequence": 0}],
+        "szone": [], "hand": [], "grave": [], "banished": []}]}}]}
+    assert handlab.read_board(conn, face_down)["interruptions"] == []

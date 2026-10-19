@@ -103,6 +103,18 @@ MUTATIONS = [
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
     ("skills/handlab.py",
+     "    for code in me.get(\"grave\") or []:\n"
+     "        seats.append((code, \"grave\"))",
+     "",
+     "stop reading the graveyard, so a GY negate reads as no follow-up"),
+
+    ("skills/handlab.py",
+     "    for code in me.get(\"hand\") or []:\n"
+     "        seats.append((code, \"hand\"))",
+     "",
+     "stop reading cards kept in hand, so a held Ash reads as nothing"),
+
+    ("skills/handlab.py",
      "    plan = blocking_plan(deck.main, deck.extra, list(hand), cards)",
      "    from ygorl.solver.batch import sample_hand\n"
      "    plan = blocking_plan(deck.main, deck.extra,\n"

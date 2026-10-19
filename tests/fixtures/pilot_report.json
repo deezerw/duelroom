@@ -174,5 +174,33 @@
    "parse_error": "solver reported 5 windows, parsed 3"
   }
  ],
- "error": ""
+ "error": "",
+ "reading": {
+  "interruptions": [
+   {
+    "name": "Rindbrumm the Striking Dragon",
+    "code": 51409648,
+    "where": "field",
+    "kind": "negate"
+   }
+  ],
+  "follow_up": [
+   {
+    "name": "Rindbrumm the Striking Dragon",
+    "code": 51409648,
+    "where": "field",
+    "actions": [
+     "add to hand"
+    ],
+    "also_interrupts": true
+   }
+  ],
+  "resources": {
+   "hand": 2,
+   "grave": 7,
+   "banished": 0,
+   "deck": 33,
+   "extra": 13
+  }
+ }
 }
