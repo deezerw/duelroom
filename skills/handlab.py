@@ -298,7 +298,8 @@ def exposure(rows):
 
 
 def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
-            handtraps=None, fill_seed=0, pieces=3, log=None, candidates=1):
+            handtraps=None, fill_seed=0, pieces=3, log=None, candidates=1,
+            threads=None):
     """The whole report for one chosen opening hand.
 
     Returns a dict with the filled hand, the end board, the readable
@@ -315,6 +316,17 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
     # this module's own demonstration hand as UNSOLVED on one run and
     # solved on another -- a cheap run is a wrong run, not a fast one.
     solve_ms = engine.SOLVE_MS if solve_ms is None else solve_ms
+    # ONE hand, so there is nothing to parallelise across -- the batch
+    # path runs six hands as six single-threaded processes, and copying
+    # its threads=1 here left a pilot run using one core of eight while
+    # the other seven sat idle. The solver parallelises its own search,
+    # so give it the cores instead.
+    #
+    # The cost is reproducibility: --threads 1 makes two runs do exactly
+    # the same work. That was never worth 1/6th of the machine here,
+    # because the budget is wall-clock anyway, so a pilot report is not
+    # reproducible at any thread count.
+    threads = engine.DEFAULT_WORKERS if threads is None else max(1, threads)
     engine.require()
     deck_path = Path(deck_path).resolve()
     deck = Deck.from_ydk(deck_path)
@@ -330,7 +342,8 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         job = HandJob(
             deck_path=deck_path, hand_index=0, hand_seed=fill_seed, targets=(),
             workdir=Workdir.create(scratch / "wd").path, scratch=scratch / "job",
-            solve_ms=solve_ms, fire_ms=fire_ms, threads=1, hand=tuple(hand),
+            solve_ms=solve_ms, fire_ms=fire_ms, threads=threads,
+            hand=tuple(hand),
             binary=find_solver(), keep_files=True, lines=max(1, candidates),
             timeout_s=solve_ms / 1000 + 300)
 
@@ -340,6 +353,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
 
         out = {
             "deck": deck_path.stem,
+            "threads": threads,
             "hand": hand,
             "hand_names": [_name(conn, c) for c in hand],
             "chosen": list(chosen),

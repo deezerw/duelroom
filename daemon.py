@@ -154,8 +154,9 @@ def cmd_pilot(conn, args):
         return
 
     candidates = int(args[5]) if len(args) > 5 else 1
+    threads = int(args[6]) if len(args) > 6 else None
     r = handlab.analyse(conn, path, chosen, solve_ms=solve_ms, fire_ms=fire_ms,
-                        handtraps=traps, candidates=candidates,
+                        handtraps=traps, candidates=candidates, threads=threads,
                         log=lambda m: print(f"  {m}", flush=True))
     out = handlab.save(r)
     _print_pilot(r)
