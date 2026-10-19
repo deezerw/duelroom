@@ -627,6 +627,20 @@ def pilot(name):
             solve_s=solve_s, fire_s=fire_s, report=str(report))
         return redirect(url_for("views.job_detail", job_id=job_id))
 
+    # ?deal=1 deals a hand into the picker rather than straight into the
+    # queue: you see the five cards, and can re-deal or adjust before
+    # spending five minutes of solver on them.
+    preset, deal_seed = [], None
+    deal = request.args.get("deal")
+    if deal is not None:
+        try:
+            codes, deal_seed = handlab.random_hand(
+                d, int(deal) if deal.isdigit() and deal != "1" else None)
+            preset = [{"code": x, "name": (card_db.resolve(c, x) or {})["name"]}
+                      for x in codes]
+        except ValueError as e:
+            flash(str(e))
+
     counts = d.counts("main")
     play = builder.play_index(c, (ms.identify_archetype(c, d) or [(None,)])[0][0])
     cards = sorted(
@@ -640,5 +654,5 @@ def pilot(name):
         key=lambda p: -p.stat().st_mtime)[:8] if (handlab.REPORTS / name).exists() else []
     return render_template(
         "pilot.html", name=name, cards=cards, running=jobs.active(c),
-        hand_size=handlab.HAND_SIZE,
+        hand_size=handlab.HAND_SIZE, preset=preset, deal_seed=deal_seed,
         recent=[handlab.load(p) for p in recent])

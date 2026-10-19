@@ -16,6 +16,9 @@
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <strong>Your hand</strong>
     <span id="slots" class="muted">nothing picked yet</span>
+    <a class="btn" style="padding:4px 10px;font-size:12px"
+       href="{{ url_for('views.pilot', name=name, deal=1) }}">{{
+       'Deal again' if preset else 'Deal a random hand' }}</a>
     <span style="margin-left:auto">
       <label class="muted">solve budget
         <select name="solve_s">
@@ -33,6 +36,11 @@
     <button class="primary" id="go" disabled>Solve this hand</button>
   </div>
   <div id="picked" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"></div>
+  {% if deal_seed is not none %}
+    <p class="prov" style="margin:8px 0 0">dealt at random from the
+      {{ hand_size }}-card opening · seed {{ deal_seed }} ·
+      <a href="{{ url_for('views.pilot', name=name, deal=deal_seed) }}">repeat this deal</a></p>
+  {% endif %}
   <p class="muted" style="margin:10px 0 0;font-size:12px">
     Fewer than {{ hand_size }} cards is fine — the rest are dealt from the deck
     and labelled as not your pick. Budget is part of the result: the same hand
@@ -87,7 +95,7 @@
 
 <script>
 const MAX = {{ hand_size }};
-const hand = [];
+const hand = {{ preset | tojson }}.map(c => ({code: c.code, name: c.name}));
 const f = document.getElementById('f');
 
 function count(code){ return hand.filter(c => c.code === code).length; }

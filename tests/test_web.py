@@ -569,3 +569,30 @@ def test_pilot_refuses_six_cards_and_an_empty_hand(loggedin):
     loggedin.post("/pilot/my-despia", data={"card": ["1984618"] * 6})
     loggedin.post("/pilot/my-despia", data={"card": ["999999999"]})
     assert len(jobs.recent(c, 200)) == before
+
+
+def test_dealing_puts_a_hand_in_the_picker_not_in_the_queue(loggedin):
+    """You see the five cards and can re-deal before spending five
+    minutes of solver on them."""
+    import json
+    import re
+    from skills import db
+    from web import jobs
+    c = db.connect()
+    before = len(jobs.recent(c, 200))
+    h = loggedin.get("/pilot/my-despia?deal=1").get_data(as_text=True)
+    preset = json.loads(re.search(r"const hand = (\[.*?\])\.map", h).group(1))
+    assert len(preset) == 5
+    assert len(jobs.recent(c, 200)) == before, "dealing queued a job"
+    assert "repeat this deal" in h
+
+
+def test_a_dealt_hand_is_repeatable_from_its_link(loggedin):
+    import json
+    import re
+
+    def deal(q):
+        h = loggedin.get(f"/pilot/my-despia?deal={q}").get_data(as_text=True)
+        return json.loads(re.search(r"const hand = (\[.*?\])\.map", h).group(1))
+    assert deal(42) == deal(42)
+    assert deal(42) != deal(43)

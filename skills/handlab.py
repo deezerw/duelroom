@@ -337,9 +337,30 @@ def resolve_in_deck(conn, deck, text):
     return names[hits[0]]
 
 
+def random_hand(deck, seed=None, size=HAND_SIZE):
+    """A hand the deck can really open, drawn from its actual copies.
+
+    Returns (hand, seed). The seed comes back so the deal can be repeated
+    -- a report nobody can reproduce is an anecdote.
+    """
+    import random
+
+    if len(deck.main) < size:
+        raise ValueError(f"the main deck holds {len(deck.main)} cards")
+    seed = random.randrange(2 ** 31) if seed is None else int(seed)
+    return random.Random(seed).sample(list(deck.main), size), seed
+
+
 def parse_hand(conn, deck, text):
-    """'nadir, aluber, branded opening' -> [codes], order kept."""
-    parts = [p for p in re.split(r"\s*[|,]\s*", str(text)) if p.strip()]
+    """'nadir, aluber, branded opening' -> [codes], order kept.
+
+    'random' deals one instead; 'random:1234' repeats a given deal.
+    """
+    raw = str(text).strip()
+    if raw.lower().startswith("random"):
+        _, _, s = raw.partition(":")
+        return random_hand(deck, int(s) if s.strip().isdigit() else None)[0]
+    parts = [p for p in re.split(r"\s*[|,]\s*", raw) if p.strip()]
     if not parts:
         raise ValueError("name at least one card")
     if len(parts) > HAND_SIZE:

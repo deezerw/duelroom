@@ -1119,3 +1119,35 @@ def test_the_solver_aims_at_a_board_for_the_hand_you_actually_hold(monkeypatch):
     handlab.solve_for_hand(job, mine, pieces=1)
     assert seen["hand"] == mine, (
         "targets were planned from a seeded hand, not the one you hold")
+
+
+def test_a_random_hand_is_one_the_deck_could_really_open():
+    from collections import Counter
+    from skills import db, handlab
+    from skills.deck import Deck
+    c = db.connect()
+    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
+                      / "assets" / "decks" / "my-despia.ydk")
+    d.canonicalise(c)
+    have = Counter(d.main)
+    for seed in range(40):
+        hand, got = handlab.random_hand(d, seed)
+        assert got == seed and len(hand) == 5
+        for code, n in Counter(hand).items():
+            assert n <= have[code], f"dealt {n} copies of a {have[code]}-of"
+
+
+def test_a_dealt_hand_can_be_dealt_again():
+    """A report nobody can reproduce is an anecdote."""
+    from skills import db, handlab
+    from skills.deck import Deck
+    c = db.connect()
+    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
+                      / "assets" / "decks" / "my-despia.ydk")
+    d.canonicalise(c)
+    first, seed = handlab.random_hand(d)
+    assert handlab.random_hand(d, seed)[0] == first
+    assert handlab.parse_hand(c, d, f"random:{seed}") == first
+    # Two unseeded deals should not be the same hand every time.
+    deals = {tuple(handlab.random_hand(d)[0]) for _ in range(12)}
+    assert len(deals) > 1, "the deal is not random"

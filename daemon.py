@@ -29,7 +29,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   archetypes [n]            what is being played, by tournament presence
   flex <archetype> [side]   core / flex / fringe breakdown
   hand <deck.ydk>           exact opening-hand math
-  pilot <deck> <cards>      solve ONE chosen hand: board, steps, handtrap windows
+  pilot <deck> <cards>      solve ONE hand (or `random`): board, steps, weak points
   check <deck.ydk>          legality and banlist check
   decks                     list .ydk files in assets/decks/
   import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
@@ -128,6 +128,8 @@ def cmd_pilot(conn, args):
     if len(args) < 2:
         print('usage: pilot <deck> "<card>, <card>, ..."  [solve_s] [fire_s]')
         print('       names may be fragments: pilot my-despia "nadir, aluber"')
+        print('       pilot my-despia random        deal one')
+        print('       pilot my-despia random:1234   deal the same one again')
         return
     name, cards = args[0], args[1]
     path = DECKS / f"{name}.ydk" if not name.endswith(".ydk") else Path(name)
