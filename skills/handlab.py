@@ -883,24 +883,47 @@ def _rank_candidates(conn, job, base, rec, traps, say):
     """Fire every hand trap at every verified line and rank by exposure."""
     from dataclasses import replace as dreplace
 
-    from ygorl.solver.batch import solve_fire
+
+    # lines x traps independent solver runs -- 21 of them for three
+    # lines and seven traps, which is the bulk of the work in this mode.
+    # Fired together for the same reason the plain trap loop is.
+    import multiprocessing
+
+    items = sorted(traps.items(), key=lambda kv: kv[1])
+    n_lines = len(rec.get("lines") or [])
+    workers = max(1, min(n_lines * len(items), engine.DEFAULT_WORKERS))
+    per_threads = max(1, engine.DEFAULT_WORKERS // workers)
+    say(f"testing {n_lines} lines x {len(items)} hand traps, "
+        f"{workers} at a time")
+
+    tasks = []
+    for k in range(n_lines):
+        only = dreplace(base, lines=[base.lines[k]])
+        sub = dreplace(job, threads=per_threads,
+                       scratch=Path(job.scratch) / f"c{k}")
+        for code, _ in items:
+            tasks.append(((sub, only, code), k))
+
+    results = {}
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(workers) as pool:
+        done = 0
+        for (code, j), k in zip(
+                pool.imap(_fire_one, [t[0] for t in tasks]),
+                [t[1] for t in tasks]):
+            meta = j.get("solver") or {}
+            results.setdefault(k, []).append(
+                {"code": code, "name": dict(items)[code],
+                 "windows": meta.get("windows"),
+                 "converted": meta.get("converted")})
+            done += 1
+            if done % len(items) == 0:
+                say(f"  {done // len(items)} of {n_lines} lines done")
 
     rows = []
-    for k in range(len(rec.get("lines") or [])):
-        say(f"testing line {k + 1} of {len(rec['lines'])} ...")
-        # solve_fire always fires at lines[0], so the candidate under test
-        # is moved to the front of its own copy.
-        only = dreplace(base, lines=[base.lines[k]])
-        per = []
-        for code, name in sorted(traps.items(), key=lambda kv: kv[1]):
-            fd = solve_fire(dreplace(job, scratch=Path(job.scratch) / f"c{k}"),
-                            only, code)
-            meta = fd.to_json().get("solver") or {}
-            per.append({"code": code, "name": name,
-                        "windows": meta.get("windows"),
-                        "converted": meta.get("converted")})
+    for k in range(n_lines):
+        per = sorted(results.get(k, []), key=lambda r: r["name"])
         lost, offered = exposure(per)
-        one = {"lines": [rec["lines"][k]]}
         rows.append({
             "line": k, "lost": lost, "offered": offered, "traps": per,
             "steps": steps(conn, {**rec, "lines": [rec["lines"][k]]}),
