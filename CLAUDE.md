@@ -73,6 +73,23 @@ venv/bin/python web/manage.py set-password
 sudo systemctl enable --now duelroom.service duelroom-watchdog.timer
 ```
 
+**Deploy web changes with SIGHUP, not a restart.** `systemctl restart` drops
+the tmux session and kills whatever solver job the worker is holding — two
+pilot runs were lost that way. The web code is served by gunicorn, and its
+master reloads workers gracefully on SIGHUP without touching the job worker:
+
+```bash
+venv/bin/python -c "from skills import db; from web import jobs; \
+    print(jobs.active(db.connect()))"      # check first
+kill -HUP $(ps -u deezer -o pid,ppid,args --no-headers | grep 'web\.wsgi:app' \
+    | grep -v grep | awk '$2 != 1 {print $1}' | head -1)
+```
+
+A full restart is still needed for changes to `web/worker.py` or `skills/`
+used by the worker. `tmux-stop.sh` now SIGTERMs the worker first and waits
+`DUELROOM_STOP_GRACE` (180s) for it to finish its job, but an `optimize` run
+outlasts that.
+
 **Never `pkill -f` the gunicorn pattern.** `pgrep -f` matches whole command
 lines, so it also matches the shell that just typed it — that is the exit-144
 footgun, and it fired again while deploying this. `tmux-stop.sh` excludes the
