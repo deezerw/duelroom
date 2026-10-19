@@ -646,3 +646,23 @@ def test_a_missing_report_says_so_rather_than_erroring(loggedin, tmp_path,
                      follow_redirects=True)
     assert r.status_code == 200
     assert "no longer stored" in r.get_data(as_text=True)
+
+
+def test_a_step_with_a_threat_can_be_opened(loggedin):
+    """The line and the hand-trap list were the same story told twice.
+    A step now carries the windows that land on IT."""
+    import json
+    from pathlib import Path
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    app = loggedin.application
+    with app.test_request_context():
+        from flask import render_template
+        h = render_template("pilot_report.html", r=rep, name="my-despia",
+                            stored=True, running=None)
+    assert h.count('<details class="branch">') == 3, (
+        "every step with a window should open")
+    assert "Ash Blossom &amp; Joyous Spring here" in h
+    assert "never assembled" in h
+    # A step with no window must not pretend to be safe OR be clickable.
+    assert "The Fallen &amp; The Virtuous" in h

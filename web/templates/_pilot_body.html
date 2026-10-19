@@ -71,16 +71,63 @@
 {% endif %}
 
 <h2>The line</h2>
+<p class="muted" style="margin:-4px 0 8px">A step with a hand-trap badge can be
+  opened: it says what happens if the trap lands <em>there</em>, which is not
+  the same question as whether the hand beats the trap at all.</p>
 <div class="panel">
   <ol style="margin:0;padding-left:22px">
   {% for s in r.steps %}
-    <li style="padding:3px 0"><span class="muted mono"
-      style="display:inline-block;min-width:118px">{{ s.verb }}</span>
-      {{ s.name }}
-      {% for d in s.did or [] %}
-        <div class="muted" style="font-size:12px;padding-left:118px">
-          <span class="mono">{{ d.what }}</span> {{ d.name }}</div>
-      {% endfor %}
+    <li style="padding:3px 0">
+      {% if s.threats %}
+        <details class="branch">
+          <summary><span class="muted mono"
+            style="display:inline-block;min-width:118px">{{ s.verb }}</span>
+            {{ s.name }}
+            {% for t in s.threats %}
+              <span class="pill {{ 'bad' if not t.survived else 'ok' }}"
+                    title="{{ t.name }}">{{ t.name.split(' ')[0] }}{{
+                    '' if t.survived else ' ✕' }}</span>
+            {% endfor %}
+          </summary>
+          <div class="branchbody">
+            {% for d in s.did or [] %}
+              <div class="muted" style="font-size:12px">
+                <span class="mono">{{ d.what }}</span> {{ d.name }}</div>
+            {% endfor %}
+            {% for t in s.threats %}
+              <div style="margin-top:8px;padding-top:7px;
+                          border-top:1px solid #ffffff0a">
+                <strong>{{ t.name }} here</strong>
+                {% if t.survived %}
+                  <span class="pill ok">you play through it</span>
+                {% else %}
+                  <span class="pill bad">no recovery found</span>
+                {% endif %}
+                {% if t.missing and not t.survived %}
+                  <div class="muted" style="font-size:12px">the search got
+                    close but never assembled: {{ t.missing|join(', ') }}</div>
+                {% endif %}
+                {% if t.answers %}
+                  <div class="muted" style="font-size:12px">you can answer it
+                    with: {{ t.answers|join(', ') }}</div>
+                {% endif %}
+                {% if t.reaches %}
+                  <div style="font-size:12px;margin-top:3px">you still reach:
+                    {{ t.reaches|join(', ') }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+      {% else %}
+        <span class="muted mono"
+          style="display:inline-block;min-width:118px">{{ s.verb }}</span>
+        {{ s.name }}
+        {% for d in s.did or [] %}
+          <div class="muted" style="font-size:12px;padding-left:118px">
+            <span class="mono">{{ d.what }}</span> {{ d.name }}</div>
+        {% endfor %}
+      {% endif %}
     </li>
   {% endfor %}
   </ol>
@@ -168,3 +215,13 @@
   <a class="btn" href="{{ url_for('views.pilot', name=r.deck) }}">Try another hand</a>
   <a class="btn" href="{{ url_for('views.deck', name=r.deck) }}">{{ r.deck }}</a>
 </p>
+
+<style>
+  details.branch > summary{cursor:pointer;list-style:none}
+  details.branch > summary::-webkit-details-marker{display:none}
+  details.branch > summary::before{content:"\25B8";color:var(--dim);
+    display:inline-block;width:14px}
+  details.branch[open] > summary::before{content:"\25BE"}
+  details.branch .branchbody{padding:6px 0 8px 132px}
+  @media(max-width:620px){details.branch .branchbody{padding-left:14px}}
+</style>

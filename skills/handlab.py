@@ -374,6 +374,10 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         if candidates > 1 and len(rec.get("lines") or []) > 1 and traps:
             out["candidates"] = _rank_candidates(
                 conn, job, base, rec, traps, say)
+
+        # The line and the threats are the same story told twice unless
+        # they are joined: each step carries the windows that land on it.
+        out["steps"], out["unplaced"] = annotate_steps(out)
         return out
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

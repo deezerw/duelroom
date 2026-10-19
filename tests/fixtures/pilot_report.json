@@ -49,7 +49,21 @@
      "name": "The Fallen & The Virtuous"
     }
    ],
-   "n": 1
+   "n": 1,
+   "threats": [
+    {
+     "name": "Ash Blossom & Joyous Spring",
+     "code": 14558127,
+     "survived": false,
+     "missing": [
+      "Aluber the Jester of Despia"
+     ],
+     "answers": [
+      "The Fallen & The Virtuous"
+     ],
+     "decision": 2
+    }
+   ]
   },
   {
    "verb": "activate",
@@ -67,14 +81,28 @@
      "name": "Branded Opening"
     }
    ],
-   "n": 2
+   "n": 2,
+   "threats": []
   },
   {
    "verb": "normal summon",
    "code": 62962630,
    "name": "Aluber the Jester of Despia",
    "did": [],
-   "n": 3
+   "n": 3,
+   "threats": [
+    {
+     "name": "Ash Blossom & Joyous Spring",
+     "code": 14558127,
+     "survived": false,
+     "missing": [
+      "Rindbrumm the Striking Dragon",
+      "Albion the Branded Dragon"
+     ],
+     "answers": [],
+     "decision": 13
+    }
+   ]
   },
   {
    "verb": "activate",
@@ -87,7 +115,8 @@
      "name": "Branded Fusion"
     }
    ],
-   "n": 4
+   "n": 4,
+   "threats": []
   },
   {
    "verb": "activate",
@@ -105,7 +134,20 @@
      "name": "Mulcharmy Fuwalos"
     }
    ],
-   "n": 5
+   "n": 5,
+   "threats": [
+    {
+     "name": "Ash Blossom & Joyous Spring",
+     "code": 14558127,
+     "survived": false,
+     "missing": [
+      "Rindbrumm the Striking Dragon",
+      "Albion the Branded Dragon"
+     ],
+     "answers": [],
+     "decision": 24
+    }
+   ]
   },
   {
    "verb": "special summon",
@@ -118,7 +160,8 @@
      "name": "Branded Fusion"
     }
    ],
-   "n": 6
+   "n": 6,
+   "threats": []
   }
  ],
  "board": [
@@ -614,5 +657,6 @@
     }
    ]
   }
- ]
+ ],
+ "unplaced": []
 }
