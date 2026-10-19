@@ -958,16 +958,60 @@ def test_window_detail_is_parsed_out_of_the_solver_log():
         "Aluber the Jester of Despia", "Branded Fusion"]
 
 
-def test_french_pas_convertie_is_not_read_as_converted():
-    """The solver's report is half French. "pas convertie" CONTAINS
-    "convertie", so a substring test for success inverts every verdict."""
+CONVERTED_LOG = (Path(__file__).resolve().parent / "fixtures"
+                 / "fire_veiler_converted.log")
+
+
+def test_both_verdicts_are_read_from_REAL_solver_output():
+    """The solver writes failure as "pas convertie" and success as
+    "CONVERTIE (board COMPLET)" -- different words AND different case.
+
+    The first version of this test built its success case by lowercasing
+    a failure line itself, so it never saw the real format: every
+    converted window shipped as "no recovery found". Both fixtures are
+    now genuine solver logs.
+    """
+    from skills import handlab
+    lost, _ = handlab.parse_windows(FIRE_LOG.read_text())
+    assert lost and not any(r["survived"] for r in lost)
+    won, _ = handlab.parse_windows(CONVERTED_LOG.read_text())
+    assert won and all(r["survived"] for r in won), (
+        "a converted window was read as a failure")
+
+
+def test_an_open_window_is_not_found_inside_a_card_name():
+    """"over Branded Opening" contains "open". The same substring trap
+    as "Ra" inside "Dragon", which this project has already paid for."""
     from skills import handlab
     rows, _ = handlab.parse_windows(FIRE_LOG.read_text())
-    assert not any(r["survived"] for r in rows), \
-        "an unconverted window was read as survived"
-    ok = FIRE_LOG.read_text().replace("pas convertie", "convertie")
-    rows2, _ = handlab.parse_windows(ok)
-    assert all(r["survived"] for r in rows2), "a converted window was missed"
+    assert not rows[0]["open_window"], "'Opening' was read as an open window"
+    rows2, _ = handlab.parse_windows(CONVERTED_LOG.read_text())
+    assert [r["open_window"] for r in rows2] == [False, True, True]
+
+
+def test_an_empty_chain_window_is_placed_by_summon_count():
+    """It lands on no card of ours, so "after the 2nd summon" is the only
+    handle it has -- and it is the one Nibiru is reasoned about with."""
+    from skills import db, engine
+    engine._export()
+    from skills import handlab
+    conn = db.connect()
+    record = json.loads((Path(__file__).resolve().parent / "fixtures"
+                         / "solved_line.json").read_text())
+    st = handlab.steps(conn, record)
+    assert [s["summon_index"] for s in st] == [None, None, 1, None, None, 2]
+
+    rows, _ = handlab.parse_windows(CONVERTED_LOG.read_text())
+    annotated, unplaced = handlab.annotate_steps(
+        {"steps": st, "handtraps": [{"name": "Effect Veiler", "code": 97268402,
+                                     "detail": rows}]})
+    assert not unplaced, f"windows with nowhere to go: {unplaced}"
+    placed = {s["n"]: len(s["threats"]) for s in annotated if s["threats"]}
+    # one named window on step 5, two empty-chain ones after the 2nd summon
+    assert placed == {5: 1, 6: 2}, placed
+    sixth = next(s for s in annotated if s["n"] == 6)
+    assert all(t["open_window"] and t["after_summons"] == 2
+               for t in sixth["threats"])
 
 
 def test_a_changed_log_format_fails_loudly(monkeypatch):

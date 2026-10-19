@@ -1,0 +1,99 @@
+loading
+@event {"type":"phase","phase":"loading"}
+  cards             : 14845 from 1 database(s)  (19 ms)
+  script dirs       : 8  (override)
+  ocgcore           : v11.0
+  arena             : base 0x400000000000, 256 MB reserved, dirty pages tracked
+
+reference replay
+  mode              : duel normal
+  garbage collector : STOPPED (memory reclaimed by restore)
+  answers to replay : 35
+
+results
+@event {"type":"phase","phase":"replay"}
+  answers consumed    : 35 / 35
+  MSG_RETRY           : 0   (faithful replay)
+@event {"type":"health","msgRetry":0}
+  turns played        : 2
+  burned              : 7 at the board, peak 7 along the line (recovery margin 0 - calibrates --burn-slack)
+
+--- possible lines along THIS line ---
+  raw branching product          : 10^12.6
+  after dedup by code            : 10^11.7
+  (scale indicator, NOT a leaf count: changing an early
+   choice changes the prompts that follow.)
+
+--- starting position (player 0) ---
+      MAIN       36637374  Branded Opening
+      MAIN       95515789  Blazing Cartesia, the Virtuous
+      MAIN       30271097  The Fallen & The Virtuous
+      MAIN       62962630  Aluber the Jester of Despia
+      MAIN        1984618  Nadir Servant
+      DECK=37  EXTRA=15
+
+--- cost of the reference line ---
+  normal summons         : 0
+  special summons        : 2
+  flip summons           : 0
+  activations            : 4
+  A_ref (tier 2)         : 6
+  D_ref (tier 3)         : 35
+
+--- target board (end of turn, player 0) ---
+    captured after answer #35
+      MZONE[2]  62962630  Aluber the Jester of Despia          DEF     
+      MZONE[5]  51409648  Rindbrumm the Striking Dragon        DEF     
+      HAND=2  DECK=33  EXTRA=13  GRAVE=7  REMOVED=0
+
+  C_ref (tier 1) = cards outside hand/deck/extra
+    player 0 total        : 57
+    left in hand+deck+extra: 48
+    => consommees         : 9
+       of which on the board : 2  (constant: fixed by the equivalence criterion)
+       of which burned to GY/banished: 7  <-- THIS is what the solver minimises
+
+--- cards the line engages (board + GY + banished) ---
+      1x  30271097  The Fallen & The Virtuous
+      1x  36637374  Branded Opening
+      1x  41373230  Titaniklad the Ash Dragon
+      1x  42141493  Mulcharmy Fuwalos
+      1x  44362883  Branded Fusion
+      1x  51409648  Rindbrumm the Striking Dragon
+      1x  62962630  Aluber the Jester of Despia
+      1x  68468459  Fallen of Albaz
+      1x  95515789  Blazing Cartesia, the Virtuous
+  self-checks  : pass, stress 18/18/0
+@event {"type":"selfChecks","pass":true,"detail":"pass, stress 18/18/0"}
+
+=== opponent test: the opponent PLAYS the threat (--fire) ===
+  MECANISMES [fire] : adapt-to-peak, hindsight 0.50
+!! REQUESTED but INERT here (dependency absent in this mode): reenter 0.50
+@event {"type":"inert","mode":"fire","flags":"reenter 0.50"}
+  threat: Effect Veiler - added to the opponent hand, PLAYED at every legal window
+  --fire-bake: Effect Veiler baked into the header (opponent deck), verified in hand by probe;
+  the replays produced play in EDOPro as they are.
+  recovery repertoire: 28 step(s), 0 unidentified
+  baseline: 28 answers of ours, 7 opponent passes, board at answer 35
+  alignment PROVEN: the baseline redoes the board on the augmented duel.
+  3 window(s) where Effect Veiler is playable (2 on an empty chain, 1 on top of an effect)
+
+--- injections: 20 s of search per window ---
+  window  0: answers to the threat: Aluber the Jester of Despia
+  window  0 (dec.  19, summon  1, over Branded Fusion): CONVERTIE (board COMPLET)  [4 rollouts, best 2/2]
+  window  1: answers to the threat: Aluber the Jester of Despia, Rindbrumm the Striking Dragon
+  window  1 (dec.  26, summon  2, OUVERTE): CONVERTIE (board COMPLET)  [4 rollouts, best 2/2]
+  window  2: answers to the threat: Aluber the Jester of Despia, Rindbrumm the Striking Dragon
+  window  2 (dec.  27, summon  2, OUVERTE): CONVERTIE (board COMPLET)  [4 rollouts, best 2/2]
+
+=== --fire verdict: 3 window(s) out of 3 converted (3 full board, 0 without the sacrificed card) ===
+@event {"type":"fireVerdict","converted":3,"windows":3}
+
+  replays of the recoveries (header BAKED: replayable from their own file, EDOPro included):
+@event {"type":"phase","phase":"output"}
+
+--- output ---
+  12 replay(s) written to /tmp/branch-_nhgt3c3/job/fire_97268402/out  (out of 12 candidate(s))
+@event {"type":"written","written":12,"candidates":12,"outdir":"/tmp/branch-_nhgt3c3/job/fire_97268402/out"}
+
+  !! scripts not found (2): c89631139.lua c0.lua

@@ -54,14 +54,23 @@ _ROLLOUTS = re.compile(r"\[(?P<n>\d+)\s+rollouts(?:,\s*best\s*(?P<a>\d+)/(?P<b>\
 _ANSWERS = re.compile(r"^\s*window\s+(?P<i>\d+):\s*answers to the threat:\s*(?P<a>.+?)\s*$")
 _COUNT = re.compile(r"(\d+)\s+window\(s\) where")
 
-# The solver writes its report in a mix of English and French.
+# The solver writes its report in a mix of English and French, and
+# CHANGES CASE between outcomes: a failure reads "pas convertie", a
+# success "CONVERTIE (board COMPLET)". Matched case-insensitively, and
+# the failure is tested first because it contains the success word.
 _CONVERTED = ("convertie", "converted")
-_NOT = ("pas convertie", "not converted")
+_NOT = ("pas convertie", "non convertie", "not converted")
 _PASS_ONLY = ("passer seulement", "pass only")
+# A window on an empty chain lands on no card of ours at all.
+_OPEN = ("ouverte", "open")
 
 
 class LogFormatChanged(RuntimeError):
     """The solver's window report did not parse. Never swallow this."""
+
+
+def _is_open(pos):
+    return any(f.strip().lower() in _OPEN for f in pos.split(","))
 
 
 def parse_windows(log_text):
@@ -90,11 +99,19 @@ def parse_windows(log_text):
         sm = _SUMMON.search(pos)
         roll = _ROLLOUTS.search(verdict)
         miss = _MISSING.search(verdict)
-        survived = not any(p in verdict for p in _NOT) and any(
-            p in verdict for p in _CONVERTED)
+        low = verdict.lower()
+        survived = (not any(p in low for p in _NOT)
+                    and any(p in low for p in _CONVERTED))
         rows[i] = {
             "window": i,
             "over": over.group("card").strip() if over else None,
+            # "OUVERTE": an empty-chain window. It interrupts the turn
+            # rather than a particular card of ours, so it is placed by
+            # summon count instead of by name.
+            #
+            # Matched as a whole comma-separated field, never as a
+            # substring: "over Branded Opening" contains "open".
+            "open_window": _is_open(pos),
             "decision": int(dec.group("dec")) if dec else None,
             "after_summons": int(sm.group("n")) if sm else None,
             "survived": survived,
@@ -181,9 +198,19 @@ def steps(conn, record, line_index=0):
     link_step = {}      # chain link -> index into `out`
     state = {"current": None, "pending": None}
 
+    summons = [0]
+
     def add(verb, code):
+        # Nibiru counts summons, and so do the solver's window reports,
+        # so every summon carries its ordinal: "the 5th summon" has to be
+        # a thing you can point at.
+        idx = None
+        if verb.endswith("summon"):
+            summons[0] += 1
+            idx = summons[0]
         out.append({"verb": verb, "code": code, "name": _name(conn, code),
-                    "did": []})
+                    "did": [], "summon_index": idx,
+                    "summons_so_far": summons[0]})
         state["current"] = len(out) - 1
         return len(out) - 1
 
@@ -546,17 +573,33 @@ def annotate_steps(report):
         used = set()
         for d in h.get("detail") or []:
             over = d.get("over")
-            hit = next((i for i, s in enumerate(steps_)
-                        if s["name"] == over and i not in used), None)
             entry = {"name": h["name"], "code": h["code"],
                      "survived": d.get("survived"),
                      "missing": d.get("missing") or [],
                      "answers": d.get("answers") or [],
-                     "decision": d.get("decision")}
+                     "decision": d.get("decision"),
+                     "after_summons": d.get("after_summons"),
+                     "open_window": bool(d.get("open_window"))}
+            if over:
+                hit = next((i for i, s in enumerate(steps_)
+                            if s["name"] == over and i not in used), None)
+            else:
+                # An empty-chain window lands on no card of ours. It is
+                # placed by summon count instead -- which is how Nibiru
+                # is reasoned about anyway: "after the fifth summon".
+                # Not subject to `used`: two empty-chain windows at the
+                # same summon count are genuinely the same point in the
+                # line, told apart by their decision index. The one-per-
+                # step rule exists for a card activated twice, which is
+                # a different situation.
+                k = d.get("after_summons")
+                hit = next((i for i, s in enumerate(steps_)
+                            if s.get("summon_index") == k), None) if k else None
             if hit is None:
                 unplaced.append(dict(entry, over=over))
                 continue
-            used.add(hit)
+            if over:
+                used.add(hit)
             steps_[hit]["threats"].append(entry)
     return steps_, unplaced
 

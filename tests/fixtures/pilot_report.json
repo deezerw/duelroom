@@ -49,6 +49,8 @@
      "name": "The Fallen & The Virtuous"
     }
    ],
+   "summon_index": null,
+   "summons_so_far": 0,
    "n": 1,
    "threats": [
     {
@@ -61,7 +63,9 @@
      "answers": [
       "The Fallen & The Virtuous"
      ],
-     "decision": 2
+     "decision": 2,
+     "after_summons": 0,
+     "open_window": false
     }
    ]
   },
@@ -81,6 +85,8 @@
      "name": "Branded Opening"
     }
    ],
+   "summon_index": null,
+   "summons_so_far": 0,
    "n": 2,
    "threats": []
   },
@@ -89,6 +95,8 @@
    "code": 62962630,
    "name": "Aluber the Jester of Despia",
    "did": [],
+   "summon_index": 1,
+   "summons_so_far": 1,
    "n": 3,
    "threats": [
     {
@@ -100,7 +108,9 @@
       "Albion the Branded Dragon"
      ],
      "answers": [],
-     "decision": 13
+     "decision": 13,
+     "after_summons": 1,
+     "open_window": false
     }
    ]
   },
@@ -115,6 +125,8 @@
      "name": "Branded Fusion"
     }
    ],
+   "summon_index": null,
+   "summons_so_far": 1,
    "n": 4,
    "threats": []
   },
@@ -134,6 +146,8 @@
      "name": "Mulcharmy Fuwalos"
     }
    ],
+   "summon_index": null,
+   "summons_so_far": 1,
    "n": 5,
    "threats": [
     {
@@ -145,7 +159,21 @@
       "Albion the Branded Dragon"
      ],
      "answers": [],
-     "decision": 24
+     "decision": 24,
+     "after_summons": 1,
+     "open_window": false
+    },
+    {
+     "name": "Effect Veiler",
+     "code": 97268402,
+     "survived": true,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia"
+     ],
+     "decision": 19,
+     "after_summons": 1,
+     "open_window": false
     }
    ]
   },
@@ -160,8 +188,37 @@
      "name": "Branded Fusion"
     }
    ],
+   "summon_index": 2,
+   "summons_so_far": 2,
    "n": 6,
-   "threats": []
+   "threats": [
+    {
+     "name": "Effect Veiler",
+     "code": 97268402,
+     "survived": true,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia",
+      "Rindbrumm the Striking Dragon"
+     ],
+     "decision": 26,
+     "after_summons": 2,
+     "open_window": true
+    },
+    {
+     "name": "Effect Veiler",
+     "code": 97268402,
+     "survived": true,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia",
+      "Rindbrumm the Striking Dragon"
+     ],
+     "decision": 27,
+     "after_summons": 2,
+     "open_window": true
+    }
+   ]
   }
  ],
  "board": [
@@ -292,11 +349,69 @@
    "code": 97268402,
    "name": "Effect Veiler",
    "status": "solved",
+   "windows": 3,
+   "converted": 3,
+   "blind_spot": null,
+   "detail": [
+    {
+     "window": 0,
+     "over": "Branded Fusion",
+     "open_window": false,
+     "decision": 19,
+     "after_summons": 1,
+     "survived": true,
+     "rollouts": 4,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia"
+     ]
+    },
+    {
+     "window": 1,
+     "over": null,
+     "open_window": true,
+     "decision": 26,
+     "after_summons": 2,
+     "survived": true,
+     "rollouts": 4,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia",
+      "Rindbrumm the Striking Dragon"
+     ]
+    },
+    {
+     "window": 2,
+     "over": null,
+     "open_window": true,
+     "decision": 27,
+     "after_summons": 2,
+     "survived": true,
+     "rollouts": 4,
+     "missing": [],
+     "answers": [
+      "Aluber the Jester of Despia",
+      "Rindbrumm the Striking Dragon"
+     ]
+    }
+   ],
+   "parse_error": null,
+   "recovered_board": [],
+   "recovered_reading": null,
+   "recovered_steps": []
+  },
+  {
+   "code": 94145021,
+   "name": "Droll & Lock Bird",
+   "status": "solved",
    "windows": 5,
-   "converted": 4,
+   "converted": 2,
    "blind_spot": null,
    "detail": [],
-   "parse_error": "solver reported 5 windows, parsed 3"
+   "parse_error": "solver reported 5 windows, parsed 3",
+   "recovered_board": [],
+   "recovered_reading": null,
+   "recovered_steps": []
   }
  ],
  "error": "",

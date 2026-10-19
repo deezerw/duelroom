@@ -83,6 +83,8 @@
           <summary><span class="muted mono"
             style="display:inline-block;min-width:118px">{{ s.verb }}</span>
             {{ s.name }}
+            {% if s.summon_index %}<span class="muted mono"
+              style="font-size:11px">summon #{{ s.summon_index }}</span>{% endif %}
             {% for t in s.threats %}
               <span class="pill {{ 'bad' if not t.survived else 'ok' }}"
                     title="{{ t.name }}">{{ t.name.split(' ')[0] }}{{
@@ -97,7 +99,10 @@
             {% for t in s.threats %}
               <div style="margin-top:8px;padding-top:7px;
                           border-top:1px solid #ffffff0a">
-                <strong>{{ t.name }} here</strong>
+                <strong>{{ t.name }}
+                  {%- if t.open_window %} after summon
+                    #{{ t.after_summons }}{% else %} on this card{% endif %}
+                </strong>
                 {% if t.survived %}
                   <span class="pill ok">you play through it</span>
                 {% else %}
@@ -132,6 +137,13 @@
   {% endfor %}
   </ol>
 </div>
+
+{% if r.unplaced %}
+  <div class="flag">{{ r.unplaced|length }} hand-trap window(s) could not be
+    tied to a step in the line, so they are listed only in the totals below.
+    A threat pinned to the wrong action would be worse than one left
+    unplaced.</div>
+{% endif %}
 
 <h2>Where it breaks</h2>
 <div class="flag">A window the solver could not convert means it found no

@@ -660,9 +660,14 @@ def test_a_step_with_a_threat_can_be_opened(loggedin):
         from flask import render_template
         h = render_template("pilot_report.html", r=rep, name="my-despia",
                             stored=True, running=None)
-    assert h.count('<details class="branch">') == 3, (
-        "every step with a window should open")
-    assert "Ash Blossom &amp; Joyous Spring here" in h
+    expected = sum(1 for st in rep["steps"] if st["threats"])
+    assert expected >= 3
+    assert h.count('<details class="branch">') == expected, (
+        "every step with a window should open, and only those")
+    assert "Ash Blossom &amp; Joyous Spring" in h
+    assert "on this card" in h, "a named window lost its framing"
+    assert "after summon" in h, "an empty-chain window lost its summon count"
+    assert "summon #1" in h, "the line does not number its summons"
     assert "never assembled" in h
     # A step with no window must not pretend to be safe OR be clickable.
     assert "The Fallen &amp; The Virtuous" in h

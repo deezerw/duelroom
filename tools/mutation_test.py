@@ -140,11 +140,33 @@ MUTATIONS = [
      "player is holding (upstream's own bug)"),
 
     ("skills/handlab.py",
-     "        survived = not any(p in verdict for p in _NOT) and any(\n"
-     "            p in verdict for p in _CONVERTED)",
-     "        survived = any(p in verdict for p in _CONVERTED)",
+     "        low = verdict.lower()\n"
+     "        survived = (not any(p in low for p in _NOT)\n"
+     "                    and any(p in low for p in _CONVERTED))",
+     "        low = verdict.lower()\n"
+     "        survived = any(p in low for p in _CONVERTED)",
      'read the solver\'s French "pas convertie" as converted, inverting '
      "every handtrap verdict"),
+
+    ("skills/handlab.py",
+     "        low = verdict.lower()\n"
+     "        survived = (not any(p in low for p in _NOT)\n"
+     "                    and any(p in low for p in _CONVERTED))",
+     "        survived = (not any(p in verdict for p in _NOT)\n"
+     "                    and any(p in verdict for p in _CONVERTED))",
+     "match the verdict case-sensitively, so the uppercase CONVERTIE the "
+     "solver really writes reads as a failure"),
+
+    ("skills/handlab.py",
+     "    return any(f.strip().lower() in _OPEN for f in pos.split(\",\"))",
+     "    return any(p in pos.lower() for p in _OPEN)",
+     "find an open window inside a card name (\"over Branded Opening\")"),
+
+    ("skills/handlab.py",
+     "                hit = next((i for i, s in enumerate(steps_)\n"
+     "                            if s.get(\"summon_index\") == k), None) if k else None",
+     "                hit = None",
+     "drop empty-chain windows instead of placing them by summon count"),
 
     ("skills/handlab.py",
      "    rng = random.Random(seed)\n"
