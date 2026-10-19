@@ -12,8 +12,9 @@ WorkingDirectory=/home/deezer/duelroom
 ExecStart=/home/deezer/duelroom/tmux-start.sh
 ExecStop=/home/deezer/duelroom/tmux-stop.sh
 KillMode=process
-# A solver job can run for hours; the stop script asks the worker to finish
-# the one it holds. Give it room rather than leaving a half-written sweep.
+# The stop script gives the worker DUELROOM_STOP_GRACE (default 180s) to
+# finish the job it holds; systemd must outlast that or it SIGKILLs the lot
+# and the grace period is theatre.
 TimeoutStopSec=300
 
 [Install]

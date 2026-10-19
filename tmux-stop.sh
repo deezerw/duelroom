@@ -3,6 +3,23 @@
 # *reload* -- the master orphans itself and keeps holding :8446. So kill the
 # gunicorn processes explicitly after dropping the session. (Learned on
 # stockroom; the same footgun, the same fix.)
+
+# The worker FIRST, and politely. It handles SIGTERM by finishing the job it
+# holds and then stopping; dropping the tmux session instead SIGHUPs it dead
+# mid-solve, and the next start marks that job "worker restarted while this
+# job was running". Two of the user's runs were lost that way before this
+# existed. Grace is bounded because an optimize run lasts hours -- past it
+# the job is lost as before, which is why `jobs` should be checked first.
+GRACE="${DUELROOM_STOP_GRACE:-180}"
+worker=$(pgrep -u deezer -f 'python web/worker\.py$' | head -1)
+if [ -n "$worker" ]; then
+    kill "$worker" 2>/dev/null
+    for _ in $(seq 1 "$GRACE"); do
+        kill -0 "$worker" 2>/dev/null || break
+        sleep 1
+    done
+fi
+
 tmux kill-session -t duelroom 2>/dev/null
 
 # `pgrep -f` matches whole command lines, so ANY process that merely *mentions*
