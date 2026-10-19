@@ -103,6 +103,14 @@ MUTATIONS = [
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
     ("skills/handlab.py",
+     "    plan = blocking_plan(deck.main, deck.extra, list(hand), cards)",
+     "    from ygorl.solver.batch import sample_hand\n"
+     "    plan = blocking_plan(deck.main, deck.extra,\n"
+     "                         sample_hand(deck, job.hand_seed, 5)[0], cards)",
+     "plan the solver's targets from a seeded hand instead of the hand the "
+     "player is holding (upstream's own bug)"),
+
+    ("skills/handlab.py",
      "        survived = not any(p in verdict for p in _NOT) and any(\n"
      "            p in verdict for p in _CONVERTED)",
      "        survived = any(p in verdict for p in _CONVERTED)",

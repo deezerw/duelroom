@@ -205,7 +205,6 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
     """
     from ygorl.solver import Demonstration, HandJob, Workdir, find_solver
     from ygorl.solver.batch import solve_fire
-    from ygorl.solver.blocking import solve_blocking
 
     from . import scenarios
     from .deck import Deck
@@ -234,7 +233,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
             binary=find_solver(), keep_files=True, lines=1,
             timeout_s=solve_ms / 1000 + 300)
 
-        rec = solve_blocking(job, pieces=pieces, pair=True)
+        rec = solve_for_hand(job, hand, pieces=pieces, say=say)
         base = Demonstration.from_json(rec)
         say(f"solve: {base.status}")
 
@@ -416,3 +415,76 @@ def annotate_steps(report):
             used.add(hit)
             steps_[hit]["threats"].append(entry)
     return steps_, unplaced
+
+
+def solve_for_hand(job, hand, pieces=3, pair=True, cards=None, scripts=None,
+                   say=None):
+    """``blocking.solve_blocking``, but planning targets from the REAL hand.
+
+    Upstream's version takes an explicit ``job.hand`` and honours it in the
+    duel -- and then plans what to aim for from ``sample_hand(deck,
+    job.hand_seed)``, a *different*, seeded hand. The solver therefore
+    searches your cards for a board chosen for somebody else's, and
+    reports "no line found" when it cannot get there.
+
+    That is not a hypothetical: the demonstration hand in this module's
+    docstring solved under one seed and came back unsolved under another,
+    with the hand identical both times. The seed was choosing the goal.
+
+    So the hand goes into the plan as well as the duel. Everything else
+    mirrors upstream: try each interrupter piece, try the best two
+    together, fall back to whatever the hand can set or keep.
+    """
+    from dataclasses import replace
+
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.batch import solve_hand
+    from ygorl.solver.blocking import (_score_demo, blocking_plan,
+                                       solve_blocking as _upstream)
+
+    say = say or (lambda m: None)
+    cards = cards if cards is not None else default_cards()
+    deck = load_ydk(job.deck_path)
+    plan = blocking_plan(deck.main, deck.extra, list(hand), cards)
+
+    results = []
+
+    def attempt(targets, label):
+        sub = replace(job, targets=tuple(targets),
+                      scratch=Path(job.scratch) / f"a{len(results)}")
+        demo = solve_hand(sub, cards=cards, scripts=scripts)
+        score = _score_demo(demo, cards)
+        info = {"label": label, "targets": list(targets),
+                "status": demo.status, "wall_s": demo.solver.get("wall_s", 0.0),
+                **(score.to_json() if score else {})}
+        results.append((info, demo, score))
+        say(f"  {label}: {demo.status} ({info['wall_s']:.0f}s)")
+        return demo.status == "solved"
+
+    solved_pieces = []
+    for p in plan.pieces[:pieces]:
+        if attempt([*plan.base, p.target], f"piece:{p.password}"):
+            solved_pieces.append(p.target)
+    if pair and len(solved_pieces) >= 2:
+        attempt([*plan.base, *solved_pieces[:2]], "pair")
+    if plan.base and not solved_pieces:
+        attempt(list(plan.base), "base")
+    if not results:
+        # Nothing to aim for at all. Upstream builds the empty record for
+        # this case; reuse it rather than inventing a second shape.
+        return _upstream(job, pieces=pieces, pair=pair, cards=cards,
+                         scripts=scripts)
+
+    scored = [(i, r) for i, r in enumerate(results) if r[2] is not None]
+    if scored:
+        k, (_, demo, score) = max(scored, key=lambda t: (t[1][2].key(), -t[0]))
+    else:
+        k, (_, demo, score) = 0, results[0]
+    demo.solver["blocking"] = {
+        "base": plan.base, "pieces": [p.target for p in plan.pieces],
+        "chosen": k, "attempts": [r[0] for r in results],
+        **(score.to_json() if score else {}),
+    }
+    demo.solver["wall_s"] = round(sum(r[0]["wall_s"] for r in results), 2)
+    return demo.to_json()

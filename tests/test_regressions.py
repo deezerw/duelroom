@@ -1076,3 +1076,46 @@ def test_a_window_matching_no_step_is_reported_not_misattached():
     steps, unplaced = handlab.annotate_steps(r)
     assert steps[0]["threats"] == []
     assert len(unplaced) == 1 and unplaced[0]["over"] == "Something Else"
+
+
+def test_the_solver_aims_at_a_board_for_the_hand_you_actually_hold(monkeypatch):
+    """ygorl's blocking.solve_blocking honours an explicit job.hand in the
+    DUEL and then plans what to aim for from sample_hand(deck, hand_seed)
+    -- a different, seeded hand. The solver searches your cards for a
+    board chosen for somebody else's and reports "no line found".
+
+    Caught live: the same five cards solved under one seed and came back
+    unsolved under another.
+    """
+    from skills import handlab
+
+    seen = {}
+
+    def fake_plan(main, extra, hand, cards):
+        seen["hand"] = list(hand)
+
+        class P:
+            base, pieces = [], []
+        return P()
+
+    def fake_upstream(job, **kw):
+        return {"status": "unsolved", "lines": [], "solver": {}}
+
+    import ygorl.solver.blocking as B
+    import ygorl.solver.batch as BT
+    from ygorl.cards.ydk import load_ydk
+    monkeypatch.setattr(B, "blocking_plan", fake_plan)
+    monkeypatch.setattr(B, "solve_blocking", fake_upstream)
+    monkeypatch.setattr(BT, "solve_hand", lambda *a, **k: None)
+
+    deck_path = (Path(__file__).resolve().parent.parent / "assets" / "decks"
+                 / "my-despia.ydk")
+    mine = list(load_ydk(deck_path).main[:5])
+
+    class Job:
+        pass
+    job = Job()
+    job.deck_path, job.hand_seed, job.scratch = deck_path, 7, Path("/tmp")
+    handlab.solve_for_hand(job, mine, pieces=1)
+    assert seen["hand"] == mine, (
+        "targets were planned from a seeded hand, not the one you hold")
