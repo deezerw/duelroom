@@ -129,6 +129,8 @@ def cmd_pilot(conn, args):
         print('usage: pilot <deck> "<card>, <card>, ..."  [solve_s] [fire_s]')
         print('       names may be fragments: pilot my-despia "nadir, aluber"')
         print('       pilot my-despia random        deal one')
+        print('       5th arg picks the traps: pilot my-despia random 60 30 "ash, imperm"')
+        print('       6th asks for N candidate lines, ranked by what they play around')
         print('       pilot my-despia random:1234   deal the same one again')
         return
     name, cards = args[0], args[1]
@@ -145,11 +147,19 @@ def cmd_pilot(conn, args):
         return
     solve_ms = int(float(args[2]) * 1000) if len(args) > 2 else engine.SOLVE_MS
     fire_ms = int(float(args[3]) * 1000) if len(args) > 3 else 30_000
+    try:
+        traps = handlab.parse_traps(args[4] if len(args) > 4 else None)
+    except ValueError as e:
+        print(e)
+        return
 
+    candidates = int(args[5]) if len(args) > 5 else 1
     r = handlab.analyse(conn, path, chosen, solve_ms=solve_ms, fire_ms=fire_ms,
+                        handtraps=traps, candidates=candidates,
                         log=lambda m: print(f"  {m}", flush=True))
     out = handlab.save(r)
     _print_pilot(r)
+    _print_candidates(r)
     print(f"\nsaved to {out.relative_to(ROOT)}")
 
 
@@ -189,6 +199,8 @@ def _print_pilot(r):
     print("\nTHE LINE")
     for s in r["steps"]:
         print(f"  {s['n']:2}. {s['verb']:16} {s['name']}")
+        for d in s.get("did") or []:
+            print(f"        {d['what']:14} {d['name']}")
 
     print("\nWHERE IT BREAKS")
     print("  A window the solver could not convert is a search that found no "
@@ -206,6 +218,10 @@ def _print_pilot(r):
             print(f"      note: {h['blind_spot']}")
         if h["parse_error"]:
             print(f"      per-window detail unavailable: {h['parse_error']}")
+        if h.get("recovered_board") and (h.get("converted") or 0):
+            got = ", ".join(b["name"] for b in h["recovered_board"]
+                            if b["zone"] != "hand") or "nothing on board"
+            print(f"      when it lands and you play on, you still reach: {got}")
         for d in h["detail"]:
             mark = "survives" if d["survived"] else "NO RECOVERY FOUND"
             print(f"      on {d['over'] or '?'}  ->  {mark}")
@@ -213,6 +229,26 @@ def _print_pilot(r):
                 print(f"         would have needed: {', '.join(d['missing'])}")
             if d["answers"]:
                 print(f"         you can answer with: {', '.join(d['answers'])}")
+
+
+def _print_candidates(r):
+    rows = r.get("candidates") or []
+    if len(rows) < 2:
+        return
+    print("\nPLAYING AROUND THE MOST")
+    print("  Every verified line, fired at with the same hand traps. The")
+    print("  strongest board and the safest line are not always the same one.")
+    for i, c in enumerate(rows):
+        tag = "  <- fewest openings" if i == 0 else ""
+        board = ", ".join(x["name"] for x in c["reading"]["interruptions"]) \
+            or "no interruptions"
+        print(f"\n  line {c['line'] + 1}: {c['lost']} of {c['offered']} "
+              f"windows unanswered{tag}")
+        print(f"      board: {board}")
+        for t in c["traps"]:
+            w, k = t.get("windows") or 0, t.get("converted") or 0
+            if w:
+                print(f"      {t['name']:32} {w - k} of {w} unanswered")
 
 
 def cmd_images(conn, args):

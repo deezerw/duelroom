@@ -523,6 +523,8 @@ def test_pilot_requires_login(client):
 def test_pilot_page_renders(loggedin):
     h = loggedin.get("/pilot/my-despia").get_data(as_text=True)
     assert 'class="pick"' in h
+    assert h.count('name="trap"') == 7, "the hand traps are not selectable"
+    assert 'name="lines"' in h, "no option to rank candidate lines"
     assert "not your pick" in h, "the filled-slot caveat is missing"
 
 
@@ -548,6 +550,10 @@ def test_pilot_report_template_renders_the_fixture(loggedin, monkeypatch):
     assert "What the board does" in h, "the board reading is missing"
     assert "Rindbrumm the Striking Dragon" in h
     assert "can still act on their turn" in h
+    assert "Playing around the most" in h, "the candidate ranking is missing"
+    assert "fewest openings" in h
+    assert "you still reach" in h, "the recovered board is missing"
+    assert "searched" in h, "the line lost its detail"
 
 
 def test_pilot_refuses_a_hand_the_deck_cannot_hold(loggedin):

@@ -129,13 +129,45 @@ STEP_KINDS = {
 }
 
 
+def _move_kind(prev, cur, reason, C):
+    """What a card movement MEANS, in the words a player would use."""
+    p, q = getattr(prev, "location", 0), getattr(cur, "location", 0)
+    if reason & C.REASON_MATERIAL:
+        return "material"
+    if q == C.LOCATION_HAND and p in (C.LOCATION_DECK, C.LOCATION_EXTRA):
+        return "searched"
+    if q == C.LOCATION_HAND and p == C.LOCATION_GRAVE:
+        return "recovered"
+    if reason & C.REASON_DISCARD:
+        return "discarded"
+    if reason & C.REASON_COST:
+        return "paid as cost"
+    if p == C.LOCATION_DECK and q == C.LOCATION_GRAVE:
+        return "milled"
+    if q == C.LOCATION_REMOVED:
+        return "banished"
+    if p == C.LOCATION_EXTRA and q == C.LOCATION_MZONE:
+        return None          # the summon itself, already its own step
+    if q == C.LOCATION_GRAVE and p in (C.LOCATION_MZONE, C.LOCATION_SZONE):
+        return "to the grave"
+    return None
+
+
 def steps(conn, record, line_index=0):
     """The solved line as readable steps, by replaying it.
 
     The line is stored only as raw replay responses; the engine is what
     turns those back into "normal summon Aluber". No search happens here,
     so it costs a fraction of a second.
+
+    Each step also carries what it actually did -- what it searched, what
+    it used as material, what it paid. Those come from MSG_MOVE, and they
+    are attributed by CHAIN LINK, not by whichever activation happened to
+    be printed last: a chain resolves backwards, so the nearest preceding
+    Chaining is usually the wrong card to credit. In the demonstration
+    hand that mistake hands Aluber's search to Branded Opening.
     """
+    from ygorl.engine import constants as C
     from ygorl.engine.replay import Replay
     import ygorl.engine.messages as M
 
@@ -146,6 +178,14 @@ def steps(conn, record, line_index=0):
     line = lines[line_index]
 
     out = []
+    link_step = {}      # chain link -> index into `out`
+    state = {"current": None, "pending": None}
+
+    def add(verb, code):
+        out.append({"verb": verb, "code": code, "name": _name(conn, code),
+                    "did": []})
+        state["current"] = len(out) - 1
+        return len(out) - 1
 
     class _Obs:
         def on_start(self, core):
@@ -155,11 +195,31 @@ def steps(conn, record, line_index=0):
             for raw in M.split_messages(buf):
                 m = M.decode_message(raw)
                 kind = type(m).__name__
-                verb = STEP_KINDS.get(kind)
-                if not verb or not hasattr(m, "code"):
+
+                if kind == "Chaining":
+                    i = add("activate", m.code)
+                    link_step[getattr(m, "chain_count", None)] = i
                     continue
-                out.append({"verb": verb, "code": m.code,
-                            "name": _name(conn, m.code)})
+                if kind in ("Summoning", "SpSummoning", "FlipSummoning",
+                            "SetCard"):
+                    add(STEP_KINDS[kind], m.code)
+                    continue
+                if kind == "ChainSolving":
+                    # Resolution, in reverse order. Everything until the
+                    # next one belongs to THIS link.
+                    state["current"] = link_step.get(
+                        getattr(m, "chain_count", None), state["current"])
+                    continue
+                if kind != "Move" or state["current"] is None:
+                    continue
+                what = _move_kind(m.previous, m.current, m.reason, C)
+                if what is None:
+                    continue
+                step = out[state["current"]]
+                entry = {"what": what, "code": m.code,
+                         "name": _name(conn, m.code)}
+                if entry not in step["did"]:
+                    step["did"].append(entry)
 
     rep = Replay(
         seed=0, first=0, rule_flags=start["rule_flags"], player=start["player"],
@@ -196,8 +256,22 @@ def fill_hand(conn, deck, chosen, seed=0, size=HAND_SIZE):
     return list(chosen) + filler, filler
 
 
+def exposure(rows):
+    """Windows a line offers that no recovery was found for. Lower is better.
+
+    Counting only failures would call a line that gives Ash four chances
+    and survives three (one loss) worse than one that gives her a single
+    chance and loses it. Both lose once; the second is the safer line to
+    take, so the number of chances offered breaks the tie.
+    """
+    lost = sum(max(0, (r.get("windows") or 0) - (r.get("converted") or 0))
+               for r in rows)
+    offered = sum(r.get("windows") or 0 for r in rows)
+    return lost, offered
+
+
 def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
-            handtraps=None, fill_seed=0, pieces=3, log=None):
+            handtraps=None, fill_seed=0, pieces=3, log=None, candidates=1):
     """The whole report for one chosen opening hand.
 
     Returns a dict with the filled hand, the end board, the readable
@@ -230,7 +304,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
             deck_path=deck_path, hand_index=0, hand_seed=fill_seed, targets=(),
             workdir=Workdir.create(scratch / "wd").path, scratch=scratch / "job",
             solve_ms=solve_ms, fire_ms=fire_ms, threads=1, hand=tuple(hand),
-            binary=find_solver(), keep_files=True, lines=1,
+            binary=find_solver(), keep_files=True, lines=max(1, candidates),
             timeout_s=solve_ms / 1000 + 300)
 
         rec = solve_for_hand(job, hand, pieces=pieces, say=say)
@@ -260,9 +334,10 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         out["steps"] = steps(conn, rec)
         out["board"] = _board(conn, rec)
         out["reading"] = read_board(conn, rec)
+        out["candidates"] = []
 
-        for code, name in sorted((handtraps or scenarios.HANDTRAPS).items(),
-                                 key=lambda kv: kv[1]):
+        traps = scenarios.HANDTRAPS if handtraps is None else handtraps
+        for code, name in sorted(traps.items(), key=lambda kv: kv[1]):
             say(f"firing {name} ...")
             fd = solve_fire(job, base, code)
             j = fd.to_json()
@@ -271,7 +346,13 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                    "windows": meta.get("windows"),
                    "converted": meta.get("converted"),
                    "blind_spot": scenarios.BLIND_SPOTS.get(code),
-                   "detail": [], "parse_error": None}
+                   "detail": [], "parse_error": None,
+                   # How far you still get when it lands and you play on:
+                   # the board the recovery reached, and its line.
+                   "recovered_board": _board(conn, j) if j.get("lines") else [],
+                   "recovered_reading": (read_board(conn, j)
+                                         if j.get("lines") else None),
+                   "recovered_steps": (steps(conn, j) if j.get("lines") else [])}
             logf = scratch / "job" / f"fire_{code}" / "solver.log"
             if logf.exists():
                 try:
@@ -285,6 +366,14 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                     # Never return a short list that reads as "few windows".
                     row["parse_error"] = str(e)
             out["handtraps"].append(row)
+
+        # The best board and the board that plays around the most hand
+        # traps are not the same line. With more than one verified line
+        # kept, every one is fired at and the trade is shown rather than
+        # decided here.
+        if candidates > 1 and len(rec.get("lines") or []) > 1 and traps:
+            out["candidates"] = _rank_candidates(
+                conn, job, base, rec, traps, say)
         return out
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -353,6 +442,31 @@ def random_hand(deck, seed=None, size=HAND_SIZE):
     return random.Random(seed).sample(list(deck.main), size), seed
 
 
+def parse_traps(text):
+    """'ash, imperm' -> {code: name}. Empty text means every one we know."""
+    from . import scenarios
+
+    raw = (text or "").strip()
+    if not raw or raw.lower() == "all":
+        return dict(scenarios.HANDTRAPS)
+    if raw.lower() in ("none", "-"):
+        return {}
+    want = [p.strip().lower() for p in re.split(r"\s*[|,]\s*", raw) if p.strip()]
+    out, unknown = {}, []
+    for w in want:
+        hit = [(c, n) for c, n in scenarios.HANDTRAPS.items()
+               if w == str(c) or w == n.lower() or w in n.lower()]
+        if len(hit) != 1:
+            unknown.append(w)
+            continue
+        out[hit[0][0]] = hit[0][1]
+    if unknown:
+        raise ValueError(
+            f"unknown hand trap(s): {', '.join(unknown)} — known: "
+            + ", ".join(sorted(scenarios.HANDTRAPS.values())))
+    return out
+
+
 def parse_hand(conn, deck, text):
     """'nadir, aluber, branded opening' -> [codes], order kept.
 
@@ -379,7 +493,7 @@ def parse_hand(conn, deck, text):
 REPORTS = ROOT / "results" / "pilot"
 
 
-def report_path(deck_name, chosen, solve_ms, fire_ms):
+def report_path(deck_name, chosen, solve_ms, fire_ms, traps="", lines=1):
     """Deterministic path for one (deck, hand, budget) report.
 
     The budget is in the key on purpose. The same hand at 30s and at 60s
@@ -388,7 +502,10 @@ def report_path(deck_name, chosen, solve_ms, fire_ms):
     other would make a report say something its budget line denies.
     """
     key = "|".join([deck_name, ",".join(str(c) for c in sorted(chosen)),
-                    str(solve_ms), str(fire_ms)])
+                    str(solve_ms), str(fire_ms),
+                    ",".join(sorted(str(t) for t in
+                                    (traps.split(",") if traps else []))),
+                    str(lines)])
     return REPORTS / deck_name / f"{hashlib.sha256(key.encode()).hexdigest()[:16]}.json"
 
 
@@ -656,3 +773,39 @@ def read_board(conn, record, line_index=0):
             "extra": me.get("extra_count"),
         },
     }
+
+
+def _rank_candidates(conn, job, base, rec, traps, say):
+    """Fire every hand trap at every verified line and rank by exposure."""
+    from dataclasses import replace as dreplace
+
+    from ygorl.solver.batch import solve_fire
+
+    rows = []
+    for k in range(len(rec.get("lines") or [])):
+        say(f"testing line {k + 1} of {len(rec['lines'])} ...")
+        # solve_fire always fires at lines[0], so the candidate under test
+        # is moved to the front of its own copy.
+        only = dreplace(base, lines=[base.lines[k]])
+        per = []
+        for code, name in sorted(traps.items(), key=lambda kv: kv[1]):
+            fd = solve_fire(dreplace(job, scratch=Path(job.scratch) / f"c{k}"),
+                            only, code)
+            meta = fd.to_json().get("solver") or {}
+            per.append({"code": code, "name": name,
+                        "windows": meta.get("windows"),
+                        "converted": meta.get("converted")})
+        lost, offered = exposure(per)
+        one = {"lines": [rec["lines"][k]]}
+        rows.append({
+            "line": k, "lost": lost, "offered": offered, "traps": per,
+            "steps": steps(conn, {**rec, "lines": [rec["lines"][k]]}),
+            "board": _board(conn, {**rec, "lines": [rec["lines"][k]]}),
+            "reading": read_board(conn, {**rec, "lines": [rec["lines"][k]]}),
+        })
+        say(f"  line {k + 1}: {lost} of {offered} windows unanswered")
+    # Fewest unanswered windows first; then fewest chances offered; then
+    # the strongest board.
+    rows.sort(key=lambda r: (r["lost"], r["offered"],
+                             -len(r["reading"]["interruptions"])))
+    return rows

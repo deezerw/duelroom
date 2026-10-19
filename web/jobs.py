@@ -40,7 +40,8 @@ KINDS = {
     "images":  (lambda d, p: ["images", p.get("scope", "small-all")],
                 "cache card art", "~25 min"),
     "pilot":   (lambda d, p: ["pilot", d, p.get("cards", ""),
-                              str(p.get("solve_s", 60)), str(p.get("fire_s", 30))],
+                              str(p.get("solve_s", 60)), str(p.get("fire_s", 30)),
+                              p.get("traps", "all"), str(p.get("lines", 1))],
                 "solve one chosen hand", "~5 min"),
 }
 

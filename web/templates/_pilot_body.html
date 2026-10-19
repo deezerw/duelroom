@@ -74,9 +74,14 @@
 <div class="panel">
   <ol style="margin:0;padding-left:22px">
   {% for s in r.steps %}
-    <li style="padding:2px 0"><span class="muted mono"
+    <li style="padding:3px 0"><span class="muted mono"
       style="display:inline-block;min-width:118px">{{ s.verb }}</span>
-      {{ s.name }}</li>
+      {{ s.name }}
+      {% for d in s.did or [] %}
+        <div class="muted" style="font-size:12px;padding-left:118px">
+          <span class="mono">{{ d.what }}</span> {{ d.name }}</div>
+      {% endfor %}
+    </li>
   {% endfor %}
   </ol>
 </div>
@@ -125,8 +130,38 @@
         {% endif %}
       </div>
     {% endfor %}
+    {% if h.recovered_board and h.converted %}
+      <div class="prov" style="margin-top:8px">when it lands and you play on,
+        you still reach:
+        {{ h.recovered_board | selectattr('zone', 'ne', 'hand')
+           | map(attribute='name') | join(', ') or 'nothing on board' }}</div>
+    {% endif %}
   </div>
 {% endfor %}
+
+{% if (r.candidates or [])|length > 1 %}
+<h2>Playing around the most</h2>
+<div class="panel">
+  <p class="muted" style="margin-top:0">Every verified line, fired at with the
+    same hand traps. The strongest board and the safest line are not always
+    the same one — the trade is shown, not decided for you.</p>
+  {% for cnd in r.candidates %}
+    <div style="padding:10px 0;border-top:1px solid #ffffff0a">
+      <strong>line {{ cnd.line + 1 }}</strong>
+      <span class="{{ 'ok' if loop.first else 'muted' }}">{{ cnd.lost }} of
+        {{ cnd.offered }} windows unanswered</span>
+      {% if loop.first %}<span class="pill ok">fewest openings</span>{% endif %}
+      <div class="muted" style="font-size:12px">board:
+        {{ cnd.reading.interruptions | map(attribute='name') | join(', ')
+           or 'no interruptions' }}</div>
+      <div class="muted" style="font-size:12px">
+        {% for t in cnd.traps %}{% if t.windows %}
+          {{ t.name }} {{ t.windows - (t.converted or 0) }}/{{ t.windows }}{%
+          if not loop.last %} · {% endif %}{% endif %}{% endfor %}</div>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% endif %}
 
 <p style="margin-top:18px">

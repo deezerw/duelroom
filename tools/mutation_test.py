@@ -103,6 +103,23 @@ MUTATIONS = [
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
     ("skills/handlab.py",
+     "                if kind == \"ChainSolving\":",
+     "                if False:",
+     "attribute a chain's searches to whichever card was activated last "
+     "instead of the link that resolved (a chain resolves backwards)"),
+
+    ("skills/handlab.py",
+     "    lost = sum(max(0, (r.get(\"windows\") or 0) - (r.get(\"converted\") or 0))\n"
+     "               for r in rows)\n"
+     "    offered = sum(r.get(\"windows\") or 0 for r in rows)\n"
+     "    return lost, offered",
+     "    lost = sum(max(0, (r.get(\"windows\") or 0) - (r.get(\"converted\") or 0))\n"
+     "               for r in rows)\n"
+     "    return (lost,)",
+     "rank candidate lines on losses alone, ignoring how many chances "
+     "each one hands the opponent"),
+
+    ("skills/handlab.py",
      "    for code in me.get(\"grave\") or []:\n"
      "        seats.append((code, \"grave\"))",
      "",

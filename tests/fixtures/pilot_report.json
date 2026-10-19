@@ -32,36 +32,92 @@
    "verb": "activate",
    "code": 36637374,
    "name": "Branded Opening",
+   "did": [
+    {
+     "what": "discarded",
+     "code": 1984618,
+     "name": "Nadir Servant"
+    },
+    {
+     "what": "searched",
+     "code": 62962630,
+     "name": "Aluber the Jester of Despia"
+    },
+    {
+     "what": "to the grave",
+     "code": 30271097,
+     "name": "The Fallen & The Virtuous"
+    }
+   ],
    "n": 1
   },
   {
    "verb": "activate",
    "code": 30271097,
    "name": "The Fallen & The Virtuous",
+   "did": [
+    {
+     "what": "paid as cost",
+     "code": 41373230,
+     "name": "Titaniklad the Ash Dragon"
+    },
+    {
+     "what": "to the grave",
+     "code": 36637374,
+     "name": "Branded Opening"
+    }
+   ],
    "n": 2
   },
   {
    "verb": "normal summon",
    "code": 62962630,
    "name": "Aluber the Jester of Despia",
+   "did": [],
    "n": 3
   },
   {
    "verb": "activate",
    "code": 62962630,
    "name": "Aluber the Jester of Despia",
+   "did": [
+    {
+     "what": "searched",
+     "code": 44362883,
+     "name": "Branded Fusion"
+    }
+   ],
    "n": 4
   },
   {
    "verb": "activate",
    "code": 44362883,
    "name": "Branded Fusion",
+   "did": [
+    {
+     "what": "material",
+     "code": 73819701,
+     "name": "Fallen of the White Dragon"
+    },
+    {
+     "what": "material",
+     "code": 42141493,
+     "name": "Mulcharmy Fuwalos"
+    }
+   ],
    "n": 5
   },
   {
    "verb": "special summon",
    "code": 51409648,
    "name": "Rindbrumm the Striking Dragon",
+   "did": [
+    {
+     "what": "to the grave",
+     "code": 44362883,
+     "name": "Branded Fusion"
+    }
+   ],
    "n": 6
   }
  ],
@@ -97,7 +153,7 @@
    "name": "Ash Blossom & Joyous Spring",
    "status": "solved",
    "windows": 3,
-   "converted": 0,
+   "converted": 1,
    "blind_spot": null,
    "detail": [
     {
@@ -141,7 +197,33 @@
      "answers": []
     }
    ],
-   "parse_error": null
+   "parse_error": null,
+   "recovered_board": [
+    {
+     "zone": "monster",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    },
+    {
+     "zone": "monster",
+     "name": "Rindbrumm the Striking Dragon",
+     "code": 51409648,
+     "set": true
+    },
+    {
+     "zone": "hand",
+     "name": "Blazing Cartesia, the Virtuous",
+     "code": 95515789,
+     "set": false
+    },
+    {
+     "zone": "hand",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    }
+   ]
   },
   {
    "code": 23434538,
@@ -202,5 +284,335 @@
    "deck": 33,
    "extra": 13
   }
- }
+ },
+ "candidates": [
+  {
+   "line": 1,
+   "lost": 1,
+   "offered": 5,
+   "steps": [
+    {
+     "verb": "activate",
+     "code": 36637374,
+     "name": "Branded Opening",
+     "did": [
+      {
+       "what": "discarded",
+       "code": 1984618,
+       "name": "Nadir Servant"
+      },
+      {
+       "what": "searched",
+       "code": 62962630,
+       "name": "Aluber the Jester of Despia"
+      },
+      {
+       "what": "to the grave",
+       "code": 30271097,
+       "name": "The Fallen & The Virtuous"
+      }
+     ],
+     "n": 1
+    },
+    {
+     "verb": "activate",
+     "code": 30271097,
+     "name": "The Fallen & The Virtuous",
+     "did": [
+      {
+       "what": "paid as cost",
+       "code": 41373230,
+       "name": "Titaniklad the Ash Dragon"
+      },
+      {
+       "what": "to the grave",
+       "code": 36637374,
+       "name": "Branded Opening"
+      }
+     ],
+     "n": 2
+    },
+    {
+     "verb": "normal summon",
+     "code": 62962630,
+     "name": "Aluber the Jester of Despia",
+     "did": [],
+     "n": 3
+    },
+    {
+     "verb": "activate",
+     "code": 62962630,
+     "name": "Aluber the Jester of Despia",
+     "did": [
+      {
+       "what": "searched",
+       "code": 44362883,
+       "name": "Branded Fusion"
+      }
+     ],
+     "n": 4
+    },
+    {
+     "verb": "activate",
+     "code": 44362883,
+     "name": "Branded Fusion",
+     "did": [
+      {
+       "what": "material",
+       "code": 73819701,
+       "name": "Fallen of the White Dragon"
+      },
+      {
+       "what": "material",
+       "code": 42141493,
+       "name": "Mulcharmy Fuwalos"
+      }
+     ],
+     "n": 5
+    },
+    {
+     "verb": "special summon",
+     "code": 51409648,
+     "name": "Rindbrumm the Striking Dragon",
+     "did": [
+      {
+       "what": "to the grave",
+       "code": 44362883,
+       "name": "Branded Fusion"
+      }
+     ],
+     "n": 6
+    }
+   ],
+   "board": [
+    {
+     "zone": "monster",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    },
+    {
+     "zone": "monster",
+     "name": "Rindbrumm the Striking Dragon",
+     "code": 51409648,
+     "set": true
+    },
+    {
+     "zone": "hand",
+     "name": "Blazing Cartesia, the Virtuous",
+     "code": 95515789,
+     "set": false
+    },
+    {
+     "zone": "hand",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    }
+   ],
+   "reading": {
+    "interruptions": [
+     {
+      "name": "Rindbrumm the Striking Dragon",
+      "code": 51409648,
+      "where": "field",
+      "kind": "negate"
+     }
+    ],
+    "follow_up": [
+     {
+      "name": "Rindbrumm the Striking Dragon",
+      "code": 51409648,
+      "where": "field",
+      "actions": [
+       "add to hand"
+      ],
+      "also_interrupts": true
+     }
+    ],
+    "resources": {
+     "hand": 2,
+     "grave": 7,
+     "banished": 0,
+     "deck": 33,
+     "extra": 13
+    }
+   },
+   "traps": [
+    {
+     "code": 14558127,
+     "name": "Ash Blossom & Joyous Spring",
+     "windows": 3,
+     "converted": 2
+    },
+    {
+     "code": 97268402,
+     "name": "Effect Veiler",
+     "windows": 2,
+     "converted": 2
+    }
+   ]
+  },
+  {
+   "line": 0,
+   "lost": 3,
+   "offered": 3,
+   "steps": [
+    {
+     "verb": "activate",
+     "code": 36637374,
+     "name": "Branded Opening",
+     "did": [
+      {
+       "what": "discarded",
+       "code": 1984618,
+       "name": "Nadir Servant"
+      },
+      {
+       "what": "searched",
+       "code": 62962630,
+       "name": "Aluber the Jester of Despia"
+      },
+      {
+       "what": "to the grave",
+       "code": 30271097,
+       "name": "The Fallen & The Virtuous"
+      }
+     ],
+     "n": 1
+    },
+    {
+     "verb": "activate",
+     "code": 30271097,
+     "name": "The Fallen & The Virtuous",
+     "did": [
+      {
+       "what": "paid as cost",
+       "code": 41373230,
+       "name": "Titaniklad the Ash Dragon"
+      },
+      {
+       "what": "to the grave",
+       "code": 36637374,
+       "name": "Branded Opening"
+      }
+     ],
+     "n": 2
+    },
+    {
+     "verb": "normal summon",
+     "code": 62962630,
+     "name": "Aluber the Jester of Despia",
+     "did": [],
+     "n": 3
+    },
+    {
+     "verb": "activate",
+     "code": 62962630,
+     "name": "Aluber the Jester of Despia",
+     "did": [
+      {
+       "what": "searched",
+       "code": 44362883,
+       "name": "Branded Fusion"
+      }
+     ],
+     "n": 4
+    },
+    {
+     "verb": "activate",
+     "code": 44362883,
+     "name": "Branded Fusion",
+     "did": [
+      {
+       "what": "material",
+       "code": 73819701,
+       "name": "Fallen of the White Dragon"
+      },
+      {
+       "what": "material",
+       "code": 42141493,
+       "name": "Mulcharmy Fuwalos"
+      }
+     ],
+     "n": 5
+    },
+    {
+     "verb": "special summon",
+     "code": 51409648,
+     "name": "Rindbrumm the Striking Dragon",
+     "did": [
+      {
+       "what": "to the grave",
+       "code": 44362883,
+       "name": "Branded Fusion"
+      }
+     ],
+     "n": 6
+    }
+   ],
+   "board": [
+    {
+     "zone": "monster",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    },
+    {
+     "zone": "monster",
+     "name": "Rindbrumm the Striking Dragon",
+     "code": 51409648,
+     "set": true
+    },
+    {
+     "zone": "hand",
+     "name": "Blazing Cartesia, the Virtuous",
+     "code": 95515789,
+     "set": false
+    },
+    {
+     "zone": "hand",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    }
+   ],
+   "reading": {
+    "interruptions": [
+     {
+      "name": "Rindbrumm the Striking Dragon",
+      "code": 51409648,
+      "where": "field",
+      "kind": "negate"
+     }
+    ],
+    "follow_up": [
+     {
+      "name": "Rindbrumm the Striking Dragon",
+      "code": 51409648,
+      "where": "field",
+      "actions": [
+       "add to hand"
+      ],
+      "also_interrupts": true
+     }
+    ],
+    "resources": {
+     "hand": 2,
+     "grave": 7,
+     "banished": 0,
+     "deck": 33,
+     "extra": 13
+    }
+   },
+   "traps": [
+    {
+     "code": 14558127,
+     "name": "Ash Blossom & Joyous Spring",
+     "windows": 3,
+     "converted": 0
+    }
+   ]
+  }
+ ]
 }

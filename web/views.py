@@ -613,7 +613,12 @@ def pilot(name):
 
         solve_s = min(max(request.form.get("solve_s", type=int) or 60, 10), 300)
         fire_s = min(max(request.form.get("fire_s", type=int) or 30, 10), 300)
-        report = handlab.report_path(name, codes, solve_s * 1000, fire_s * 1000)
+        picked = [int(x) for x in request.form.getlist("trap")
+                  if x.isdigit() and int(x) in scenarios.HANDTRAPS]
+        traps = ",".join(str(x) for x in picked)
+        lines = min(max(request.form.get("lines", type=int) or 1, 1), 4)
+        report = handlab.report_path(name, codes, solve_s * 1000, fire_s * 1000,
+                                     traps=traps, lines=lines)
         existing = handlab.load(report)
         if existing and not request.form.get("again"):
             # Same hand, same budget, already measured. Re-running it would
@@ -624,7 +629,8 @@ def pilot(name):
         job_id = jobs.enqueue(
             c, "pilot", deck=name,
             cards=",".join(str(x) for x in codes),
-            solve_s=solve_s, fire_s=fire_s, report=str(report))
+            solve_s=solve_s, fire_s=fire_s, traps=traps or "none",
+            lines=lines, report=str(report))
         return redirect(url_for("views.job_detail", job_id=job_id))
 
     # ?deal=1 deals a hand into the picker rather than straight into the
@@ -655,4 +661,6 @@ def pilot(name):
     return render_template(
         "pilot.html", name=name, cards=cards, running=jobs.active(c),
         hand_size=handlab.HAND_SIZE, preset=preset, deal_seed=deal_seed,
+        traps=sorted(scenarios.HANDTRAPS.items(), key=lambda kv: kv[1]),
+        blind=scenarios.BLIND_SPOTS,
         recent=[handlab.load(p) for p in recent])

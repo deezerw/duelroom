@@ -41,7 +41,41 @@
       {{ hand_size }}-card opening · seed {{ deal_seed }} ·
       <a href="{{ url_for('views.pilot', name=name, deal=deal_seed) }}">repeat this deal</a></p>
   {% endif %}
+</div>
+
+<div class="panel">
+  <strong>Test against</strong>
+  <div class="grid" style="margin:8px 0 0">
+  {% for code, tname in traps %}
+    <label style="display:flex;gap:7px;align-items:center;font-size:13px">
+      <input type="checkbox" name="trap" value="{{ code }}" form="f" checked>
+      <img loading="lazy" alt="" width="20" height="29"
+           style="border-radius:2px;object-fit:cover;background:#0d0f15"
+           src="{{ url_for('views.card_image', size='small', card_id=code) }}">
+      {{ tname }}{% if blind.get(code) %}
+        <span class="pill" title="{{ blind[code] }}">caveat</span>{% endif %}
+    </label>
+  {% endfor %}
+  </div>
   <p class="muted" style="margin:10px 0 0;font-size:12px">
+    Each one costs up to {{ hand_size }} windows of search, so untick the ones
+    you do not expect to face. Unticking everything still solves the hand and
+    shows the line.</p>
+
+  <div style="margin-top:14px">
+    <label style="display:flex;gap:7px;align-items:center">
+      <input type="checkbox" name="lines" value="3" form="f">
+      <strong>Find the board that plays around the most</strong></label>
+    <p class="muted" style="margin:5px 0 0;font-size:12px">
+      Keeps three different verified lines and fires every ticked hand trap at
+      each of them, then ranks by how many windows go unanswered. The strongest
+      board and the safest line are often not the same one. Roughly three times
+      the work.</p>
+  </div>
+</div>
+
+<div class="panel">
+  <p class="muted" style="margin:0;font-size:12px">
     Fewer than {{ hand_size }} cards is fine — the rest are dealt from the deck
     and labelled as not your pick. Budget is part of the result: the same hand
     can be unsolved at 30s and solved at 60s.</p>
