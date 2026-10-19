@@ -15,6 +15,27 @@ from web import create_app  # noqa: E402
 from web.auth import MAX_ATTEMPTS, safe_next  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def keep_the_installation_intact():
+    """Tests run against the real database. Put back what they change.
+
+    Several of these drive routes that set the active deck -- /import and
+    the matrix test do it deliberately -- and the suite used to leave the
+    installation pointing at a deck called "evil" that another test had
+    just deleted. Every page defaulting to the active deck then broke,
+    and nothing in the suite noticed, because the suite had already
+    passed.
+    """
+    from skills import db
+    conn = db.connect()
+    was = db.get_meta(conn, "active_deck")
+    yield
+    conn = db.connect()
+    if db.get_meta(conn, "active_deck") != was:
+        db.set_meta(conn, "active_deck", was)
+        conn.commit()
+
+
 @pytest.fixture
 def client():
     # The limiter is shared state by design (see auth._rate_limited), so
