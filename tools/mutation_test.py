@@ -102,6 +102,21 @@ MUTATIONS = [
      "    return re.compile(body, re.IGNORECASE)",
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
+    ("skills/handlab.py",
+     "        survived = not any(p in verdict for p in _NOT) and any(\n"
+     "            p in verdict for p in _CONVERTED)",
+     "        survived = any(p in verdict for p in _CONVERTED)",
+     'read the solver\'s French "pas convertie" as converted, inverting '
+     "every handtrap verdict"),
+
+    ("skills/handlab.py",
+     "    rng = random.Random(seed)\n"
+     "    filler = rng.sample(pool, size - len(chosen)) if len(chosen) < size else []",
+     "    rng = random.Random(seed)\n"
+     "    filler = [rng.choice(pool) for _ in range(size - len(chosen))] \\\n"
+     "        if len(chosen) < size else []",
+     "fill a partial hand with replacement, dealing a 1-of twice"),
+
     ("skills/images.py",
      "            part.write_bytes(r.content)\n            part.rename(dest)",
      "            dest.write_bytes(r.content)",

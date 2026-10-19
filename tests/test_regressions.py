@@ -935,3 +935,97 @@ def test_image_scopes_are_validated(tmp_path, monkeypatch):
     assert size == "small" and len(ids) > 14000
     _, meta = images.wanted(conn, "small-meta")
     assert ids[:len(meta)] == meta, "meta-played cards are not fetched first"
+
+
+# --- one chosen hand (handlab) -------------------------------------------
+
+FIRE_LOG = Path(__file__).resolve().parent / "fixtures" / "fire_ash.log"
+
+
+def test_window_detail_is_parsed_out_of_the_solver_log():
+    """The per-window verdict is the whole point of the feature: not
+    "2 of 3 Ash timings kill you" but "Ash on your Branded Opening"."""
+    from skills import handlab
+    rows, declared = handlab.parse_windows(FIRE_LOG.read_text())
+    assert declared == 3 and len(rows) == 3
+    first = rows[0]
+    assert first["over"] == "Branded Opening"
+    assert first["decision"] == 2
+    assert first["survived"] is False
+    assert first["missing"] == ["Aluber the Jester of Despia"]
+    assert first["answers"] == ["The Fallen & The Virtuous"]
+    assert [r["over"] for r in rows[1:]] == [
+        "Aluber the Jester of Despia", "Branded Fusion"]
+
+
+def test_french_pas_convertie_is_not_read_as_converted():
+    """The solver's report is half French. "pas convertie" CONTAINS
+    "convertie", so a substring test for success inverts every verdict."""
+    from skills import handlab
+    rows, _ = handlab.parse_windows(FIRE_LOG.read_text())
+    assert not any(r["survived"] for r in rows), \
+        "an unconverted window was read as survived"
+    ok = FIRE_LOG.read_text().replace("pas convertie", "convertie")
+    rows2, _ = handlab.parse_windows(ok)
+    assert all(r["survived"] for r in rows2), "a converted window was missed"
+
+
+def test_a_changed_log_format_fails_loudly(monkeypatch):
+    """A parser that returns [] on an unknown format reports "no windows",
+    which reads as "this hand is safe"."""
+    from skills import handlab
+    text = FIRE_LOG.read_text().replace("window  0 (", "fenetre  0 (")
+    rows, declared = handlab.parse_windows(text)
+    assert declared == 3 and len(rows) == 2, "expected one row to stop parsing"
+    # analyse() turns that mismatch into parse_error rather than a short list.
+    assert len(rows) != declared
+
+
+def test_a_partial_hand_is_filled_from_the_deck_and_says_so():
+    from skills import db, handlab
+    from skills.deck import Deck
+    c = db.connect()
+    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
+                      / "assets" / "decks" / "my-despia.ydk")
+    d.canonicalise(c)
+    nadir = handlab.resolve_in_deck(c, d, "nadir")
+    hand, filler = handlab.fill_hand(c, d, [nadir], seed=0)
+    assert len(hand) == 5 and len(filler) == 4
+    assert hand[0] == nadir, "the chosen card must stay in the hand"
+    assert all(f in d.main for f in filler)
+    # Deterministic in the seed, so a report can be reproduced.
+    assert handlab.fill_hand(c, d, [nadir], seed=0)[0] == hand
+    assert handlab.fill_hand(c, d, [nadir], seed=1)[0] != hand
+
+
+def test_filling_respects_how_many_copies_the_deck_runs():
+    """A 1-of must not be dealt to you twice."""
+    from collections import Counter
+    from skills import db, handlab
+    from skills.deck import Deck
+    c = db.connect()
+    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
+                      / "assets" / "decks" / "my-despia.ydk")
+    d.canonicalise(c)
+    have = Counter(d.main)
+    for seed in range(25):
+        hand, _ = handlab.fill_hand(c, d, [], seed=seed)
+        for code, n in Counter(hand).items():
+            assert n <= have[code], f"dealt {n} of a {have[code]}-of"
+
+
+def test_a_card_not_in_the_deck_is_refused():
+    from skills import db, handlab
+    from skills.deck import Deck
+    c = db.connect()
+    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
+                      / "assets" / "decks" / "my-despia.ydk")
+    d.canonicalise(c)
+    with pytest.raises(ValueError):
+        handlab.parse_hand(c, d, "Blue-Eyes White Dragon")
+    with pytest.raises(ValueError, match="matches"):
+        handlab.parse_hand(c, d, "branded")          # ambiguous
+    with pytest.raises(ValueError):
+        handlab.parse_hand(c, d, "a, b, c, d, e, f")  # six cards
+    got = handlab.parse_hand(c, d, "nadir, aluber")
+    assert len(got) == 2

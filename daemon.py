@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
-                    gate, images, importer, meta_scrape as ms, optimizer,
-                    report, scenarios, stats)
+                    gate, handlab, images, importer, meta_scrape as ms,
+                    optimizer, report, scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +29,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   archetypes [n]            what is being played, by tournament presence
   flex <archetype> [side]   core / flex / fringe breakdown
   hand <deck.ydk>           exact opening-hand math
+  pilot <deck> <cards>      solve ONE chosen hand: board, steps, handtrap windows
   check <deck.ydk>          legality and banlist check
   decks                     list .ydk files in assets/decks/
   import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
@@ -120,6 +121,77 @@ def _resolve_deck(arg, conn=None):
 
 def cmd_cards(conn, args):
     print(card_db.sync(conn, force=bool(args and args[0] == "force")))
+
+
+def cmd_pilot(conn, args):
+    """Solve one chosen opening hand and show where it breaks."""
+    if len(args) < 2:
+        print('usage: pilot <deck> "<card>, <card>, ..."  [solve_s] [fire_s]')
+        print('       names may be fragments: pilot my-despia "nadir, aluber"')
+        return
+    name, cards = args[0], args[1]
+    path = DECKS / f"{name}.ydk" if not name.endswith(".ydk") else Path(name)
+    if not path.exists():
+        print(f"no deck at {path}")
+        return
+    d = Deck.from_ydk(path)
+    d.canonicalise(conn)
+    try:
+        chosen = handlab.parse_hand(conn, d, cards)
+    except ValueError as e:
+        print(f"could not read the hand: {e}")
+        return
+    solve_ms = int(float(args[2]) * 1000) if len(args) > 2 else 30_000
+    fire_ms = int(float(args[3]) * 1000) if len(args) > 3 else 20_000
+
+    r = handlab.analyse(conn, path, chosen, solve_ms=solve_ms, fire_ms=fire_ms,
+                        log=lambda m: print(f"  {m}", flush=True))
+    _print_pilot(r)
+
+
+def _print_pilot(r):
+    print(f"\n{r['deck']} — {', '.join(r['hand_names'])}")
+    if r["filled"]:
+        print(f"  (you chose {len(r['chosen'])}; the rest were dealt from the "
+              f"deck and are NOT your pick)")
+    if r["status"] != "solved":
+        print(f"\nno line found ({r['status']}). "
+              f"That is {r['solve_ms']/1000:.0f}s of search, not a proof.")
+        if r["error"]:
+            print(f"  {r['error']}")
+        return
+
+    print(f"\nEND BOARD  ({r['interruptions']} interruption(s))")
+    for b in r["board"]:
+        print(f"  {b['zone']:10} {b['name']}{' (set)' if b['set'] else ''}")
+
+    print("\nTHE LINE")
+    for s in r["steps"]:
+        print(f"  {s['n']:2}. {s['verb']:16} {s['name']}")
+
+    print("\nWHERE IT BREAKS")
+    print("  A window the solver could not convert is a search that found no "
+          "recovery")
+    print(f"  in {r['fire_ms']/1000:.0f}s. It is not a proof that the hand "
+          "is dead there.")
+    for h in r["handtraps"]:
+        w, c = h.get("windows"), h.get("converted")
+        if not w:
+            print(f"\n  {h['name']}: no legal window in this line")
+            continue
+        print(f"\n  {h['name']}: live at {w} point(s), "
+              f"{c if c is not None else '?'} recovered")
+        if h["blind_spot"]:
+            print(f"      note: {h['blind_spot']}")
+        if h["parse_error"]:
+            print(f"      per-window detail unavailable: {h['parse_error']}")
+        for d in h["detail"]:
+            mark = "survives" if d["survived"] else "NO RECOVERY FOUND"
+            print(f"      on {d['over'] or '?'}  ->  {mark}")
+            if d["missing"] and not d["survived"]:
+                print(f"         would have needed: {', '.join(d['missing'])}")
+            if d["answers"]:
+                print(f"         you can answer with: {', '.join(d['answers'])}")
 
 
 def cmd_images(conn, args):
@@ -1157,6 +1229,7 @@ def cmd_decks(conn, args):
 COMMANDS = {
     "cards": cmd_cards,
     "images": cmd_images,
+    "pilot": cmd_pilot,
     "meta": cmd_meta,
     "archetypes": cmd_archetypes,
     "flex": cmd_flex,

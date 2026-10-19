@@ -1,0 +1,100 @@
+loading
+@event {"type":"phase","phase":"loading"}
+  cards             : 14845 from 1 database(s)  (18 ms)
+  script dirs       : 8  (override)
+  ocgcore           : v11.0
+  arena             : base 0x400000000000, 256 MB reserved, dirty pages tracked
+
+reference replay
+  mode              : duel normal
+  garbage collector : STOPPED (memory reclaimed by restore)
+  answers to replay : 53
+
+results
+@event {"type":"phase","phase":"replay"}
+  answers consumed    : 53 / 53
+  MSG_RETRY           : 0   (faithful replay)
+@event {"type":"health","msgRetry":0}
+  turns played        : 2
+  burned              : 6 at the board, peak 7 along the line (recovery margin 1 - calibrates --burn-slack)
+
+--- possible lines along THIS line ---
+  raw branching product          : 10^18.1
+  after dedup by code            : 10^17.3
+  (scale indicator, NOT a leaf count: changing an early
+   choice changes the prompts that follow.)
+
+--- starting position (player 0) ---
+      MAIN       36637374  Branded Opening
+      MAIN       95515789  Blazing Cartesia, the Virtuous
+      MAIN       30271097  The Fallen & The Virtuous
+      MAIN       62962630  Aluber the Jester of Despia
+      MAIN        1984618  Nadir Servant
+      DECK=37  EXTRA=15
+
+--- cost of the reference line ---
+  normal summons         : 0
+  special summons        : 4
+  flip summons           : 0
+  activations            : 6
+  A_ref (tier 2)         : 10
+  D_ref (tier 3)         : 53
+
+--- target board (end of turn, player 0) ---
+    captured after answer #53
+      MZONE[0]  62962630  Aluber the Jester of Despia          FD-DEF  
+      MZONE[1]  62962630  Aluber the Jester of Despia          DEF     
+      MZONE[2]  51409648  Rindbrumm the Striking Dragon        ATK     
+      MZONE[3]  95515789  Blazing Cartesia, the Virtuous       DEF     
+      MZONE[4]  87746184  Albion the Branded Dragon            ATK     
+      SZONE[2]   1984618  Nadir Servant                        FACEDOWN
+      HAND=0  DECK=33  EXTRA=12  GRAVE=4  REMOVED=2
+
+  C_ref (tier 1) = cards outside hand/deck/extra
+    player 0 total        : 57
+    left in hand+deck+extra: 45
+    => consommees         : 12
+       of which on the board : 6  (constant: fixed by the equivalence criterion)
+       of which burned to GY/banished: 6  <-- THIS is what the solver minimises
+
+--- cards the line engages (board + GY + banished) ---
+      1x   1984618  Nadir Servant
+      1x  19304410  Tri-Brigade Springans Kitt
+      1x  30271097  The Fallen & The Virtuous
+      1x  36637374  Branded Opening
+      1x  41373230  Titaniklad the Ash Dragon
+      1x  44362883  Branded Fusion
+      1x  51409648  Rindbrumm the Striking Dragon
+      2x  62962630  Aluber the Jester of Despia
+      1x  68468459  Fallen of Albaz
+      1x  87746184  Albion the Branded Dragon
+      1x  95515789  Blazing Cartesia, the Virtuous
+  self-checks  : pass, stress 27/27/0
+@event {"type":"selfChecks","pass":true,"detail":"pass, stress 27/27/0"}
+
+=== opponent test: the opponent PLAYS the threat (--fire) ===
+  MECANISMES [fire] : adapt-to-peak, hindsight 0.50
+!! REQUESTED but INERT here (dependency absent in this mode): reenter 0.50
+@event {"type":"inert","mode":"fire","flags":"reenter 0.50"}
+  threat: Ash Blossom & Joyous Spring - added to the opponent hand, PLAYED at every legal window
+  --fire-bake: Ash Blossom & Joyous Spring baked into the header (opponent deck), verified in hand by probe;
+  the replays produced play in EDOPro as they are.
+  recovery repertoire: 43 step(s), 0 unidentified
+  baseline: 43 answers of ours, 10 opponent passes, board at answer 53
+  alignment PROVEN: the baseline redoes the board on the augmented duel.
+  3 window(s) where Ash Blossom & Joyous Spring is playable (0 on an empty chain, 3 on top of an effect)
+
+--- injections: 20 s of search per window ---
+  window  0: answers to the threat: The Fallen & The Virtuous
+  window  0 (dec.   2, summon  0, over Branded Opening): pas convertie  [5621 rollouts, best 5/6]  manque : Aluber the Jester of Despia
+  window  1: answers to the threat: (passer seulement)
+  window  1 (dec.  13, summon  1, over Aluber the Jester of Despia): pas convertie  [17393 rollouts, best 4/6]  manque : Rindbrumm the Striking Dragon, Albion the Branded Dragon
+  window  2: answers to the threat: (passer seulement)
+  window  2 (dec.  24, summon  1, over Branded Fusion): pas convertie  [19168 rollouts, best 4/6]  manque : Rindbrumm the Striking Dragon, Albion the Branded Dragon
+
+=== --fire verdict: 0 window(s) out of 3 converted (0 full board, 0 without the sacrificed card) ===
+@event {"type":"fireVerdict","converted":0,"windows":3}
+  unconverted windows are NOT proofs of absence: 20 s of sampling
+  budget per window - go deeper with --fire-ms.
+
+  !! scripts not found (2): c89631139.lua c0.lua
