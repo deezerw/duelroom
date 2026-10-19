@@ -712,3 +712,35 @@ def test_an_old_report_is_joined_on_read_and_says_what_is_missing(
     assert '<details class="branch">' in h
     if loaded["unplaced"]:
         assert "before the line numbered its summons" in flat(h)
+
+
+def test_a_report_that_contradicts_itself_says_so(loggedin, tmp_path,
+                                                  monkeypatch):
+    """Runs measured before the verdict parser was fixed stored every
+    window as a failure, including the ones their own totals say
+    converted. Rendering that as-is shows "3 of 3 converted" above three
+    dead ends."""
+    import json
+    from skills import handlab
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    for h in rep["handtraps"]:
+        if h["name"] == "Effect Veiler":
+            h["converted"] = 3
+            for d in h["detail"]:
+                d["survived"] = False      # the bug's output
+    folder = tmp_path / "my-despia"
+    folder.mkdir()
+    (folder / "aabbccddeeff0011.json").write_text(json.dumps(rep))
+
+    loaded = handlab.load(folder / "aabbccddeeff0011.json")
+    veiler = next(h for h in loaded["handtraps"] if h["name"] == "Effect Veiler")
+    assert veiler["detail_stale"] is True
+    ash = next(h for h in loaded["handtraps"]
+               if h["name"].startswith("Ash"))
+    assert ash["detail_stale"] is False, "a sound verdict was called stale"
+
+    h = loggedin.get("/pilot/my-despia/r/aabbccddeeff0011").get_data(as_text=True)
+    assert "before a parser bug was fixed" in flat(h)
+    assert "verdict not stored" in h, "a stale window still shows a verdict"

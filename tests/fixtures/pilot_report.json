@@ -57,6 +57,7 @@
      "name": "Ash Blossom & Joyous Spring",
      "code": 14558127,
      "survived": false,
+     "stale": false,
      "missing": [
       "Aluber the Jester of Despia"
      ],
@@ -103,6 +104,7 @@
      "name": "Ash Blossom & Joyous Spring",
      "code": 14558127,
      "survived": false,
+     "stale": false,
      "missing": [
       "Rindbrumm the Striking Dragon",
       "Albion the Branded Dragon"
@@ -154,6 +156,7 @@
      "name": "Ash Blossom & Joyous Spring",
      "code": 14558127,
      "survived": false,
+     "stale": false,
      "missing": [
       "Rindbrumm the Striking Dragon",
       "Albion the Branded Dragon"
@@ -167,6 +170,7 @@
      "name": "Effect Veiler",
      "code": 97268402,
      "survived": true,
+     "stale": false,
      "missing": [],
      "answers": [
       "Aluber the Jester of Despia"
@@ -196,6 +200,7 @@
      "name": "Effect Veiler",
      "code": 97268402,
      "survived": true,
+     "stale": false,
      "missing": [],
      "answers": [
       "Aluber the Jester of Despia",
@@ -209,6 +214,7 @@
      "name": "Effect Veiler",
      "code": 97268402,
      "survived": true,
+     "stale": false,
      "missing": [],
      "answers": [
       "Aluber the Jester of Despia",
@@ -253,7 +259,7 @@
    "name": "Ash Blossom & Joyous Spring",
    "status": "solved",
    "windows": 3,
-   "converted": 1,
+   "converted": 0,
    "blind_spot": null,
    "detail": [
     {
@@ -298,32 +304,9 @@
     }
    ],
    "parse_error": null,
-   "recovered_board": [
-    {
-     "zone": "monster",
-     "name": "Aluber the Jester of Despia",
-     "code": 62962630,
-     "set": false
-    },
-    {
-     "zone": "monster",
-     "name": "Rindbrumm the Striking Dragon",
-     "code": 51409648,
-     "set": true
-    },
-    {
-     "zone": "hand",
-     "name": "Blazing Cartesia, the Virtuous",
-     "code": 95515789,
-     "set": false
-    },
-    {
-     "zone": "hand",
-     "name": "Aluber the Jester of Despia",
-     "code": 62962630,
-     "set": false
-    }
-   ]
+   "recovered_board": [],
+   "recovered_reading": null,
+   "recovered_steps": []
   },
   {
    "code": 23434538,
@@ -333,7 +316,10 @@
    "converted": 4,
    "blind_spot": "lines convert 94% of its windows, so SURVIVAL measures completion, not cost",
    "detail": [],
-   "parse_error": null
+   "parse_error": null,
+   "recovered_board": [],
+   "recovered_reading": null,
+   "recovered_steps": []
   },
   {
    "code": 27204311,
@@ -343,7 +329,10 @@
    "converted": 0,
    "blind_spot": null,
    "detail": [],
-   "parse_error": null
+   "parse_error": null,
+   "recovered_board": [],
+   "recovered_reading": null,
+   "recovered_steps": []
   },
   {
    "code": 97268402,
@@ -396,7 +385,32 @@
     }
    ],
    "parse_error": null,
-   "recovered_board": [],
+   "recovered_board": [
+    {
+     "zone": "monster",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    },
+    {
+     "zone": "monster",
+     "name": "Rindbrumm the Striking Dragon",
+     "code": 51409648,
+     "set": true
+    },
+    {
+     "zone": "hand",
+     "name": "Blazing Cartesia, the Virtuous",
+     "code": 95515789,
+     "set": false
+    },
+    {
+     "zone": "hand",
+     "name": "Aluber the Jester of Despia",
+     "code": 62962630,
+     "set": false
+    }
+   ],
    "recovered_reading": null,
    "recovered_steps": []
   },

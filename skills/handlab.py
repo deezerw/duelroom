@@ -562,9 +562,28 @@ def load(path):
     if not path.exists():
         return None
     r = json.loads(path.read_text())
+    # Reports measured before the verdict parser was fixed stored every
+    # window as a failure, including the ones the run's own totals say
+    # converted. Detect the contradiction rather than render it: the
+    # counts are from the solver's event and still true, the per-window
+    # verdicts are not.
+    for h in r.get("handtraps") or []:
+        detail = h.get("detail") or []
+        h["detail_stale"] = bool(
+            detail and (h.get("converted") or 0) > 0
+            and not any(d.get("survived") for d in detail))
+
     if r.get("steps") and "threats" not in r["steps"][0]:
         r["steps"], r["unplaced"] = annotate_steps(r)
         r["legacy"] = True
+    else:
+        # Already joined, but the staleness above is decided at read
+        # time, so it has to reach the badges on the line too.
+        stale = {h["code"] for h in (r.get("handtraps") or [])
+                 if h.get("detail_stale")}
+        for st in r.get("steps") or []:
+            for t in st.get("threats") or []:
+                t["stale"] = t.get("code") in stale
     r.setdefault("unplaced", [])
     r.setdefault("legacy", False)
     return r
@@ -592,6 +611,7 @@ def annotate_steps(report):
             over = d.get("over")
             entry = {"name": h["name"], "code": h["code"],
                      "survived": d.get("survived"),
+                     "stale": bool(h.get("detail_stale")),
                      "missing": d.get("missing") or [],
                      "answers": d.get("answers") or [],
                      "decision": d.get("decision"),

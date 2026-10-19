@@ -86,9 +86,10 @@
             {% if s.summon_index %}<span class="muted mono"
               style="font-size:11px">summon #{{ s.summon_index }}</span>{% endif %}
             {% for t in s.threats %}
-              <span class="pill {{ 'bad' if not t.survived else 'ok' }}"
-                    title="{{ t.name }}">{{ t.name.split(' ')[0] }}{{
-                    '' if t.survived else ' ✕' }}</span>
+              <span class="pill {{ '' if t.stale else ('ok' if t.survived
+                    else 'bad') }}" title="{{ t.name }}">{{
+                    t.name.split(' ')[0] }}{{ '' if t.stale or t.survived
+                    else ' ✕' }}</span>
             {% endfor %}
           </summary>
           <div class="branchbody">
@@ -103,7 +104,9 @@
                   {%- if t.open_window %} after summon
                     #{{ t.after_summons }}{% else %} on this card{% endif %}
                 </strong>
-                {% if t.survived %}
+                {% if t.stale %}
+                  <span class="pill">verdict not stored</span>
+                {% elif t.survived %}
                   <span class="pill ok">you play through it</span>
                 {% else %}
                   <span class="pill bad">no recovery found</span>
@@ -171,6 +174,12 @@
       {% endif %}
     </div>
     {% if h.blind_spot %}<div class="flag">{{ h.blind_spot }}</div>{% endif %}
+    {% if h.detail_stale %}
+      <div class="flag">This run says {{ h.converted }} of {{ h.windows }}
+        windows converted, but it was measured before a parser bug was fixed
+        and stored every one as a failure. The totals are right; the
+        per-window verdicts below are not. Re-run the hand to get them.</div>
+    {% endif %}
     {% if h.parse_error %}
       <div class="flag bad">Per-window detail unavailable:
         {{ h.parse_error }}. The totals above still hold.</div>

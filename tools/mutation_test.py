@@ -132,6 +132,14 @@ MUTATIONS = [
      "stop reading cards kept in hand, so a held Ash reads as nothing"),
 
     ("skills/handlab.py",
+     "        h[\"detail_stale\"] = bool(\n"
+     "            detail and (h.get(\"converted\") or 0) > 0\n"
+     "            and not any(d.get(\"survived\") for d in detail))",
+     "        h[\"detail_stale\"] = False",
+     "render a report whose totals and per-window verdicts contradict "
+     "each other without saying so"),
+
+    ("skills/handlab.py",
      "    plan = blocking_plan(deck.main, deck.extra, list(hand), cards)",
      "    from ygorl.solver.batch import sample_hand\n"
      "    plan = blocking_plan(deck.main, deck.extra,\n"
