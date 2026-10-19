@@ -344,3 +344,66 @@ def test_search_ranks_the_decks_own_archetype_first(loggedin):
     assert not other or max(own) < min(other)
     assert all(c["play"]["archetype"] == "Branded"
                for c in played if c["play"]["own"])
+
+
+# --- card art ------------------------------------------------------------
+
+def test_card_art_requires_login(client):
+    assert client.get("/img/small/14558127.jpg").status_code == 302
+
+
+def test_uncached_art_is_a_placeholder_that_is_not_cached(loggedin):
+    """A missing image must not be remembered as missing by the browser,
+    or the art never appears once the fetch job reaches that card."""
+    r = loggedin.get("/img/small/999999999.jpg")
+    assert r.status_code == 200
+    assert r.mimetype == "image/svg+xml"
+    assert "no-store" in r.headers["Cache-Control"]
+
+
+def test_cached_art_is_served_locally_and_cached_hard(loggedin):
+    from pathlib import Path
+    from skills import images
+    have = sorted(images.dir_for("small").glob("*.jpg"))
+    if not have:
+        pytest.skip("no art cached yet")
+    r = loggedin.get(f"/img/small/{Path(have[0]).stem}.jpg")
+    assert r.status_code == 200 and r.mimetype == "image/jpeg"
+    assert "max-age=31536000" in r.headers["Cache-Control"]
+
+
+def test_unknown_image_size_is_not_a_path(loggedin):
+    assert loggedin.get("/img/bogus/1.jpg").status_code == 404
+    assert loggedin.get("/img/..%2f..%2fetc/1.jpg").status_code in (404, 308)
+
+
+def test_pages_never_reference_ygoprodecks_image_host(loggedin):
+    """Their terms forbid hotlinking. Every <img> must point at us."""
+    for path in ("/build", "/deck/my-despia", "/maintenance"):
+        h = loggedin.get(path).get_data(as_text=True)
+        assert "images.ygoprodeck.com" not in h, f"{path} hotlinks card art"
+
+
+# --- jobs that take no deck ----------------------------------------------
+
+def test_deckless_route_refuses_a_job_that_needs_a_deck(loggedin):
+    r = loggedin.post("/run/gate", follow_redirects=False)
+    assert r.status_code == 302 and "/maintenance" in r.headers["Location"]
+
+
+def test_image_job_rejects_an_unknown_scope(loggedin):
+    from skills import db
+    from web import jobs
+    c = db.connect()
+    before = len(jobs.recent(c, 100))
+    r = loggedin.post("/run/images", data={"scope": "../../etc"})
+    assert "/maintenance" in r.headers["Location"]
+    assert len(jobs.recent(c, 100)) == before, "a bad scope was queued anyway"
+
+
+def test_progress_reads_an_explicit_denominator(tmp_path):
+    from web import jobs
+    log = tmp_path / "j.log"
+    log.write_text("starting\nprogress 300/14580 — 300 fetched\n")
+    p = jobs.progress({"log_path": str(log)})
+    assert (p["hands"], p["total"]) == (300, 14580)

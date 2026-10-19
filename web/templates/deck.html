@@ -30,7 +30,11 @@
     {{ sections[sec]|sum(attribute='copies') }} cards</span></h2>
   <div class="panel"><div class="grid">
     {% for c in sections[sec] %}
-      <div><span class="mono muted">{{ c.copies }}×</span> {{ c.name }}</div>
+      <div style="display:flex;gap:7px;align-items:center">
+        {% if c.id %}<img loading="lazy" alt="" width="22" height="32"
+          style="border-radius:3px;object-fit:cover;background:#0d0f15;flex:none"
+          src="{{ url_for('views.card_image', size='small', card_id=c.id) }}">{% endif %}
+        <span class="mono muted">{{ c.copies }}×</span> {{ c.name }}</div>
     {% endfor %}
   </div></div>
   {% endif %}

@@ -102,6 +102,20 @@ MUTATIONS = [
      "    return re.compile(body, re.IGNORECASE)",
      'plain substring tag matching, so "Ra" matches inside "Dragon"'),
 
+    ("skills/images.py",
+     "            part.write_bytes(r.content)\n            part.rename(dest)",
+     "            dest.write_bytes(r.content)",
+     "write card art straight to its final name, so a truncated body is "
+     "cached forever as a complete one"),
+
+    ("skills/images.py",
+     "            if r.status_code == 404:\n                absent += 1\n"
+     "                gone.add(cid)\n                continue",
+     "            if r.status_code >= 400:\n                absent += 1\n"
+     "                gone.add(cid)\n                continue",
+     "treat any HTTP error as 'this card has no art', so a transient "
+     "failure is never retried"),
+
     ("skills/builder.py",
      "        lo = stats.wilson(round(pct * n), n)[1]",
      "        lo = pct",

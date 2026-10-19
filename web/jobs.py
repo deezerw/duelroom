@@ -37,7 +37,12 @@ KINDS = {
                  "flex-slot search", "hours"),
     "meta":    (lambda d, p: ["meta", str(p.get("days", 120)), str(p.get("cap", 500))],
                 "scrape the meta", "~1 min"),
+    "images":  (lambda d, p: ["images", p.get("scope", "small-all")],
+                "cache card art", "~25 min"),
 }
+
+# Jobs that are about the installation rather than about one deck.
+DECKLESS = ("meta", "images")
 
 
 def _now():
@@ -152,9 +157,21 @@ def progress(job):
     if not path or not Path(path).exists():
         return {"hands": 0, "line": "", "note": "starting"}
     lines = Path(path).read_text().splitlines()
+    last = next((l for l in reversed(lines) if l.strip()), "")
+
+    # Jobs that know their own denominator say so explicitly, rather than
+    # having a percentage inferred for them.
+    counted = [l for l in lines if l.startswith("progress ")]
+    if counted:
+        try:
+            done, total = counted[-1].split()[1].split("/")
+            return {"hands": int(done), "total": int(total), "line": last[:160],
+                    "note": f"{done} of {total}"}
+        except (IndexError, ValueError):
+            pass
+
     hands = sum(1 for l in lines if ": solved" in l or ": brick" in l
                 or ": unsolved" in l or ": error" in l)
-    last = next((l for l in reversed(lines) if l.strip()), "")
     return {"hands": hands, "line": last[:160],
             "note": f"{hands} hand(s) solved so far" if hands else "working"}
 

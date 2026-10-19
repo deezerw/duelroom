@@ -784,3 +784,154 @@ def test_optimize_report_block_defines_rows_before_use():
     first_use = block.index("for r in rows[")
     assert assign < first_use, (
         "rows must be assigned before the result table iterates it")
+
+
+# --- card image cache ----------------------------------------------------
+
+def test_an_image_takes_its_final_name_only_after_the_whole_body(tmp_path,
+                                                                  monkeypatch):
+    """The failure that makes a cache permanently wrong rather than slow.
+
+    A truncated JPEG under the final name is indistinguishable from a
+    complete one, so every later run skips it and that card is broken
+    forever. The body must be written under a temporary name and renamed.
+
+    Checked by watching where the bytes are actually written -- asserting
+    only that an interrupted fetch leaves no .jpg behind would pass just
+    as happily against a direct write, since the interruption happens
+    before any write at all.
+    """
+    from pathlib import Path as P
+
+    from skills import images
+    monkeypatch.setattr(images, "CACHE", tmp_path)
+    monkeypatch.setattr(images, "RPS", 1e6)
+
+    written = []
+    real_write = P.write_bytes
+    monkeypatch.setattr(P, "write_bytes",
+                        lambda self, b: (written.append(self.name),
+                                         real_write(self, b))[1])
+
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url):
+            class R:
+                status_code, content = 200, b"\xff\xd8body"
+            return R()
+    monkeypatch.setattr(images.httpx, "Client", lambda **kw: Client())
+
+    class FakeConn:
+        def execute(self, q, *a):
+            return [{"card_id": 101, "p": 1.0}] if "inclusion" in q else []
+    images.fetch(FakeConn(), "small-meta", log=lambda m: None)
+
+    jpgs = [w for w in written if w.endswith(".jpg")]
+    assert not jpgs, f"wrote straight to the final name: {jpgs}"
+    assert "101.jpg.part" in written
+    assert images.have("small", 101), "the rename never happened"
+    assert not list((tmp_path / "small").glob("*.part")), "a .part was left behind"
+
+
+def test_an_interrupted_image_fetch_leaves_nothing_behind(tmp_path, monkeypatch):
+    from skills import images
+    monkeypatch.setattr(images, "CACHE", tmp_path)
+    monkeypatch.setattr(images, "RPS", 1e6)
+
+    class Boom(Exception):
+        pass
+
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url):
+            raise Boom("connection reset mid-body")
+
+    monkeypatch.setattr(images.httpx, "Client", lambda **kw: Client())
+    monkeypatch.setattr(images.httpx, "HTTPError", Boom)
+
+    class FakeConn:
+        def execute(self, q, *a):
+            return [{"card_id": 101, "p": 1.0}] if "inclusion" in q else []
+    r = images.fetch(FakeConn(), "small-meta", log=lambda m: None)
+    assert r["fetched"] == 0 and r["failed"] == 1
+    assert not images.have("small", 101)
+    # missing.json is expected; an image file of any kind is not.
+    assert not list((tmp_path / "small").glob("*.jpg*")), "a partial file survived"
+    assert images.load_missing("small") == set(), "a retryable error was given up on"
+
+
+def test_absent_art_is_remembered_but_a_network_error_is_not(tmp_path, monkeypatch):
+    """A 404 means there is no artwork; a timeout means try again later.
+
+    Recording both as permanent would silently stop re-fetching cards the
+    cache simply failed to reach.
+    """
+    from skills import images
+    monkeypatch.setattr(images, "CACHE", tmp_path)
+    monkeypatch.setattr(images, "RPS", 1e6)
+
+    class Boom(Exception):
+        pass
+
+    class Resp:
+        def __init__(self, code, body=b""):
+            self.status_code, self.content = code, body
+
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url):
+            if url.endswith("/404.jpg"):
+                return Resp(404)
+            if url.endswith("/500.jpg"):
+                return Resp(500)
+            return Resp(200, b"\xff\xd8ok")
+
+    monkeypatch.setattr(images.httpx, "Client", lambda **kw: Client())
+    monkeypatch.setattr(images.httpx, "HTTPError", Boom)
+
+    class FakeConn:
+        def execute(self, q, *a):
+            return [{"card_id": i, "p": 1.0} for i in (404, 500, 7)] \
+                if "inclusion" in q else []
+    r = images.fetch(FakeConn(), "small-meta", log=lambda m: None)
+    assert (r["fetched"], r["absent"], r["failed"]) == (1, 1, 1)
+    assert images.load_missing("small") == {404}, "a retryable error was given up on"
+    assert images.have("small", 7)
+
+
+def test_a_limited_run_does_not_misreport_what_is_cached(tmp_path, monkeypatch):
+    from skills import images
+    monkeypatch.setattr(images, "CACHE", tmp_path)
+    monkeypatch.setattr(images, "RPS", 1e6)
+    said = []
+
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url):
+            class R:
+                status_code, content = 200, b"\xff\xd8ok"
+            return R()
+    monkeypatch.setattr(images.httpx, "Client", lambda **kw: Client())
+
+    class FakeConn:
+        def execute(self, q, *a):
+            return [{"card_id": i, "p": 1.0} for i in range(50)] \
+                if "inclusion" in q else []
+    images.fetch(FakeConn(), "small-meta", limit=5, log=said.append)
+    assert "0 already cached" in said[0], said[0]
+
+
+def test_image_scopes_are_validated(tmp_path, monkeypatch):
+    from skills import db, images
+    conn = db.connect()
+    for bad in ("small", "tiny-all", "small-some", "full"):
+        with pytest.raises(ValueError):
+            images.wanted(conn, bad)
+    size, ids = images.wanted(conn, "small-all")
+    assert size == "small" and len(ids) > 14000
+    _, meta = images.wanted(conn, "small-meta")
+    assert ids[:len(meta)] == meta, "meta-played cards are not fetched first"

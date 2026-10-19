@@ -23,6 +23,8 @@
 
 <div id="saveout"></div>
 
+<img id="peek" alt="">
+
 <div class="build">
   <!-- ---------------- search ---------------- -->
   <section class="panel" style="margin-top:0">
@@ -69,6 +71,14 @@
   .hit:hover{background:#ffffff0c}
   .hit .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
            white-space:nowrap}
+  .art{width:30px;height:44px;flex:none;border-radius:3px;object-fit:cover;
+       background:#0d0f15}
+  .art.sm{width:22px;height:32px}
+  /* Full art on hover, from this machine's own cache. If the full-size
+     fetch has not run, this is an empty frame -- never a request to
+     YGOPRODeck's CDN, which their terms forbid. */
+  #peek{position:fixed;z-index:50;width:240px;pointer-events:none;display:none;
+        border-radius:9px;box-shadow:0 10px 34px #000a;border:1px solid var(--line)}
   .hit .sub{font-size:11px;color:var(--dim)}
   .hit.full{opacity:.4;cursor:not-allowed}
   /* Inclusion drawn as a miniature interval: the solid part is the Wilson
@@ -151,7 +161,8 @@ function row(c){
            `${pct}% of ${c.play.n}</span>`;
   }
   const sub = [c.type, c.race, c.attribute].filter(Boolean).join(' · ');
-  return `<div class="hit ${full?'full':''}">
+  return `<div class="hit ${full?'full':''}" data-id="${c.id}">
+    <img class="art" loading="lazy" alt="" src="/img/small/${c.id}.jpg">
     <span class="nm">${esc(c.name)} ${lim}
       <span class="sub">${esc(sub)}${n ? ` — ${n} in deck` : ''}</span></span>
     ${bar}${play}</div>`;
@@ -197,7 +208,9 @@ function draw(){
         const c = info[id], p = c.play
           ? `<span class="pl">${Math.round(c.play.pct*100)}% of ${c.play.n}</span>` : '';
         return `<div class="card" data-id="${id}" data-sec="${sec}" title="click to remove one">
-          <span class="x">${k}×</span><span class="nm">${esc(c.name)}</span>${p}</div>`;
+          <span class="x">${k}×</span>
+          <img class="art sm" loading="lazy" alt="" src="/img/small/${id}.jpg">
+          <span class="nm">${esc(c.name)}</span>${p}</div>`;
       }).join('');
     return `<div class="panel sec"><h3>${sec}
       <span class="${bad?'bad':'ok'}">${n}</span>
@@ -262,6 +275,22 @@ async function save(force){
   $('saveout').innerHTML = html;
   history.replaceState(null, '', '/build/' + encodeURIComponent(d.name));
 }
+
+// Full art follows the cursor, read from the local cache only.
+const peek = $('peek');
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-id]');
+  if (!el){ peek.style.display = 'none'; return; }
+  peek.src = '/img/full/' + el.dataset.id + '.jpg';
+  peek.style.display = 'block';
+});
+document.addEventListener('mousemove', e => {
+  if (peek.style.display === 'none') return;
+  const w = 240, h = 350, pad = 14;
+  peek.style.left = Math.min(e.clientX + pad, innerWidth - w - pad) + 'px';
+  peek.style.top  = Math.min(Math.max(e.clientY - h/2, pad),
+                             innerHeight - h - pad) + 'px';
+});
 
 $('q').oninput = searchSoon;
 $('arch').onchange = () => { search(); };

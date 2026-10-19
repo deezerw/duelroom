@@ -2,13 +2,13 @@
 
 from pathlib import Path
 
-from flask import (Blueprint, Response, flash, redirect, render_template,
-                   request, url_for)
+from flask import (Blueprint, Response, abort, flash, redirect,
+                   render_template, request, send_from_directory, url_for)
 
 import json
 
 from skills import (builder, card_db, carddb, config, db, drill, gate,
-                    importer, meta_scrape as ms, report as report_mod,
+                    images, importer, meta_scrape as ms, report as report_mod,
                     scenarios, stats)
 from skills.deck import Deck
 
@@ -463,3 +463,75 @@ def build_save():
         c.commit()
     return {"ok": True, "name": path.stem, "problems": problems,
             "warnings": warn, "url": url_for("views.deck", name=path.stem)}
+
+
+# --- card art ------------------------------------------------------------
+#
+# Served from our own disk, never hotlinked: YGOPRODeck's terms forbid it,
+# and a list view would otherwise fire a hundred cross-origin requests at
+# their CDN on every render.
+
+# Drawn when a card's art has not been cached yet. Served with no-store so
+# that the real image replaces it the moment the fetch job reaches it.
+PLACEHOLDER = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 146">'
+    '<rect width="100" height="146" rx="5" fill="#1a1d26" stroke="#2a2f3d"/>'
+    '<text x="50" y="76" fill="#4a5168" font-size="9" font-family="sans-serif"'
+    ' text-anchor="middle">no art yet</text></svg>')
+
+
+@bp.route("/img/<size>/<int:card_id>.jpg")
+@login_required
+def card_image(size, card_id):
+    if size not in images.SIZES:
+        abort(404)
+    if not images.have(size, card_id):
+        return Response(PLACEHOLDER, mimetype="image/svg+xml",
+                        headers={"Cache-Control": "no-store"})
+    return send_from_directory(
+        images.dir_for(size), f"{card_id}.jpg", mimetype="image/jpeg",
+        max_age=60 * 60 * 24 * 365)   # a passcode's art never changes
+
+
+@bp.route("/maintenance")
+@login_required
+def maintenance():
+    """Jobs about the installation rather than about one deck."""
+    c = conn()
+    return render_template(
+        "maintenance.html", status=images.status(c),
+        scopes=[("small-meta", "art for the ~1,100 cards the meta plays"),
+                ("small-all", "list-sized art for the whole pool"),
+                ("full-meta", "full-size art for meta cards"),
+                ("full-all", "full-size art for the whole pool")],
+        deckless=[(k, jobs.KINDS[k][1], jobs.KINDS[k][2])
+                  for k in jobs.DECKLESS],
+        running=jobs.active(c), rows=jobs.recent(c, 10))
+
+
+@bp.route("/run/<kind>", methods=["POST"])
+@login_required
+def run_deckless(kind):
+    """meta and images take no deck, so the per-deck route cannot start them.
+
+    Before this existed the meta scrape was reachable only from the CLI,
+    which quietly made the web UI a read-only view of a database someone
+    else had to keep current.
+    """
+    if kind not in jobs.DECKLESS:
+        flash("That job needs a deck — start it from the deck page.")
+        return redirect(url_for("views.maintenance"))
+    params = {}
+    if kind == "images":
+        scope = request.form.get("scope", "small-all")
+        if scope not in {f"{s}-{w}" for s in images.SIZES
+                         for w in ("all", "meta")}:
+            flash("Unknown image scope")
+            return redirect(url_for("views.maintenance"))
+        params["scope"] = scope
+    c = conn()
+    job_id = jobs.enqueue(c, kind, deck=None, **params)
+    running = jobs.active(c)
+    if running and running["id"] != job_id:
+        flash(f"Queued as job {job_id} — job {running['id']} is running first.")
+    return redirect(url_for("views.job_detail", job_id=job_id))

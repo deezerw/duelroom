@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
-                    gate, importer, meta_scrape as ms, optimizer,
+                    gate, images, importer, meta_scrape as ms, optimizer,
                     report, scenarios, stats)
 from skills.deck import Deck
 
@@ -24,6 +24,7 @@ BANNER = """\
 duelroom — Yu-Gi-Oh! deck laboratory
 
   cards                     refresh the card mirror from YGOPRODeck
+  images [scope] [limit]    cache card art locally (small-meta, small-all, full-all)
   meta [days] [n]           scrape recent tournament lists (default 120 days, 500)
   archetypes [n]            what is being played, by tournament presence
   flex <archetype> [side]   core / flex / fringe breakdown
@@ -119,6 +120,21 @@ def _resolve_deck(arg, conn=None):
 
 def cmd_cards(conn, args):
     print(card_db.sync(conn, force=bool(args and args[0] == "force")))
+
+
+def cmd_images(conn, args):
+    """Cache card art locally. Resumable: re-run it after an interruption."""
+    if args and args[0] == "status":
+        for size, st in images.status(conn).items():
+            print(f"  {size:6} {st['cached']:6}/{st['pool']} cached  "
+                  f"{st['bytes'] / 1e6:7.1f} MB  "
+                  f"{st['missing_upstream']} with no art upstream")
+        return
+    scope = args[0] if args else "small-meta"
+    limit = int(args[1]) if len(args) > 1 else None
+    r = images.fetch(conn, scope, limit, log=lambda m: print(m, flush=True))
+    print(f"{r['fetched']} fetched, {r['absent']} absent upstream, "
+          f"{r['failed']} left to retry (re-run to pick them up)")
 
 
 def cmd_meta(conn, args):
@@ -1140,6 +1156,7 @@ def cmd_decks(conn, args):
 
 COMMANDS = {
     "cards": cmd_cards,
+    "images": cmd_images,
     "meta": cmd_meta,
     "archetypes": cmd_archetypes,
     "flex": cmd_flex,

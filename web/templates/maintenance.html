@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}maintenance · duelroom{% endblock %}
+{% block body %}
+<h1>Maintenance</h1>
+<p class="muted">Jobs about the installation rather than about one deck.
+  They queue behind solver runs like everything else.</p>
+
+{% if running %}
+  <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
+    Anything started here queues behind it.</div>
+{% endif %}
+
+<h2>Card art</h2>
+<div class="panel">
+  <p style="margin-top:0" class="muted">
+    Downloaded once and served from this machine. YGOPRODeck's terms forbid
+    hotlinking, and a deck list would otherwise fire a hundred requests at
+    their CDN every time it rendered. Fetched at 10 requests a second,
+    resumable — stopping it loses nothing.</p>
+  <table>
+    <thead><tr><th>size</th><th class="num">cached</th><th class="num">of pool</th>
+      <th class="num">on disk</th><th>no art upstream</th></tr></thead>
+    <tbody>
+    {% for size, st in status.items() %}
+      <tr><td class="mono">{{ size }}</td>
+        <td class="num">{{ '{:,}'.format(st.cached) }}</td>
+        <td class="num muted">{{ '{:,}'.format(st.pool) }}</td>
+        <td class="num">{{ '%.0f'|format(st.bytes / 1e6) }} MB</td>
+        <td class="muted">{{ st.missing_upstream or '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+  {% for scope, what in scopes %}
+    <form method="post" action="{{ url_for('views.run_deckless', kind='images') }}"
+          style="margin:0">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <button title="{{ what }}">{{ scope }}</button>
+    </form>
+  {% endfor %}
+  </div>
+  <p class="prov" style="margin-top:10px">
+    A card with no cached art shows an empty frame, not a broken image, and
+    not a request to someone else's server.</p>
+</div>
+
+<h2>The meta</h2>
+<div class="panel">
+  <p style="margin-top:0" class="muted">Re-scrape tournament lists and
+    recompute inclusion rates. Everything the builder ranks by, and every
+    archetype the matrix knows about, comes from this.</p>
+  <form method="post" action="{{ url_for('views.run_deckless', kind='meta') }}"
+        style="margin:0">
+    <button>scrape the meta <span class="muted">~1 min</span></button>
+  </form>
+</div>
+
+<h2>Recent jobs</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>id</th><th>kind</th><th>deck</th><th>state</th><th>queued</th></tr></thead>
+    <tbody>
+    {% for j in rows %}
+      <tr><td><a href="{{ url_for('views.job_detail', job_id=j.id) }}">{{ j.id }}</a></td>
+        <td>{{ j.kind }}</td><td class="muted">{{ j.deck or '—' }}</td>
+        <td>{{ j.state }}</td><td class="muted mono">{{ j.queued_at }}</td></tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">nothing yet</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
