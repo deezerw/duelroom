@@ -15,6 +15,17 @@ from web import create_app  # noqa: E402
 from web.auth import MAX_ATTEMPTS, safe_next  # noqa: E402
 
 
+def flat(html):
+    """HTML with runs of whitespace collapsed.
+
+    Prose in a template wraps wherever the line got long, so asserting on
+    a sentence matches or not depending on indentation. Three assertions
+    in this file have failed that way against correct pages.
+    """
+    import re as _re
+    return _re.sub(r"\s+", " ", html)
+
+
 @pytest.fixture(autouse=True)
 def keep_the_installation_intact():
     """Tests run against the real database. Put back what they change.
@@ -671,3 +682,33 @@ def test_a_step_with_a_threat_can_be_opened(loggedin):
     assert "never assembled" in h
     # A step with no window must not pretend to be safe OR be clickable.
     assert "The Fallen &amp; The Virtuous" in h
+
+
+def test_an_old_report_is_joined_on_read_and_says_what_is_missing(
+        loggedin, tmp_path, monkeypatch):
+    """Reports written before the line carried its threats render as a
+    plain list with nothing to click. They are joined by card name on
+    read; their empty-chain windows cannot be placed without summon
+    ordinals, and the page has to say that rather than show a bare
+    count."""
+    import json
+    from skills import handlab
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    for st in rep["steps"]:          # back to the old shape
+        st.pop("threats", None)
+        st.pop("summon_index", None)
+    rep.pop("unplaced", None)
+    folder = tmp_path / "my-despia"
+    folder.mkdir()
+    (folder / "0011223344556677.json").write_text(json.dumps(rep))
+
+    loaded = handlab.load(folder / "0011223344556677.json")
+    assert loaded["legacy"] is True
+    assert any(s["threats"] for s in loaded["steps"]), "nothing was joined"
+
+    h = loggedin.get("/pilot/my-despia/r/0011223344556677").get_data(as_text=True)
+    assert '<details class="branch">' in h
+    if loaded["unplaced"]:
+        assert "before the line numbered its summons" in flat(h)

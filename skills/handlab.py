@@ -549,8 +549,25 @@ def save(report, path=None):
 
 
 def load(path):
+    """A stored report, brought up to the current shape.
+
+    Reports written before the line and the threats were joined have
+    steps with no windows attached, so they render as a plain list with
+    nothing to open. They can be joined on read by card name. What they
+    cannot get is summon ordinals -- those need the original replay,
+    which the report does not keep -- so their empty-chain windows stay
+    unplaced and the page says how many.
+    """
     path = Path(path)
-    return json.loads(path.read_text()) if path.exists() else None
+    if not path.exists():
+        return None
+    r = json.loads(path.read_text())
+    if r.get("steps") and "threats" not in r["steps"][0]:
+        r["steps"], r["unplaced"] = annotate_steps(r)
+        r["legacy"] = True
+    r.setdefault("unplaced", [])
+    r.setdefault("legacy", False)
+    return r
 
 
 def annotate_steps(report):

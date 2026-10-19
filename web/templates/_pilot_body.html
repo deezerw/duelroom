@@ -139,10 +139,13 @@
 </div>
 
 {% if r.unplaced %}
-  <div class="flag">{{ r.unplaced|length }} hand-trap window(s) could not be
-    tied to a step in the line, so they are listed only in the totals below.
-    A threat pinned to the wrong action would be worse than one left
-    unplaced.</div>
+  <div class="flag">{{ r.unplaced|length }} hand-trap window(s) are not tied to
+    a step, so they appear only in the totals below.
+    {% if r.legacy %}This report was measured before the line numbered its
+      summons, and a window on an empty chain has nothing but a summon count
+      to place it by — re-run the hand to place them.
+    {% else %}A threat pinned to the wrong action would be worse than one
+      left unplaced.{% endif %}</div>
 {% endif %}
 
 <h2>Where it breaks</h2>
