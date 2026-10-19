@@ -90,6 +90,12 @@ used by the worker. `tmux-stop.sh` now SIGTERMs the worker first and waits
 `DUELROOM_STOP_GRACE` (180s) for it to finish its job, but an `optimize` run
 outlasts that.
 
+**Guard `__main__` in any script that calls `handlab.analyse`.** It fires the
+hand traps through a `spawn` pool, and a spawned child re-imports `__main__`,
+so a script with top-level code re-runs itself in every worker. The first run
+of that code solved the hand seven times over; the waste looks exactly like
+the work.
+
 **Never `pkill -f` the gunicorn pattern.** `pgrep -f` matches whole command
 lines, so it also matches the shell that just typed it — that is the exit-144
 footgun, and it fired again while deploying this. `tmux-stop.sh` excludes the

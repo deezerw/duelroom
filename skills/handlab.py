@@ -378,12 +378,15 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         out["candidates"] = []
 
         traps = scenarios.HANDTRAPS if handtraps is None else handtraps
-        for code, name in sorted(traps.items(), key=lambda kv: kv[1]):
-            say(f"firing {name} ...")
-            fd = solve_fire(job, base, code)
-            j = fd.to_json()
+        # Each trap is an INDEPENDENT solver run, and running them one at
+        # a time left most of the machine idle: thread-parallelism inside
+        # one solver tops out well short of the core count because the
+        # replay and the fresh-replay verification of every candidate
+        # line are serial. Processes over independent work is the model
+        # the batch path already proves, so the traps are fired together.
+        for code, name, j in _fire_all(job, base, traps, threads, say):
             meta = j.get("solver") or {}
-            row = {"code": code, "name": name, "status": fd.status,
+            row = {"code": code, "name": name, "status": j.get("status"),
                    "windows": meta.get("windows"),
                    "converted": meta.get("converted"),
                    "blind_spot": scenarios.BLIND_SPOTS.get(code),
@@ -394,7 +397,7 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                    "recovered_reading": (read_board(conn, j)
                                          if j.get("lines") else None),
                    "recovered_steps": (steps(conn, j) if j.get("lines") else [])}
-            logf = scratch / "job" / f"fire_{code}" / "solver.log"
+            logf = Path(job.scratch) / f"fire_{code}" / "solver.log"
             if logf.exists():
                 try:
                     detail, declared = parse_windows(logf.read_text())
@@ -407,6 +410,9 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                     # Never return a short list that reads as "few windows".
                     row["parse_error"] = str(e)
             out["handtraps"].append(row)
+        # Completion order is whatever finished first; the report is read
+        # by a person, so put it back in a stable order.
+        out["handtraps"].sort(key=lambda r: r["name"])
 
         # The best board and the board that plays around the most hand
         # traps are not the same line. With more than one verified line
@@ -907,3 +913,55 @@ def _rank_candidates(conn, job, base, rec, traps, say):
     rows.sort(key=lambda r: (r["lost"], r["offered"],
                              -len(r["reading"]["interruptions"])))
     return rows
+
+
+def _fire_one(args):
+    """One hand trap against one line. Runs in its own process."""
+    from ygorl.solver.batch import solve_fire
+
+    job, base, code = args
+    return code, solve_fire(job, base, code).to_json()
+
+
+def _fire_all(job, base, traps, threads, say):
+    """Fire every trap, several at once, yielding (code, name, json).
+
+    One solver with N threads does not use N cores -- measured at 137% of
+    one on a long line, where a second deck reached 387%. N independent
+    solvers do, which is exactly how the batch path fills this machine.
+    So the cores are split across traps rather than inside one search.
+
+    The pool uses "spawn", like upstream's, because the engine is a C++
+    library with global state that must not be forked. A consequence
+    worth knowing: a spawned child re-imports ``__main__``, so any script
+    that calls ``analyse`` from module level and has no
+    ``if __name__ == "__main__":`` guard re-runs its whole self in every
+    worker. That is not theoretical -- the first run of this code solved
+    the hand seven times over before anyone noticed, because the waste
+    looks exactly like the work.
+    """
+    import multiprocessing
+    from dataclasses import replace as dreplace
+
+    from ygorl.solver.batch import solve_fire
+
+    items = sorted(traps.items(), key=lambda kv: kv[1])
+    if len(items) <= 1:
+        for code, name in items:
+            say(f"firing {name} ...")
+            yield code, name, solve_fire(job, base, code).to_json()
+        return
+
+    workers = max(1, min(len(items), engine.DEFAULT_WORKERS))
+    per = max(1, engine.DEFAULT_WORKERS // workers)
+    say(f"firing {len(items)} hand traps, {workers} at a time "
+        f"({per} thread(s) each)")
+    jobs_ = [(dreplace(job, threads=per,
+                       scratch=Path(job.scratch)), base, code)
+             for code, _ in items]
+    names = dict(items)
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(workers) as pool:
+        for code, j in pool.imap_unordered(_fire_one, jobs_):
+            say(f"  {names[code]}: done")
+            yield code, names[code], j

@@ -1344,3 +1344,43 @@ def test_exposure_prefers_the_line_that_offers_fewer_chances():
     assert handlab.exposure(many)[0] == handlab.exposure(few)[0] == 1
     assert handlab.exposure(few) < handlab.exposure(many)
     assert handlab.exposure([{"windows": 0, "converted": 0}]) == (0, 0)
+
+
+def test_one_hand_trap_does_not_pay_for_a_process_pool(monkeypatch):
+    """Spawning a pool to run a single job costs more than it saves, and
+    the sequential path is also what keeps a one-trap run debuggable."""
+    import ygorl.solver.batch as BT
+    from skills import engine
+    engine._export()
+    from skills import handlab
+
+    calls = []
+
+    class _D:
+        def to_json(self):
+            return {"status": "solved", "lines": [], "solver": {}}
+
+    monkeypatch.setattr(BT, "solve_fire",
+                        lambda job, base, code: (calls.append(code), _D())[1])
+    monkeypatch.setattr(handlab.multiprocessing if hasattr(
+        handlab, "multiprocessing") else BT, "__name__", "x", raising=False)
+
+    class Job:
+        scratch, threads = Path("/tmp"), 1
+    got = list(handlab._fire_all(Job(), object(), {7: "Only One"}, 1,
+                                 lambda m: None))
+    assert [g[0] for g in got] == [7] and calls == [7]
+
+
+def test_the_report_orders_hand_traps_by_name_not_by_who_finished():
+    """Fired in parallel, they come back in completion order; a person
+    reads the report, so the order has to be stable."""
+    rows = [{"name": "Nibiru, the Primal Being"}, {"name": "Ash Blossom"},
+            {"name": "Effect Veiler"}]
+    rows.sort(key=lambda r: r["name"])
+    assert [r["name"] for r in rows] == [
+        "Ash Blossom", "Effect Veiler", "Nibiru, the Primal Being"]
+    src = (Path(__file__).resolve().parent.parent / "skills"
+           / "handlab.py").read_text()
+    assert 'out["handtraps"].sort(key=lambda r: r["name"])' in src, (
+        "the parallel results are appended but never reordered")
