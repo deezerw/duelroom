@@ -960,7 +960,7 @@ def cmd_second(conn, args):
     if not their_target or not our_target:
         print("could not establish a target for both decks")
         return
-    print(f"{ok_} going second into {tk}")
+    print(f"{ours.stem} going second into {theirs.stem}")
     print(f"  their board target: {their_target}")
     print(f"  our payoff target : {our_target}\n")
     rows = breaking.going_second(theirs, ours, their_target, our_target,
