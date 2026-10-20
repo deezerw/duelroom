@@ -248,6 +248,132 @@ def our_board_start(our_deck, their_deck, our_hand, our_targets, seed,
     return start
 
 
+# A card with no effect text at all, so a board holding one interrupts
+# nothing. This is ygorl's own PASSIVE_OPPONENT card for the same reason.
+INERT = 89631139  # Blue-Eyes White Dragon
+
+
+def inert_start(their_deck, seed, scratch, solve_ms=None):
+    """A `--start` replay where player 0 built a board that DOES NOTHING.
+
+    The `base` rung is not a floor, which is the trap this exists to
+    close. "Do nothing, hold what the hand holds" sounded like the
+    do-nothing control, and then the hand it holds turns out to be Droll
+    and Effect Veiler -- two live interactions on the opponent's turn. A
+    board scoring the same as that control is not a board that achieves
+    nothing; it is a board that achieves as much as two held hand traps.
+
+    So the real floor is a deck of 40 vanilla monsters that normal summons
+    one and passes: a body on the field, zero interruption anywhere. The
+    opponent's stop rate against THIS is how hard their own turn-2 task
+    is at this budget, independent of anything you did. Without that
+    number a stop rate has no zero -- and `gauntlet`'s first two real
+    boards both stopped 18/18, which is either two excellent boards or a
+    task nobody could complete.
+
+    Built the same way as `breaking.floodgate_start`, which does this with
+    a deck of 40 floodgates.
+    """
+    from ygorl.engine.duel import Deck as YDeck
+    from ygorl.engine.replay import Replay, load_yrp
+    from ygorl.solver.combo_solver import Workdir
+    from ygorl.solver.demo import convert_line
+
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    wd = Workdir.create(scratch / "workdir")
+    sols = scratch / "sol"
+    sols.mkdir(exist_ok=True)
+
+    inert = YDeck((INERT,) * 40, (), (), "inert")
+    ydk = scratch / "inert.ydk"
+    ydk.write_text("#created by duelroom\n#main\n"
+                   + "\n".join([str(INERT)] * 40) + "\n#extra\n!side\n")
+
+    tpl = breaking.template_vs(scratch / "tpl.yrpX", inert, their_deck,
+                               seed=seed)
+    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
+    for d in wd.scriptdirs:
+        cmd += ["--scriptdir", str(d)]
+    cmd += ["--no-ref", "--deck", str(ydk.resolve()),
+            "--hand", "|".join([str(INERT)] * 5),
+            "--target", f"{INERT}@atk",
+            "--solve-ms", str(solve_ms or engine.SOLVE_MS),
+            "--threads", "1", "--outdir", str(sols)]
+    breaking._run_solver(cmd, f"inert_start(seed {seed})")
+
+    found = sorted(sols.glob("*.yrp"))
+    if not found:
+        return None
+    line = convert_line(load_yrp(found[0]), [f"{INERT}@atk"], close_turn=True)
+    base = Replay.from_yrp(found[0])
+    ext = Replay(seed=base.seed, first=base.first, rule_flags=base.rule_flags,
+                 player=base.player, shuffle_decks=base.shuffle_decks,
+                 decks=base.decks, responses=list(line.responses),
+                 seed_words=base.seed_words)
+    out = scratch / f"inert_{seed}.yrpX"
+    ext.to_yrpx(out, names=("inert", "them"))
+    return out
+
+
+def floor(their_decks, hands=4, draws=DEFENCE_DRAWS, solve_ms=None,
+          scratch=None, log=None):
+    """How often each opposing deck gets through a board that does nothing.
+
+    The zero point for every stop rate `defend` reports. A board that
+    stops 18 of 18 means nothing until this says the floor stops fewer.
+    Same hands and same draws as `defend`, so the two are comparable.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    from ygorl.solver.batch import sample_hand
+
+    say = log or (lambda m: None)
+    solve_ms = engine.SOLVE_MS if solve_ms is None else solve_ms
+    scratch = Path(scratch or tempfile.mkdtemp(prefix="duelroom-floor-"))
+    work, rows = [], []
+    for deck_path, target in their_decks:
+        name = Path(deck_path).stem
+        try:
+            start = inert_start(deck_path, seed=0, scratch=scratch / name,
+                                solve_ms=solve_ms)
+        except breaking.SolverFailed as e:
+            say(f"  {name}: floor board failed to build — {e}")
+            rows.append({"deck": name, "hand": None, "error": str(e)})
+            continue
+        if start is None:
+            say(f"  {name}: could not even summon a vanilla monster — "
+                f"the floor itself is broken, not the deck")
+            rows.append({"deck": name, "hand": None,
+                         "error": "inert board not built"})
+            continue
+        theirs = breaking.to_ydeck(deck_path)
+        for h in range(hands):
+            their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
+            for d in range(draws):
+                work.append((start, deck_path, their_hand, target, solve_ms,
+                             5000 + d, name, h))
+
+    say(f"  floor: {len(work)} going-second searches against a board that "
+        f"does nothing")
+    results = {}
+    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS) as ex:
+        for (args, res) in zip(work, ex.map(_attack, [w[:6] for w in work])):
+            acc = results.setdefault((args[6], args[7]),
+                                     {"through": 0, "searched": 0})
+            acc["through"] += bool(res["through"])
+            acc["searched"] += bool(res["searched"])
+    for (name, h), acc in sorted(results.items()):
+        rows.append({"deck": name, "hand": h, "through": acc["through"] > 0,
+                     "searched": acc["searched"]})
+    tested = [r for r in rows if r.get("hand") is not None]
+    through = sum(1 for r in tested if r["through"])
+    return {"rows": rows, "tested": len(tested), "through": through,
+            "stopped": len(tested) - through,
+            "stop_rate": (len(tested) - through) / len(tested)
+            if tested else None}
+
+
 def _attack(args):
     """One opposing going-second hand against a fixed start. Pool entry."""
     start, their_deck, their_hand, their_target, solve_ms, seed = args
@@ -398,12 +524,27 @@ def rank(our_deck, our_hand, their_decks, keep=3, hands=4, draws=DRAWS,
         out.append(res)
     out.sort(key=lambda r: (-(r["stop_rate"] if r["stop_rate"] is not None
                               else -1), -r["candidate"]["interruptions"]))
+    # The zero point, measured the same way. Without it "stopped 18 of 18"
+    # cannot be told apart from "nobody could have done it anyway".
+    say("\nfloor: the same hands against a board that does nothing")
+    fl = floor(their_decks, hands=hands, draws=defence_draws,
+               solve_ms=solve_ms, log=say)
+    say(f"  -> the floor stops {fl['stopped']}/{fl['tested']}")
+
     rates = {r["stop_rate"] for r in out if r["stop_rate"] is not None}
+    best = max((r["stop_rate"] for r in out
+                if r["stop_rate"] is not None), default=None)
     return {"deck": Path(our_deck).stem, "hand": list(our_hand),
             "candidates": [c.to_json() for c in cands], "results": out,
             "discriminated": len(rates) > 1,
             "control_rate": next((r["stop_rate"] for r in out
-                                  if r.get("control")), None)}
+                                  if r.get("control")), None),
+            "floor": fl, "floor_rate": fl["stop_rate"],
+            # A board is worth something only if it beats a board that does
+            # nothing. Equal to the floor means the opponents' own turn-2
+            # task was the obstacle, not anything you built.
+            "beats_floor": (best is not None and fl["stop_rate"] is not None
+                            and best > fl["stop_rate"])}
 
 
 def save(report, path):

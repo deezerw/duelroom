@@ -1020,6 +1020,20 @@ def cmd_gauntlet(conn, args):
         for row in r["rows"]:
             if row.get("hand") is None:
                 print(f"            ! {row['deck']}: {row['error']}")
+    fr = rep.get("floor_rate")
+    if fr is not None:
+        f = rep["floor"]
+        print(f"  {f['stopped']}/{f['tested']}  FLOOR — a board that does "
+              f"nothing (40 vanilla monsters, one summoned)")
+    # A stop rate only means something above the floor. Equal to it means
+    # the opponents' own turn-2 task was the obstacle, not your board.
+    if fr is not None and not rep.get("beats_floor"):
+        print("\n  ! no board beat the FLOOR. Whatever stopped those hands, it")
+        print("    was not your board — the opposing decks could not assemble")
+        print("    their payoff going second even against a vanilla monster.")
+        print("    Calibrate the attacker side (budget, or their targets)")
+        print("    before reading anything into the ordering above.")
+        return
     # No separation means the test had no resolution, not that the boards
     # are equal. Say so before anyone reads an ordering into it.
     if not rep.get("discriminated"):
@@ -1031,8 +1045,9 @@ def cmd_gauntlet(conn, args):
     print(f"\n  best board: {best['candidate']['label']}, stopping "
           f"{best['stopped']}/{best['tested']} going-second hands")
     if rep.get("control_rate") is not None:
-        print(f"  control (do nothing) stopped "
-              f"{rep['control_rate']:.0%} — the gap is what the board is worth")
+        print(f"  passing with this hand stops {rep['control_rate']:.0%}, "
+              f"a board that does nothing {rep['floor_rate']:.0%}"
+              f" — the gap above those is what the board is worth")
     # The heuristic score and the measured one disagreeing is the whole
     # reason this command exists, so say when it happens.
     by_score = max(rep["results"],

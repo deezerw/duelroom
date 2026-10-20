@@ -1481,6 +1481,14 @@ def _stub_defend(monkeypatch, rates):
     monkeypatch.setattr(gauntlet, "defend", fake)
 
 
+def _stub_floor(monkeypatch, rate):
+    """The do-nothing zero point, also solver-free."""
+    from skills import gauntlet
+    monkeypatch.setattr(gauntlet, "floor", lambda *a, **k: {
+        "rows": [], "tested": 10, "through": int((1 - rate) * 10),
+        "stopped": int(rate * 10), "stop_rate": rate})
+
+
 def _cand(label, interruptions, code):
     from skills.gauntlet import Candidate
     return Candidate(targets=(str(code),), label=label,
@@ -1496,6 +1504,7 @@ def test_the_do_nothing_board_is_carried_as_a_control(monkeypatch, tmp_path):
              _cand("base", 2, 3)]
     _stub_candidates(monkeypatch, cands)
     _stub_defend(monkeypatch, {"stack:2": 0.8, "piece:9": 0.6, "base": 0.2})
+    _stub_floor(monkeypatch, 0.1)
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
     labels = [r["candidate"]["label"] for r in rep["results"]]
@@ -1511,6 +1520,7 @@ def test_identical_stop_rates_are_reported_as_no_resolution(monkeypatch):
     cands = [_cand("stack:2", 5, 1), _cand("base", 2, 3)]
     _stub_candidates(monkeypatch, cands)
     _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 1.0})
+    _stub_floor(monkeypatch, 0.5)
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
     assert rep["discriminated"] is False
@@ -1525,3 +1535,33 @@ def test_the_opponent_gets_best_of_n_draws():
     src = inspect.getsource(gauntlet.defend)
     assert 'acc["through"] > 0' in src, (
         "the opponent no longer gets the benefit of every draw")
+
+
+def test_a_board_that_only_matches_the_floor_is_not_a_result(monkeypatch):
+    """gauntlet's first real run had two boards stopping 18/18, which is
+    either two excellent boards or a task nobody could complete. The
+    `base` rung cannot answer that -- "do nothing, hold what the hand
+    holds" held Droll and Effect Veiler, two live interactions. Only a
+    board of vanilla monsters is a zero."""
+    from skills import gauntlet
+    cands = [_cand("stack:2", 5, 1), _cand("base", 2, 3)]
+    _stub_candidates(monkeypatch, cands)
+    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 0.9})
+    _stub_floor(monkeypatch, 1.0)
+    rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
+                        keep=2)
+    assert rep["beats_floor"] is False, (
+        "a board no better than 40 vanilla monsters was called a result")
+    _stub_floor(monkeypatch, 0.5)
+    rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
+                        keep=2)
+    assert rep["beats_floor"] is True
+
+
+def test_the_floor_board_interrupts_nothing():
+    """A floor built from a card with an effect is not a floor."""
+    from skills.gauntlet import INERT
+    from skills import db
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+    assert card_interruptions(INERT, default_cards()) == ()
