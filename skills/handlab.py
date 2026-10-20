@@ -790,8 +790,16 @@ def solve_for_hand(job, hand, pieces=4, pair=True, cards=None, scripts=None,
         k, (_, demo, score) = max(scored, key=lambda t: (t[1][2].key(), -t[0]))
     else:
         k, (_, demo, score) = 0, results[0]
+    # `score.to_json()` carries its own "pieces" -- the cards the END BOARD
+    # interrupts with -- so splatting it last silently ATE the plan's piece
+    # list in every record ever written (271 of 280 in results/boards.jsonl
+    # hold the board's pieces under that key, the other 9 being the unsolved
+    # ones where there is no score to overwrite it). Both are wanted, and
+    # the pair of them is the only way to ask the question this report
+    # exists to answer: what was the ladder offered, and how far up did it
+    # get? Keep the score's shape, name the plan's separately.
     demo.solver["blocking"] = {
-        "base": plan.base, "pieces": [p.target for p in plan.pieces],
+        "base": plan.base, "plan_pieces": [p.target for p in plan.pieces],
         "chosen": k, "attempts": [r[0] for r in results],
         **(score.to_json() if score else {}),
     }
