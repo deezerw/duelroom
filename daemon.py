@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
-                    gate, handlab, images, importer, meta_scrape as ms,
-                    optimizer, report, scenarios, stats)
+                    gate, gauntlet, handlab, images, importer,
+                    meta_scrape as ms, optimizer, report, scenarios, stats)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -53,6 +53,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
   second <theirs> <ours>    going second into their real board
+  gauntlet <deck> <hand>    rank this hand's end boards by what they stop
   floodgates <deck>         does the deck function under common floodgates
   help / quit
 """
@@ -945,6 +946,111 @@ def cmd_optimize(conn, args):
     print(f"\n  best list written to {out}")
 
 
+def cmd_gauntlet(conn, args):
+    """Rank one hand's end boards by what they actually stop."""
+    if not args:
+        print("usage: gauntlet <deck> <hand | random[:seed]> [hands] [boards]"
+              " [solve_s] [opponents]")
+        print("  finds the distinct end boards this hand can reach, then")
+        print("  deals each opposing deck going-second hands at every one")
+        print("  hands     going-second hands PER opposing deck (default 4)")
+        print("  boards    candidate boards to test (default 3, + a control)")
+        print("  solve_s   per-search budget. Cheap is WRONG, not fast — see")
+        print("            engine.SOLVE_MS. For smoke-testing, not measuring.")
+        print("  opponents how many opposing decks, by locals weight (default 3)")
+        return
+    deck_path = _resolve_deck(args[0], conn)
+    if not deck_path:
+        print(f"deck not found: {args[0]}")
+        return
+    _warn_if_busy("this run")
+    deck = Deck.from_ydk(deck_path)
+    deck.canonicalise(conn)
+    try:
+        hand = handlab.parse_hand(conn, deck, args[1] if len(args) > 1
+                                  else "random")
+    except ValueError as e:
+        print(f"bad hand: {e}")
+        return
+    hands = int(args[2]) if len(args) > 2 else 4
+    boards = int(args[3]) if len(args) > 3 else 3
+    solve_ms = int(float(args[4]) * 1000) if len(args) > 4 else None
+    # Hands per deck and number of decks were ONE argument in the first
+    # version, so asking for more hands silently widened the gauntlet and
+    # vice versa -- and the test's resolution depends on the first while
+    # its coverage depends on the second.
+    n_opp = int(args[5]) if len(args) > 5 else 3
+
+    # The opponents, weighted by YOUR room rather than global meta share --
+    # the same rule every other weighted ranking in this project follows.
+    others = [p for p in sorted(DECKS.glob("*.ydk")) if p != deck_path]
+    others.sort(key=lambda p: -config.weight_for(p.stem))
+    opponents = []
+    for p in others[:n_opp]:
+        target = scenarios.ensure_target(p)
+        if not target:
+            print(f"  no payoff target for {p.stem} — skipped")
+            continue
+        opponents.append((p, target))
+    if not opponents:
+        print("no opposing decks with a payoff target — run `targets` first")
+        return
+
+    print(f"{deck_path.stem}, hand: "
+          + ", ".join(handlab._name(conn, c) for c in hand))
+    print(f"  opponents: " + ", ".join(f"{p.stem} -> {t}"
+                                       for p, t in opponents) + "\n")
+    if solve_ms:
+        print(f"  ! budget overridden to {solve_ms/1000:.0f}s per search — "
+              f"a cheap run is a wrong run, not a fast one\n")
+    rep = gauntlet.rank(deck_path, hand, opponents, keep=boards,
+                        hands=hands, solve_ms=solve_ms, log=print)
+    if not rep["results"]:
+        print("\nno end board was reached at all — this hand is a brick")
+        return
+
+    print("\n  stops  board")
+    for r in rep["results"]:
+        c = r["candidate"]
+        rate = ("  n/a " if r["stop_rate"] is None
+                else f"{r['stopped']}/{r['tested']}")
+        tag = "  (control: do nothing)" if r.get("control") else ""
+        print(f"  {rate:>6s}  {c['interruptions']} int / {c['negates']} neg"
+              f"  [{c['label']}]{tag}")
+        for row in r["rows"]:
+            if row.get("hand") is None:
+                print(f"            ! {row['deck']}: {row['error']}")
+    # No separation means the test had no resolution, not that the boards
+    # are equal. Say so before anyone reads an ordering into it.
+    if not rep.get("discriminated"):
+        print("\n  ! every board stopped the SAME number of hands — this test")
+        print("    did not discriminate. Raise `hands`, or the opposing decks")
+        print("    cannot threaten any of these boards.")
+        return
+    best = rep["results"][0]
+    print(f"\n  best board: {best['candidate']['label']}, stopping "
+          f"{best['stopped']}/{best['tested']} going-second hands")
+    if rep.get("control_rate") is not None:
+        print(f"  control (do nothing) stopped "
+              f"{rep['control_rate']:.0%} — the gap is what the board is worth")
+    # The heuristic score and the measured one disagreeing is the whole
+    # reason this command exists, so say when it happens.
+    by_score = max(rep["results"],
+                   key=lambda r: (r["candidate"]["interruptions"],
+                                  r["candidate"]["negates"]))
+    if by_score is not best:
+        print(f"  NOTE: the old interruption count would have picked "
+              f"{by_score['candidate']['label']} "
+              f"({by_score['candidate']['interruptions']} int), which stops "
+              f"{by_score['stopped']}/{by_score['tested']}")
+    if best["tested"] and best["tested"] < 6:
+        print(f"  ! {best['tested']} tested hands is too few to separate "
+              f"boards — raise `hands` before believing this ordering")
+    path = gauntlet.save(rep, ROOT / "results" /
+                         f"gauntlet_{deck_path.stem}.json")
+    print(f"  written to {path}")
+
+
 def cmd_second(conn, args):
     if len(args) < 2:
         print("usage: second <their_deck> <our_deck> [hands]")
@@ -1319,6 +1425,7 @@ COMMANDS = {
     "locals": cmd_locals,
     "optimize": cmd_optimize,
     "second": cmd_second,
+    "gauntlet": cmd_gauntlet,
     "floodgates": cmd_floodgates,
 }
 

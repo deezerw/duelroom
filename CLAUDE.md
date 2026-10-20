@@ -50,6 +50,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
   second <theirs> <ours>    going second into their real board
+  gauntlet <deck> <hand>    rank this hand's end boards by what they STOP
   floodgates <deck>         does the deck function under common floodgates
   help / quit
 ```
@@ -147,6 +148,7 @@ daemon.py (CLI loop + report formatting)
   ├─→ skills/solver.py       Action-tree search over own legal moves
   ├─→ skills/scoring.py      End-board evaluation
   ├─→ skills/scenarios.py    Handtrap injection, board breaking, floodgates
+  ├─→ skills/gauntlet.py     Candidate end boards, ranked by what they stop
   ├─→ skills/optimizer.py    Flex-slot hill climb with paired seeds
   └─→ skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
 ```
@@ -226,6 +228,19 @@ response windows). Real counts need each line replayed through ygorl.
   budget builds, last format's deck, and rogue piles.
 - **Don't simulate what math solves:** pure "do I open card X" questions are
   hypergeometric — exact and instant. Reserve the engine for questions about lines.
+- **The solver is a RANDOMIZED search, and one attempt is one draw.** Measured
+  2026-10-20, same hand, same target set, same 60 s budget, only the solver seed
+  differing: an elfnote hand returned end boards of 3, 3, 3, 3, 5 and 6 interruptions
+  over six draws, and a despia pair solved on 3 of 6 draws while reporting "no line"
+  on the other 3. No `--seed` is passed anywhere, so all 280 records in
+  `results/boards.jsonl` carry a different one. Consequences, in order of how much
+  they cost: a single-draw "this deck cannot make that board" is a coin flip, not a
+  finding; the best board a hand can reach is usually NOT the one a single draw
+  returns, because the solver stops at the first line that satisfies the targets and
+  anything else on the board is incidental; and no run is reproducible. `gauntlet`
+  draws each goal `DRAWS` times for this reason, and the opponent gets
+  `DEFENCE_DRAWS`. Anything that takes one draw and believes it is understating
+  the deck.
 - **Version pinning:** `ygopro-core`, `CardScripts`, and `cards.cdb` must match and are
   pinned. Treat an update as a migration; otherwise results silently change meaning.
 
@@ -288,6 +303,16 @@ Honest gaps, so nobody mistakes a limit for a result:
   yours. Every weighted ranking inherits whatever is in that file.
 - **The side plan and floodgate check are implemented but not run at scale.** Each side
   candidate is `hands` full going-second runs, roughly ten minutes apiece.
+- **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
+  opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
+  limitation the handtrap matrix has, generalised from a card to a board. It is not a
+  life-point check and there is no OTK test; breaking a board is not expressible as a
+  solver goal (`--board-remove` relaxes the goal, see `breaking.going_second_args`).
+  The opponents come from `assets/decks/`, and `export` writes whichever scraped list
+  happened to be stored first (`ORDER BY d.id LIMIT 1`), not a representative one:
+  `branded.ydk` is a Branded/Blitzclique hybrid with one Fallen of Albaz and no
+  Branded Fusion, and it averages 1.0 interruptions over 40 hands. A gauntlet of weak
+  lists flatters every board.
 
 **Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
 detail yet — see "Why No Duel AI (Yet)" above for the trade.

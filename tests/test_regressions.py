@@ -1430,3 +1430,98 @@ def test_the_spare_reaches_the_child_process():
     assert "job, base, code, spare = args" in src, (
         "the spare is not carried into the worker")
     assert "finally" in src, "the patched SolveRequest is never restored"
+
+
+# --- gauntlet: ranking boards by what they stop --------------------------
+
+def test_board_score_no_longer_eats_the_plans_piece_list():
+    """`**score.to_json()` splatted last overwrote "pieces" in every
+    blocking record ever written -- 271 of 280 in results/boards.jsonl
+    hold the board score's shape under that key. Both lists are wanted."""
+    import inspect
+    from skills import handlab
+    src = inspect.getsource(handlab.solve_for_hand)
+    assert '"plan_pieces": [p.target for p in plan.pieces]' in src
+    assert '"pieces": [p.target for p in plan.pieces]' not in src, (
+        "the plan's pieces are back under the key the board score uses")
+
+
+def test_two_draws_of_the_same_board_collapse():
+    """The candidates must be ALTERNATIVES. A board is identified by what
+    it interrupts with, regardless of the order the solver listed it in,
+    or four draws of one board would be offered as four choices."""
+    from skills.gauntlet import Candidate
+    a = Candidate(targets=("1",), label="piece:1", interruptions=2, negates=1,
+                  pieces=((100, "field", True), (200, "hand", False)),
+                  draws=1, solve_s=1.0)
+    b = Candidate(targets=("1",), label="stack:2", interruptions=2, negates=1,
+                  pieces=((200, "hand", False), (100, "field", True)),
+                  draws=1, solve_s=1.0)
+    c = Candidate(targets=("1",), label="piece:1", interruptions=2, negates=1,
+                  pieces=((100, "field", True), (300, "hand", False)),
+                  draws=1, solve_s=1.0)
+    assert a.board_key() == b.board_key()
+    assert a.board_key() != c.board_key()
+
+
+def _stub_candidates(monkeypatch, cands):
+    from skills import gauntlet
+    monkeypatch.setattr(gauntlet, "candidate_boards",
+                        lambda *a, **k: list(cands))
+
+
+def _stub_defend(monkeypatch, rates):
+    """defend() keyed by candidate label, so no solver is needed."""
+    from skills import gauntlet
+
+    def fake(our_deck, our_hand, candidate, their_decks, **kw):
+        rate = rates[candidate.label]
+        return {"candidate": candidate.to_json(), "rows": [],
+                "tested": 10, "stopped": int(rate * 10), "stop_rate": rate}
+    monkeypatch.setattr(gauntlet, "defend", fake)
+
+
+def _cand(label, interruptions, code):
+    from skills.gauntlet import Candidate
+    return Candidate(targets=(str(code),), label=label,
+                     interruptions=interruptions, negates=0,
+                     pieces=((code, "field", False),), draws=1, solve_s=1.0)
+
+
+def test_the_do_nothing_board_is_carried_as_a_control(monkeypatch, tmp_path):
+    """Without it a stop rate has no scale: "stopped 8 of 12" says nothing
+    unless the board that builds nothing stops fewer."""
+    from skills import gauntlet
+    cands = [_cand("stack:2", 5, 1), _cand("piece:9", 4, 2),
+             _cand("base", 2, 3)]
+    _stub_candidates(monkeypatch, cands)
+    _stub_defend(monkeypatch, {"stack:2": 0.8, "piece:9": 0.6, "base": 0.2})
+    rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
+                        keep=2)
+    labels = [r["candidate"]["label"] for r in rep["results"]]
+    assert "base" in labels, "the control was dropped by the keep cut"
+    assert rep["control_rate"] == 0.2
+    assert rep["discriminated"] is True
+
+
+def test_identical_stop_rates_are_reported_as_no_resolution(monkeypatch):
+    """Three boards that all stop everything is a test with no power, not
+    a three-way tie to read an ordering into."""
+    from skills import gauntlet
+    cands = [_cand("stack:2", 5, 1), _cand("base", 2, 3)]
+    _stub_candidates(monkeypatch, cands)
+    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 1.0})
+    rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
+                        keep=2)
+    assert rep["discriminated"] is False
+
+
+def test_the_opponent_gets_best_of_n_draws():
+    """Their search is the same randomized search -- measured at 50%
+    P(solve) per 60s draw on a borderline goal -- so one draw would make
+    "stopped" a coin flip. Any draw through counts as through."""
+    import inspect
+    from skills import gauntlet
+    src = inspect.getsource(gauntlet.defend)
+    assert 'acc["through"] > 0' in src, (
+        "the opponent no longer gets the benefit of every draw")

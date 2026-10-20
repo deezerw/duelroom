@@ -25,6 +25,23 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] RE-RUN the 40-hand board library with the multi-draw ladder. Everything in
+      `results/boards*.jsonl` was built one draw per goal and capped at a pair, so
+      every stored board is a floor, not a best. Measured on one elfnote hand: the
+      library says 4 interruptions; 32 draws at a QUARTER of the budget found 10
+      distinct boards topping out at 5 int / 4 neg. `targets`, `threats`, `second`,
+      `matrix` and `optimize` all read this file.
+
+- [ ] Point `gauntlet` at the real thing: the default budget (60 s), more than 2
+      hands, and opponents that are not `branded.ydk`. The smoke run used 20 s.
+
+- [ ] `export` picks whichever list was scraped FIRST (`ORDER BY d.id LIMIT 1`), not
+      a representative or best-placing one. That is how `branded.ydk` ended up a
+      Branded/Blitzclique hybrid with no Branded Fusion that averages 1.0
+      interruptions over 40 hands and drags the whole library down. Rank by placement,
+      or by distance from the archetype's inclusion profile.
+
+
 - [ ] VERIFY the running optimizer actually fires Imperm AND Ash — check a trial
       RECORD's `fire` keys, not the targets file. The file lies; funnel_eval drops
       every key but `targets`.
