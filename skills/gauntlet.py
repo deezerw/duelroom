@@ -313,6 +313,16 @@ def defend(our_deck, our_hand, candidate, their_decks, hands=4,
         theirs = breaking.to_ydeck(deck_path)
         for h in range(hands):
             # Going second draws for turn: six cards, not five.
+            #
+            # Only the HAND varies across trials. The rest of their deck
+            # order comes from the start replay's template and the .ydk,
+            # so every trial against one deck searches the same remaining
+            # order -- what they draw or dig to beyond the opening six is
+            # identical. That is common random numbers, the same variance
+            # reduction `optimizer` relies on, and it is the right default
+            # for comparing BOARDS against each other. It also means
+            # `hands` counts opening hands, not full independent shuffles,
+            # so it understates the spread of a single board's stop rate.
             their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
             for d in range(draws):
                 work.append((start, deck_path, their_hand, target, solve_ms,
