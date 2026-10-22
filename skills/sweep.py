@@ -126,6 +126,20 @@ def _solve_one(args):
             "unsolved_record": None if score else rec}
 
 
+def _map_solves(batch, workers):
+    """Run a wave of solves, yielding results as they finish.
+
+    A seam, not an abstraction: the wave structure (breadth, then stacks,
+    then depth) is where the sweep's decisions live, and it had no test
+    because exercising it meant hours of solver. Tests replace this with a
+    serial stub and check the waves, which is the part that can be wrong
+    in a way no amount of solver time would reveal.
+    """
+    with ProcessPoolExecutor(max_workers=workers,
+                             initializer=engine.be_nice) as ex:
+        yield from ex.map(_solve_one, batch)
+
+
 def allocate(attempts, draws, n_goals):
     """Which goals get the remaining draws, after one draw of each.
 
@@ -336,14 +350,12 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
 
     def run(batch, phase):
         done_n = 0
-        with ProcessPoolExecutor(max_workers=workers,
-                                 initializer=engine.be_nice) as ex:
-            for res in ex.map(_solve_one, batch):
-                collect(res)
-                done_n += 1
-                if done_n % max(1, len(batch) // 5) == 0:
-                    say(f"  {phase}: {done_n}/{len(batch)} solves, "
-                        f"{time.monotonic() - start:.0f}s")
+        for res in _map_solves(batch, workers):
+            collect(res)
+            done_n += 1
+            if done_n % max(1, len(batch) // 5) == 0:
+                say(f"  {phase}: {done_n}/{len(batch)} solves, "
+                    f"{time.monotonic() - start:.0f}s")
 
     run(work, "breadth")
 

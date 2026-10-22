@@ -1754,3 +1754,84 @@ def test_the_stacks_wave_runs_at_the_triage_budget():
     window = body[i:i + 400]
     assert "triage_ms" in window, (
         "the stacks wave is spending the full budget on untried goals")
+
+
+def test_the_sweep_runs_breadth_then_stacks_then_depth(tmp_path,
+                                                       monkeypatch):
+    """The wave structure, with no solver at all.
+
+    What it pins: breadth asks one draw of each piece goal at the TRIAGE
+    budget; the stacks wave then asks for combinations of the pieces that
+    solved, also cheap; only the depth wave spends the full budget. Those
+    three decisions are the sweep, and they had no test because
+    exercising them for real is hours of CPU.
+    """
+    from skills import sweep
+
+    waves = []
+
+    def fake_map(batch, workers):
+        waves.append([{"label": b[6], "targets": tuple(b[5]),
+                       "solve_ms": b[7], "draw": b[8], "hand": b[2]}
+                      for b in batch])
+        for b in batch:
+            label, targets = b[6], tuple(b[5])
+            # Pieces A and C solve; B does not and places nothing. Any
+            # stack of the solvable ones solves, and better.
+            solvable = "B" not in targets
+            n = len([t for t in targets if not t.endswith("@hand")])
+            yield {
+                "hand_index": b[2], "label": label,
+                "attempt": {"label": label, "targets": list(targets),
+                            "draw": b[8], "solver_seed": 1,
+                            "status": "solved" if solvable else "unsolved",
+                            "wall_s": 1.0,
+                            **({"interruptions": 1 + n, "negates": 0}
+                               if solvable else {"best_placed": 0})},
+                "score": {"interruptions": 1 + n, "negates": 0,
+                          "pieces": []} if solvable else None,
+                "record": {"deck": {"name": "t"}, "status": "solved",
+                           "targets": list(targets), "lines": [{"board": {}}],
+                           "solver": {}} if solvable else None,
+                "unsolved_record": None if solvable else {
+                    "deck": {"name": "t"}, "status": "unsolved",
+                    "targets": list(targets), "lines": [], "solver": {}},
+            }
+
+    monkeypatch.setattr(sweep, "_map_solves", fake_map)
+    monkeypatch.setattr(sweep.engine, "require", lambda: None)
+    monkeypatch.setattr(sweep.engine, "preflight", lambda d: None)
+    monkeypatch.setattr(sweep, "_breadth_goals", lambda p, h, n: [
+        (("b@hand", "A"), "piece:A"), (("b@hand", "B"), "piece:B"),
+        (("b@hand", "C"), "piece:C"), (("b@hand",), "base")])
+
+    class FakeDeck:
+        name = "t"
+        main = list(range(40))
+        extra = []
+
+    monkeypatch.setattr("ygorl.cards.ydk.load_ydk", lambda p: FakeDeck())
+    monkeypatch.setattr("ygorl.solver.batch.sample_hand",
+                        lambda deck, seed, *a, **k: (list(range(5)), None))
+    monkeypatch.setattr("ygorl.solver.batch.hand_seed",
+                        lambda s, n, i: 1000 + i)
+
+    out = tmp_path / "sweep.jsonl"
+    sweep.solve_deck(tmp_path / "t.ydk", hands=1, draws=4, out=out,
+                     solve_ms=60_000, workers=1)
+
+    assert len(waves) == 3, f"expected breadth, stacks, depth; got {len(waves)}"
+    breadth, stacks, depth = waves
+    assert all(j["solve_ms"] == sweep.TRIAGE_MS for j in breadth), (
+        "breadth is not using the triage budget")
+    assert all(j["solve_ms"] == sweep.TRIAGE_MS for j in stacks), (
+        "the stacks wave is paying the full budget for untried goals")
+    assert all(j["solve_ms"] == 60_000 for j in depth), (
+        "the depth wave is not using the full budget")
+    # A and C solved separately, so A+C must be asked for -- the pair the
+    # prefix enumeration could never name.
+    assert any(set(j["targets"]) == {"b@hand", "A", "C"} for j in stacks), (
+        [j["targets"] for j in stacks])
+    # B placed nothing, so nothing in the depth wave may name it.
+    assert all("B" not in j["targets"] for j in depth), (
+        [j["targets"] for j in depth])
