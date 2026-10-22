@@ -1820,18 +1820,30 @@ def test_the_sweep_runs_breadth_then_stacks_then_depth(tmp_path,
     sweep.solve_deck(tmp_path / "t.ydk", hands=1, draws=4, out=out,
                      solve_ms=60_000, workers=1)
 
-    assert len(waves) == 3, f"expected breadth, stacks, depth; got {len(waves)}"
-    breadth, stacks, depth = waves
+    assert len(waves) >= 3, (
+        f"expected breadth, stacks and at least one depth round; "
+        f"got {len(waves)}")
+    breadth, stacks, depth_rounds = waves[0], waves[1], waves[2:]
     assert all(j["solve_ms"] == sweep.TRIAGE_MS for j in breadth), (
         "breadth is not using the triage budget")
     assert all(j["solve_ms"] == sweep.TRIAGE_MS for j in stacks), (
         "the stacks wave is paying the full budget for untried goals")
-    assert all(j["solve_ms"] == 60_000 for j in depth), (
-        "the depth wave is not using the full budget")
+    assert all(j["solve_ms"] == 60_000 for w in depth_rounds for j in w), (
+        "a depth round is not using the full budget")
     # A and C solved separately, so A+C must be asked for -- the pair the
     # prefix enumeration could never name.
     assert any(set(j["targets"]) == {"b@hand", "A", "C"} for j in stacks), (
         [j["targets"] for j in stacks])
-    # B placed nothing, so nothing in the depth wave may name it.
-    assert all("B" not in j["targets"] for j in depth), (
-        [j["targets"] for j in depth])
+    # B placed nothing, so no depth round may name it.
+    assert all("B" not in j["targets"] for w in depth_rounds for j in w), (
+        [j["targets"] for w in depth_rounds for j in w])
+    # This stub never improves on a re-draw, so patience=2 must stop the
+    # hand after two flat rounds rather than spending all draws-1.
+    assert len(depth_rounds) == 2, (
+        f"early stopping did not fire: {len(depth_rounds)} depth rounds "
+        f"for a hand that never improved (patience=2, draws=4)")
+    # Every draw index must be distinct per goal, or re-draws repeat the
+    # same reproducible seed and redo identical work.
+    draws_used = [(j["hand"], j["targets"], j["draw"])
+                  for w in depth_rounds for j in w]
+    assert len(draws_used) == len(set(draws_used)), "a draw index repeats"

@@ -286,7 +286,7 @@ def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
 
 def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
                seed=0, first_hand=0, out=None, workers=None, log=None,
-               triage_ms=None):
+               triage_ms=None, patience=2):
     """Sweep one deck's opening hands, keeping the best board per hand.
 
     Appends demonstration JSONL as each hand completes, so a rerun
@@ -376,24 +376,56 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
     else:
         say("  stacks: no hand reached two pieces separately")
 
-    # Wave three: the full budget, where round one and two earned it.
-    third = []
-    for i, acc in per_hand.items():
-        hs, hand = hand_info[i]
-        budget = max(0, (draws - 1) * n_goals)
-        seen = {}
-        for targets, label in allocate(acc["attempts"], draws, n_goals):
-            key = (label, tuple(targets))
-            seen[key] = seen.get(key, 0) + 1
-            third.append((deck_path, name, i, hs, hand, list(targets),
-                          label, solve_ms, seen[key] + 1))
-    if third:
-        kept = len({(w[2], tuple(w[5])) for w in third})
-        say(f"  depth: {len(third)} draws at {solve_ms // 1000}s over "
-            f"{kept} goal(s) worth it (of {n_hands * n_goals} breadth goals)")
-        run(third, "depth")
-    else:
-        say("  depth: nothing solved and nothing came close — no re-draws")
+    # Wave three: the full budget, in ROUNDS, dropping each hand when its
+    # board stops improving.
+    #
+    # A flat `draws` spends the same on a hand that peaked immediately as
+    # on one still climbing. Measured on 10 despia hands at draws=4: the
+    # eventual best board was already found before 59% of the solves ran
+    # (95 of 160), and at one draw 9 of the 10 hands were already there.
+    # Over the same hands the extra draws bought +0.10 mean interruptions
+    # for 4x the solver time -- a bad trade, and one a fixed `draws` can
+    # neither notice nor avoid.
+    #
+    # `patience` is 2 rounds rather than 1 because of the one hand that
+    # DID improve: it reached (4,3) on its twelfth solve, in round three,
+    # and it is the only hand of the ten the extra draws improved at all.
+    # Stopping after a single flat round would have thrown away the entire
+    # measured benefit along with the waste.
+    draw_n = {i: 1 for i in per_hand}
+    flat = {i: 0 for i in per_hand}
+    active = set(per_hand)
+    for rnd in range(1, draws):
+        if not active:
+            say(f"  depth: every hand plateaued after round {rnd - 1}")
+            break
+        batch = []
+        before = {}
+        for i in sorted(active):
+            hs, hand = hand_info[i]
+            acc = per_hand[i]
+            before[i] = acc["best"][0] if acc["best"] else (0, 0)
+            # draws=2 asks `allocate` for exactly one round's worth.
+            for targets, label in allocate(acc["attempts"], 2, n_goals):
+                draw_n[i] += 1
+                batch.append((deck_path, name, i, hs, hand, list(targets),
+                              label, solve_ms, draw_n[i]))
+        if not batch:
+            say("  depth: nothing solved and nothing came close — no re-draws")
+            break
+        say(f"  depth round {rnd}: {len(batch)} draws at "
+            f"{solve_ms // 1000}s over {len(active)} hand(s) still climbing")
+        run(batch, f"depth r{rnd}")
+        for i in sorted(active):
+            now = per_hand[i]["best"][0] if per_hand[i]["best"] else (0, 0)
+            if now > before[i]:
+                flat[i] = 0
+            else:
+                flat[i] += 1
+                if flat[i] >= patience:
+                    active.discard(i)
+        say(f"    improved: {sum(1 for i in before if flat[i] == 0)}, "
+            f"still climbing: {len(active)}")
 
     written = []
     for i in sorted(per_hand):
