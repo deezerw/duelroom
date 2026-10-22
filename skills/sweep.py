@@ -531,7 +531,8 @@ def summarize(records, cards=None):
 
 
 def sweep(decks, hands=8, draws=DRAWS, pieces=4, solve_ms=None, seed=0,
-          out=None, summary=None, workers=None, log=None):
+          out=None, summary=None, workers=None, log=None, triage_ms=None,
+          patience=2):
     """`engine.solve_blocking`, multi-draw. Writes JSONL and the summary."""
     say = log or (lambda m: None)
     decks = [decks] if isinstance(decks, (str, Path)) else list(decks)
@@ -539,9 +540,13 @@ def sweep(decks, hands=8, draws=DRAWS, pieces=4, solve_ms=None, seed=0,
     summary = Path(summary) if summary else \
         engine.ROOT / "results" / "boards_multi_summary.json"
     for d in decks:
+        # Every knob `solve_deck` takes is reachable from here. A
+        # parameter that exists and cannot be set is this project's
+        # signature bug -- `engine.duel`'s arguments were audited for
+        # exactly this, and the fire list was written and then dropped.
         solve_deck(d, hands=hands, draws=draws, pieces=pieces,
                    solve_ms=solve_ms, seed=seed, out=out, workers=workers,
-                   log=say)
+                   log=say, triage_ms=triage_ms, patience=patience)
     records = [json.loads(l) for l in out.read_text().splitlines()
                if l.strip()] if out.exists() else []
     table = summarize(records)

@@ -1847,3 +1847,17 @@ def test_the_sweep_runs_breadth_then_stacks_then_depth(tmp_path,
     draws_used = [(j["hand"], j["targets"], j["draw"])
                   for w in depth_rounds for j in w]
     assert len(draws_used) == len(set(draws_used)), "a draw index repeats"
+
+
+def test_every_solve_deck_knob_is_reachable_from_sweep():
+    """A parameter that exists and cannot be set is this project's
+    signature bug: `engine.duel`'s arguments were audited for exactly
+    this, and the handtrap fire list was written and then dropped. If
+    solve_deck grows a knob, sweep() has to forward it."""
+    import inspect
+    from skills import sweep
+    inner = set(inspect.signature(sweep.solve_deck).parameters)
+    outer = set(inspect.signature(sweep.sweep).parameters)
+    # first_hand is deliberately per-deck, not a sweep-wide option
+    missing = inner - outer - {"deck_path", "first_hand"}
+    assert not missing, f"sweep() cannot set: {sorted(missing)}"
