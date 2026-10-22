@@ -1710,3 +1710,47 @@ def test_one_solved_piece_proposes_no_stack():
     atts = [_att("piece:A", "solved", ["b@hand", "A"], interruptions=2),
             _att("piece:B", "unsolved", ["b@hand", "B"], best_placed=0)]
     assert combinations_to_try(atts) == []
+
+
+def test_breadth_does_not_ask_for_stacks():
+    """A target set is a conjunction, so it is monotone: if the search
+    cannot place one card of {base, A} it cannot place {base, A, B}. The
+    prefix stacks in the breadth round spent budget proving what the piece
+    goals already proved -- and, because `combinations_to_try` skips what
+    was tried, they crowded out the evidence-based stacks it exists to
+    propose. The first despia sweep said so: "0 of them combinations the
+    enumeration could not reach".
+
+    Behavioural, against a real deck and a real hand: no breadth goal may
+    name more than one piece."""
+    from skills import sweep
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import blocking_plan
+
+    deck_path = (Path(__file__).resolve().parent.parent / "assets" / "decks"
+                 / "elfnote.ydk")
+    deck = load_ydk(deck_path)
+    hand = list(deck.main[:5])
+    cards = default_cards()
+    base = set(blocking_plan(deck.main, deck.extra, hand, cards).base)
+    goals = sweep._breadth_goals(deck_path, hand, 4)
+    assert goals, "no breadth goals at all"
+    for targets, label in goals:
+        extra = [t for t in targets if t not in base]
+        assert len(extra) <= 1, (
+            f"{label} names {len(extra)} pieces: breadth is enumerating "
+            f"stacks again ({targets})")
+    assert not any(l.startswith("stack") for _, l in goals)
+
+
+def test_the_stacks_wave_runs_at_the_triage_budget():
+    """New goals are asked cheaply first, same as the pieces were; only
+    what earns it gets the full budget."""
+    import inspect
+    from skills import sweep
+    body = inspect.getsource(sweep.solve_deck)
+    i = body.index("combinations_to_try")
+    window = body[i:i + 400]
+    assert "triage_ms" in window, (
+        "the stacks wave is spending the full budget on untried goals")

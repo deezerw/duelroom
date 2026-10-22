@@ -216,6 +216,39 @@ def combinations_to_try(attempts, max_new=6):
     return out
 
 
+def _breadth_goals(deck_path, hand, pieces):
+    """Breadth asks about the PIECES, not the stacks.
+
+    A target set is a conjunction, so it is monotone: if the search cannot
+    place a single card of {base, A}, it cannot place {base, A, B} either
+    -- the second is strictly harder. Running the prefix stacks in the
+    breadth round therefore spends budget on goals whose impossibility the
+    piece goals already prove, and those stacks are the expensive failures
+    (a failure always burns the whole budget).
+
+    Worse, it defeated `combinations_to_try`: that function skips goals
+    already tried, so the prefix stacks AB, ABC, ABCD crowded out the
+    evidence-based combinations it exists to propose. The first despia
+    sweep reported "0 of them combinations the enumeration could not
+    reach" for exactly this reason.
+
+    So breadth asks only base and base+piece. The stacks come after, built
+    from the pieces that actually solved.
+    """
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import blocking_plan
+
+    cards = default_cards()
+    deck = load_ydk(Path(deck_path))
+    plan = blocking_plan(deck.main, deck.extra, list(hand), cards)
+    goals = [(tuple([*plan.base, p.target]), f"piece:{p.password}")
+             for p in plan.pieces[:pieces]]
+    if plan.base:
+        goals.append((tuple(plan.base), "base"))
+    return goals
+
+
 def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
                draws, done):
     """Every (hand, goal, draw) for one deck, skipping finished hands."""
@@ -230,7 +263,7 @@ def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
             continue
         hand, _ = sample_hand(deck, hs)
         hand_info[i] = (hs, list(hand))
-        for targets, label in gauntlet._goals(deck_path, hand, pieces):
+        for targets, label in _breadth_goals(deck_path, hand, pieces):
             for d in range(draws):
                 out.append((deck_path, name, i, hs, list(hand), list(targets),
                             label, solve_ms, d))
@@ -313,32 +346,39 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
 
     run(work, "breadth")
 
-    second, new_total = [], 0
+    # Wave two: the STACKS, built from the pieces that actually solved,
+    # still at the triage budget. These are new goals, so they are asked
+    # cheaply first for the same reason the pieces were.
+    combine, n_combos = [], 0
+    for i, acc in per_hand.items():
+        hs, hand = hand_info[i]
+        for targets, label in combinations_to_try(acc["attempts"]):
+            n_combos += 1
+            combine.append((deck_path, name, i, hs, hand, list(targets),
+                            label, triage_ms, 0))
+    if combine:
+        say(f"  stacks: {n_combos} combination(s) of pieces that solved, "
+            f"at {triage_ms // 1000}s")
+        run(combine, "stacks")
+    else:
+        say("  stacks: no hand reached two pieces separately")
+
+    # Wave three: the full budget, where round one and two earned it.
+    third = []
     for i, acc in per_hand.items():
         hs, hand = hand_info[i]
         budget = max(0, (draws - 1) * n_goals)
-        # NEW combinations first. A stack of three pieces that each solved
-        # can reach a board no re-draw of a single piece ever will, so it
-        # outranks spending the same budget on another sample of something
-        # already measured.
-        fresh = combinations_to_try(acc["attempts"])[:budget]
-        new_total += len(fresh)
-        spend = fresh + allocate(acc["attempts"], draws, n_goals)[
-            :budget - len(fresh)]
-        # Each repeat of a goal needs its own draw index, or it would
-        # reuse the same reproducible seed and redo identical work.
         seen = {}
-        for targets, label in spend:
+        for targets, label in allocate(acc["attempts"], draws, n_goals):
             key = (label, tuple(targets))
             seen[key] = seen.get(key, 0) + 1
-            second.append((deck_path, name, i, hs, hand, list(targets),
-                           label, solve_ms, seen[key]))
-    if second:
-        kept = len({(w[2], tuple(w[5])) for w in second})
-        say(f"  depth: {len(second)} draws over {kept} goal(s), "
-            f"{new_total} of them combinations the enumeration could not "
-            f"reach (of {n_hands * n_goals} breadth goals)")
-        run(second, "depth")
+            third.append((deck_path, name, i, hs, hand, list(targets),
+                          label, solve_ms, seen[key] + 1))
+    if third:
+        kept = len({(w[2], tuple(w[5])) for w in third})
+        say(f"  depth: {len(third)} draws at {solve_ms // 1000}s over "
+            f"{kept} goal(s) worth it (of {n_hands * n_goals} breadth goals)")
+        run(third, "depth")
     else:
         say("  depth: nothing solved and nothing came close — no re-draws")
 
