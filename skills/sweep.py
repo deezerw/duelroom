@@ -286,7 +286,7 @@ def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
 
 def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
                seed=0, first_hand=0, out=None, workers=None, log=None,
-               triage_ms=None, patience=2):
+               triage_ms=None, patience=None):
     """Sweep one deck's opening hands, keeping the best board per hand.
 
     Appends demonstration JSONL as each hand completes, so a rerun
@@ -311,6 +311,12 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
     # (a smoke run) a fixed 15s would make breadth the expensive round.
     triage_ms = min(TRIAGE_MS, solve_ms) if triage_ms is None \
         else min(triage_ms, solve_ms)
+    # With a single draw there IS no depth round, so nothing gets promoted
+    # to the full budget and triage would simply be a cheap run -- the one
+    # failure mode this project names outright. Breadth takes the whole
+    # budget instead.
+    if draws <= 1:
+        triage_ms = solve_ms
     workers = workers or engine.DEFAULT_WORKERS
     deck_path = Path(deck_path).resolve()
     name = load_ydk(deck_path).name or deck_path.stem
@@ -387,11 +393,25 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
     # for 4x the solver time -- a bad trade, and one a fixed `draws` can
     # neither notice nor avoid.
     #
-    # `patience` is 2 rounds rather than 1 because of the one hand that
-    # DID improve: it reached (4,3) on its twelfth solve, in round three,
-    # and it is the only hand of the ten the extra draws improved at all.
-    # Stopping after a single flat round would have thrown away the entire
-    # measured benefit along with the waste.
+    # `patience=None` means NO early stopping, and that is the default
+    # because the measurement did not support switching it on. Same ten
+    # despia hands, all four arms:
+    #
+    #   single draw @60s          mean 2.50 int   14.6 solver-min
+    #   two-wave,  4 draws        mean 2.60 int   61.9
+    #   three-wave, 4 draws       mean 2.60 int   38.4
+    #   three-wave + patience 2   mean 2.50 int   25.3
+    #
+    # Early stopping cut 38.4 to 25.3 minutes and gave back the entire
+    # quality gain: hand 3 reached (4,3) in both flat arms and fell to
+    # (3,3) with patience=2. It was set to 2 specifically to protect that
+    # hand, justified from where its improvement landed in the TWO-wave
+    # run -- and the three-wave restructure moved it into a different
+    # round, so the reasoning did not survive its own refactor.
+    #
+    # Pass `patience` explicitly to trade board quality for time with your
+    # eyes open. The wave restructure above is the free part (38.4 vs 61.9
+    # minutes at identical 2.60), and it stays on.
     draw_n = {i: 1 for i in per_hand}
     flat = {i: 0 for i in per_hand}
     active = set(per_hand)
@@ -414,7 +434,8 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
             say("  depth: nothing solved and nothing came close — no re-draws")
             break
         say(f"  depth round {rnd}: {len(batch)} draws at "
-            f"{solve_ms // 1000}s over {len(active)} hand(s) still climbing")
+            f"{solve_ms // 1000}s over {len(active)} hand(s)"
+            + (" still climbing" if patience is not None else ""))
         run(batch, f"depth r{rnd}")
         for i in sorted(active):
             now = per_hand[i]["best"][0] if per_hand[i]["best"] else (0, 0)
@@ -422,7 +443,10 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
                 flat[i] = 0
             else:
                 flat[i] += 1
-                if flat[i] >= patience:
+                # patience=None means no early stopping at all; comparing
+                # against it raised TypeError the moment it became the
+                # default, which is what the wave test caught.
+                if patience is not None and flat[i] >= patience:
                     active.discard(i)
         say(f"    improved: {sum(1 for i in before if flat[i] == 0)}, "
             f"still climbing: {len(active)}")
@@ -532,7 +556,7 @@ def summarize(records, cards=None):
 
 def sweep(decks, hands=8, draws=DRAWS, pieces=4, solve_ms=None, seed=0,
           out=None, summary=None, workers=None, log=None, triage_ms=None,
-          patience=2):
+          patience=None):
     """`engine.solve_blocking`, multi-draw. Writes JSONL and the summary."""
     say = log or (lambda m: None)
     decks = [decks] if isinstance(decks, (str, Path)) else list(decks)

@@ -1837,11 +1837,11 @@ def test_the_sweep_runs_breadth_then_stacks_then_depth(tmp_path,
     # B placed nothing, so no depth round may name it.
     assert all("B" not in j["targets"] for w in depth_rounds for j in w), (
         [j["targets"] for w in depth_rounds for j in w])
-    # This stub never improves on a re-draw, so patience=2 must stop the
-    # hand after two flat rounds rather than spending all draws-1.
-    assert len(depth_rounds) == 2, (
-        f"early stopping did not fire: {len(depth_rounds)} depth rounds "
-        f"for a hand that never improved (patience=2, draws=4)")
+    # Early stopping is OFF by default -- it gave back the whole measured
+    # quality gain on despia -- so all draws-1 rounds must run.
+    assert len(depth_rounds) == 3, (
+        f"{len(depth_rounds)} depth rounds at draws=4 with the default "
+        f"patience: early stopping is on by default again")
     # Every draw index must be distinct per goal, or re-draws repeat the
     # same reproducible seed and redo identical work.
     draws_used = [(j["hand"], j["targets"], j["draw"])
@@ -1861,3 +1861,61 @@ def test_every_solve_deck_knob_is_reachable_from_sweep():
     # first_hand is deliberately per-deck, not a sweep-wide option
     missing = inner - outer - {"deck_path", "first_hand"}
     assert not missing, f"sweep() cannot set: {sorted(missing)}"
+
+
+def test_early_stopping_fires_when_asked_for(tmp_path, monkeypatch):
+    """`patience` is opt-in, and when passed it must actually stop a hand
+    that is not improving -- 2 flat rounds, not all draws-1."""
+    from skills import sweep
+
+    rounds = []
+
+    def fake_map(batch, workers):
+        rounds.append(batch)
+        for b in batch:
+            targets = tuple(b[5])
+            yield {"hand_index": b[2], "label": b[6],
+                   "attempt": {"label": b[6], "targets": list(targets),
+                               "draw": b[8], "solver_seed": 1,
+                               "status": "solved", "wall_s": 1.0,
+                               "interruptions": 2, "negates": 0},
+                   "score": {"interruptions": 2, "negates": 0, "pieces": []},
+                   "record": {"deck": {"name": "t"}, "status": "solved",
+                              "targets": list(targets),
+                              "lines": [{"board": {}}], "solver": {}},
+                   "unsolved_record": None}
+
+    monkeypatch.setattr(sweep, "_map_solves", fake_map)
+    monkeypatch.setattr(sweep.engine, "require", lambda: None)
+    monkeypatch.setattr(sweep.engine, "preflight", lambda d: None)
+    monkeypatch.setattr(sweep, "_breadth_goals",
+                        lambda p, h, n: [(("A",), "piece:A")])
+
+    class FakeDeck:
+        name = "t"
+        main = list(range(40))
+        extra = []
+
+    monkeypatch.setattr("ygorl.cards.ydk.load_ydk", lambda p: FakeDeck())
+    monkeypatch.setattr("ygorl.solver.batch.sample_hand",
+                        lambda deck, seed, *a, **k: (list(range(5)), None))
+    monkeypatch.setattr("ygorl.solver.batch.hand_seed", lambda s, n, i: 7)
+
+    sweep.solve_deck(tmp_path / "t.ydk", hands=1, draws=6,
+                     out=tmp_path / "s.jsonl", solve_ms=60_000, workers=1,
+                     patience=2)
+    # breadth, stacks-or-not, then depth rounds. The stub never improves,
+    # so depth must stop after 2 rounds instead of running all 5.
+    depth = [r for r in rounds if all(j[7] == 60_000 for j in r)]
+    assert len(depth) == 2, f"{len(depth)} depth rounds with patience=2"
+
+
+def test_a_single_draw_does_not_silently_become_a_cheap_run():
+    """With draws=1 there is no depth round, so nothing is promoted to the
+    full budget and a 15s triage would just BE the run -- the one failure
+    mode this project names outright."""
+    import inspect
+    from skills import sweep
+    src = inspect.getsource(sweep.solve_deck)
+    assert "if draws <= 1:" in src and "triage_ms = solve_ms" in src, (
+        "draws=1 can run the whole sweep at the triage budget")
