@@ -229,6 +229,14 @@ response windows). Real counts need each line replayed through ygorl.
   budget builds, last format's deck, and rogue piles.
 - **Don't simulate what math solves:** pure "do I open card X" questions are
   hypergeometric — exact and instant. Reserve the engine for questions about lines.
+- **Extra draws are worth measuring per deck, not assuming.** Four arms on the same
+  ten despia hands (identical hand seeds): a single draw at 60 s gives mean 2.50
+  interruptions for 14.6 solver-minutes; four draws give 2.60 for 38.4. One hand of
+  ten improved. The same machinery on one elfnote hand went from the library's 4 to
+  5 int / 4 neg, so the value of draws is **deck-dependent** — ladder it like the
+  budget, do not assume `DRAWS`. The free part is the wave restructure: 61.9 → 38.4
+  solver-minutes at identical 2.60. Early stopping (`patience`) takes it to 25.3 and
+  gives the gain back, so it is opt-in.
 - **Where solver time goes** (all 952 attempts of the stored sweep, 2026-10-22):
   attempts that SOLVED (632) take a median 12.5 s and a mean 16.8 s, and 64% of them
   finish within 15 s; attempts that FAIL (320) burn the WHOLE budget by construction

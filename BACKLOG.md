@@ -25,6 +25,14 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] A DRAWS LADDER, the way `ladder` calibrates the budget. Measured: four draws
+      buy +0.10 mean interruptions on despia (2.50 -> 2.60) for 2.6x the solver time,
+      and one hand in ten improved -- but on an elfnote hand the same machinery went
+      from the library's 4 to 5 int / 4 neg. Two decks, opposite answers, so `DRAWS`
+      cannot have one right value. Report, per deck, the quality/CPU curve over
+      draws 1..4 and store it beside the budget ladder.
+
+
 - [ ] FIX the going-second formulation, or `gauntlet` cannot rank anything. Floor
       measured 2026-10-22: one vanilla Alexandrite Dragon "stopped" 18/18 meta
       going-second hands (searched on 6/6, so not the repair-mode no-op).
