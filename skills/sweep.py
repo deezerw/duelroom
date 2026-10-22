@@ -148,6 +148,49 @@ def allocate(attempts, draws, n_goals):
     return [ranked[i % len(ranked)] for i in range(budget)]
 
 
+def combinations_to_try(attempts, max_new=6):
+    """Stack goals worth asking for, now that we know which pieces solve.
+
+    `gauntlet._goals` can only enumerate PREFIX stacks -- with pieces
+    ranked A, B, C, D it asks for AB, ABC, ABCD and never AC, BD or BCD.
+    The ranking is static (`Piece.rank`: engine pieces, then negations,
+    then Extra Deck) and knows nothing about this hand, so a deck whose
+    reachable pair is A+C is simply never asked whether it can make two
+    interrupters. That is the other half of the problem the climb fixed
+    only partly: not the solver failing to find a good board, but nobody
+    requesting one.
+
+    The breadth round answers the question the enumeration could not --
+    which pieces this hand can reach at all -- so the depth round builds
+    stacks out of exactly those. Bigger combinations first, because more
+    interrupters is the point; combinations already tried are skipped.
+    """
+    from itertools import combinations
+
+    base, solved = None, []
+    tried = set()
+    for a in attempts:
+        tried.add(frozenset(a["targets"]))
+        if a["label"].startswith("piece:") and a["status"] == "solved":
+            # A piece goal is base + the one piece, so the piece is last
+            # and everything before it is the base.
+            solved.append(a["targets"][-1])
+            if base is None:
+                base = list(a["targets"][:-1])
+    if base is None or len(solved) < 2:
+        return []
+    out = []
+    for size in range(len(solved), 1, -1):
+        for combo in combinations(solved, size):
+            targets = [*base, *combo]
+            if frozenset(targets) in tried:
+                continue
+            out.append((tuple(targets), f"stack:{size}"))
+            if len(out) >= max_new:
+                return out
+    return out
+
+
 def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
                draws, done):
     """Every (hand, goal, draw) for one deck, skipping finished hands."""
@@ -232,21 +275,31 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
 
     run(work, "breadth")
 
-    second = []
+    second, new_total = [], 0
     for i, acc in per_hand.items():
         hs, hand = hand_info[i]
-        spend = allocate(acc["attempts"], draws, n_goals)
+        budget = max(0, (draws - 1) * n_goals)
+        # NEW combinations first. A stack of three pieces that each solved
+        # can reach a board no re-draw of a single piece ever will, so it
+        # outranks spending the same budget on another sample of something
+        # already measured.
+        fresh = combinations_to_try(acc["attempts"])[:budget]
+        new_total += len(fresh)
+        spend = fresh + allocate(acc["attempts"], draws, n_goals)[
+            :budget - len(fresh)]
         # Each repeat of a goal needs its own draw index, or it would
         # reuse the same reproducible seed and redo identical work.
         seen = {}
         for targets, label in spend:
-            seen[label] = seen.get(label, 0) + 1
+            key = (label, tuple(targets))
+            seen[key] = seen.get(key, 0) + 1
             second.append((deck_path, name, i, hs, hand, list(targets),
-                           label, solve_ms, seen[label]))
+                           label, solve_ms, seen[key]))
     if second:
-        kept = len({(w[2], w[6]) for w in second})
-        say(f"  depth: {len(second)} draws over {kept} goal(s) worth "
-            f"re-drawing (of {n_hands * n_goals})")
+        kept = len({(w[2], tuple(w[5])) for w in second})
+        say(f"  depth: {len(second)} draws over {kept} goal(s), "
+            f"{new_total} of them combinations the enumeration could not "
+            f"reach (of {n_hands * n_goals} breadth goals)")
         run(second, "depth")
     else:
         say("  depth: nothing solved and nothing came close — no re-draws")

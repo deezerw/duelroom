@@ -1667,3 +1667,46 @@ def test_sweep_summary_matches_the_vendored_shape():
                 "top_pieces", "boards", "hand_left", "spells_traps"):
         assert f'"{key}"' in ours, f"sweep.summarize dropped {key}"
         assert f'"{key}"' in vendored, f"{key} is no longer upstream's"
+
+
+def test_non_prefix_stacks_are_proposed_once_the_pieces_are_known():
+    """`_goals` can only enumerate PREFIX stacks: with pieces A B C D it
+    asks AB, ABC, ABCD and never AC. A deck whose reachable pair is A+C
+    was never asked whether it can make two interrupters."""
+    from skills.sweep import combinations_to_try
+    atts = [_att("piece:A", "solved", ["base@hand", "A"], interruptions=2),
+            _att("piece:B", "unsolved", ["base@hand", "B"], best_placed=0),
+            _att("piece:C", "solved", ["base@hand", "C"], interruptions=2),
+            _att("stack:2", "unsolved", ["base@hand", "A", "B"],
+                 best_placed=1)]
+    combos = combinations_to_try(atts)
+    sets = [frozenset(t) for t, _ in combos]
+    assert frozenset(["base@hand", "A", "C"]) in sets, (
+        "A+C solved separately and was still never requested together")
+    # B never placed a card, so no combination should include it.
+    assert all("B" not in t for t, _ in combos), combos
+
+
+def test_bigger_stacks_are_proposed_before_smaller_ones():
+    """More interrupters is the point, so the three-stack is asked first."""
+    from skills.sweep import combinations_to_try
+    atts = [_att(f"piece:{p}", "solved", ["b@hand", p], interruptions=2)
+            for p in "ABC"]
+    combos = combinations_to_try(atts)
+    assert len(combos[0][0]) == 4, combos[0]      # base + 3 pieces
+    assert combos[0][1] == "stack:3"
+
+
+def test_a_combination_already_tried_is_not_proposed_again():
+    from skills.sweep import combinations_to_try
+    atts = [_att("piece:A", "solved", ["b@hand", "A"], interruptions=2),
+            _att("piece:C", "solved", ["b@hand", "C"], interruptions=2),
+            _att("stack:2", "solved", ["b@hand", "A", "C"], interruptions=4)]
+    assert combinations_to_try(atts) == []
+
+
+def test_one_solved_piece_proposes_no_stack():
+    from skills.sweep import combinations_to_try
+    atts = [_att("piece:A", "solved", ["b@hand", "A"], interruptions=2),
+            _att("piece:B", "unsolved", ["b@hand", "B"], best_placed=0)]
+    assert combinations_to_try(atts) == []
