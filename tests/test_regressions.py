@@ -1558,10 +1558,112 @@ def test_a_board_that_only_matches_the_floor_is_not_a_result(monkeypatch):
     assert rep["beats_floor"] is True
 
 
-def test_the_floor_board_interrupts_nothing():
-    """A floor built from a card with an effect is not a floor."""
-    from skills.gauntlet import INERT
+def test_the_floor_board_interrupts_nothing_and_can_be_summoned():
+    """Two halves, and the first version only had one.
+
+    It used Blue-Eyes White Dragon -- no effect, so it passed the
+    interruption half -- and level 8, so a hand of five of them cannot
+    normal summon one without two tributes. All three decks came back
+    "inert board not built" and the floor measured nothing, in exactly
+    the shape of a real result."""
     from skills import db
+    from skills.gauntlet import INERT
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import card_interruptions
+
     assert card_interruptions(INERT, default_cards()) == ()
+    row = db.connect().execute(
+        "SELECT name, type, level FROM cards WHERE id = ?", (INERT,)).fetchone()
+    assert row is not None, "the floor card is not in the card mirror"
+    assert "Normal Monster" in row["type"], row["type"]
+    assert row["level"] and row["level"] <= 4, (
+        f"{row['name']} is level {row['level']}: it cannot be normal summoned "
+        f"from a hand holding nothing else, so the floor never builds")
+
+
+# --- sweep: where the extra draws go -------------------------------------
+
+def _att(label, status, targets, interruptions=None, best_placed=None):
+    a = {"label": label, "status": status, "targets": targets}
+    if interruptions is not None:
+        a["interruptions"], a["negates"] = interruptions, 0
+    if best_placed is not None:
+        a["best_placed"] = best_placed
+    return a
+
+
+def test_a_goal_that_placed_nothing_earns_no_redraws():
+    """41% of the stored sweep's failed attempts (132 of 320) never placed
+    a single target card, each burning a full budget -- 2.2 of 8.2 hours.
+    A seed does not rescue a goal the search cannot get one card towards."""
+    from skills.sweep import allocate
+    atts = [_att("piece:1", "unsolved", ["1"], best_placed=0),
+            _att("piece:2", "unsolved", ["2"], best_placed=0)]
+    assert allocate(atts, draws=4, n_goals=2) == []
+
+
+def test_solved_goals_are_redrawn_before_near_misses():
+    """Re-drawing a SOLVED goal is what finds the better board; a near
+    miss is only a maybe."""
+    from skills.sweep import allocate
+    atts = [_att("piece:1", "unsolved", ["a", "1"], best_placed=1),
+            _att("piece:2", "solved", ["a", "2"], interruptions=3)]
+    spend = allocate(atts, draws=3, n_goals=2)
+    assert len(spend) == 4, "the budget changed"
+    assert spend[0][1] == "piece:2", "the solved goal was not redrawn first"
+    assert {s[1] for s in spend} == {"piece:1", "piece:2"}
+
+
+def test_the_better_board_is_redrawn_first():
+    from skills.sweep import allocate
+    atts = [_att("piece:1", "solved", ["1"], interruptions=2),
+            _att("stack:2", "solved", ["1", "2"], interruptions=5)]
+    spend = allocate(atts, draws=2, n_goals=2)
+    assert [s[1] for s in spend] == ["stack:2", "piece:1"]
+
+
+def test_redraws_spread_round_robin_not_all_into_one():
+    from skills.sweep import allocate
+    atts = [_att("a", "solved", ["1"], interruptions=3),
+            _att("b", "solved", ["2"], interruptions=3),
+            _att("c", "unsolved", ["3"], best_placed=0)]
+    spend = allocate(atts, draws=3, n_goals=3)
+    labels = [s[1] for s in spend]
+    assert labels.count("a") == 3 and labels.count("b") == 3, labels
+    assert "c" not in labels
+
+
+def test_the_budget_is_unchanged_by_the_allocation():
+    """Breadth round is n_goals solves; depth must be (draws-1)*n_goals,
+    or the two-round sweep is not comparable with a flat one."""
+    from skills.sweep import allocate
+    atts = [_att(f"g{i}", "solved", [str(i)], interruptions=2)
+            for i in range(5)]
+    for draws in (1, 2, 4, 7):
+        spend = allocate(atts, draws=draws, n_goals=5)
+        assert len(spend) == max(0, (draws - 1) * 5), draws
+
+
+def test_each_redraw_of_a_goal_gets_its_own_seed():
+    """Two draws of one goal at the same seed redo identical work. The
+    seed must be reproducible across RUNS but distinct across DRAWS."""
+    from skills.sweep import _draw_seed
+    a = _draw_seed(99, ["1@hand", "2"], 0)
+    assert a == _draw_seed(99, ["1@hand", "2"], 0), "not reproducible"
+    assert a != _draw_seed(99, ["1@hand", "2"], 1), "draws collide"
+    assert a != _draw_seed(99, ["1@hand", "3"], 0), "goals collide"
+    assert a != _draw_seed(98, ["1@hand", "2"], 0), "hands collide"
+
+
+def test_sweep_summary_matches_the_vendored_shape():
+    """`gate.load_boards` reads this shape. sweep.summarize is a copy of
+    the vendored one, so the keys must not drift apart silently."""
+    import inspect
+    from skills import sweep
+    vendored = (Path(__file__).resolve().parent.parent / "vendor" / "ygorl"
+                / "tools" / "solve_blocking.py").read_text()
+    ours = inspect.getsource(sweep.summarize)
+    for key in ("solve_rate", "wall_per_hand_s", "mean_interruptions",
+                "top_pieces", "boards", "hand_left", "spells_traps"):
+        assert f'"{key}"' in ours, f"sweep.summarize dropped {key}"
+        assert f'"{key}"' in vendored, f"{key} is no longer upstream's"

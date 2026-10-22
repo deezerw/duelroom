@@ -248,9 +248,15 @@ def our_board_start(our_deck, their_deck, our_hand, our_targets, seed,
     return start
 
 
-# A card with no effect text at all, so a board holding one interrupts
-# nothing. This is ygorl's own PASSIVE_OPPONENT card for the same reason.
-INERT = 89631139  # Blue-Eyes White Dragon
+# A card with no effect at all, so a board holding one interrupts nothing
+# -- AND summonable from a hand of nothing else, which is the half the
+# first version got wrong. It used Blue-Eyes White Dragon, ygorl's own
+# PASSIVE_OPPONENT card, which is level 8: a hand of five of them cannot
+# normal summon one without two tributes, so the floor board never built
+# and all three decks reported "inert board not built". A floor that
+# cannot be built measures nothing, and it fails in exactly the shape of
+# a real result.
+INERT = 43096270  # Alexandrite Dragon -- Normal Monster, level 4, no script
 
 
 def inert_start(their_deck, seed, scratch, solve_ms=None):
