@@ -36,6 +36,7 @@ project's worst bugs got in.
 """
 
 import json
+import sys
 import tempfile
 import time
 import zlib
@@ -45,6 +46,30 @@ from pathlib import Path
 from . import engine, gauntlet
 
 DRAWS = gauntlet.DRAWS
+
+# Budget for the BREADTH round, where the job is to find out which goals
+# are reachable at all rather than to squeeze the best board out of one.
+#
+# Measured over every attempt in the stored sweep (952 of them):
+#
+#   attempts that SOLVED (632): median 12.5s, mean 16.8s, max 57.5s
+#   attempts that FAILED (320): median 60.2s -- a failure ALWAYS burns the
+#                               whole budget, by construction
+#   64% of all solves finish within 15s; 75% within 20s
+#
+# and 64% of the sweep's 8.2 solver-hours went to failures. So the full
+# budget buys almost nothing on the breadth pass: the goals it finds are
+# mostly found in the first quarter of it, and the rest is spent proving
+# a negative that the depth round re-examines anyway. Goals that solve in
+# triage are kept outright -- their line is verified the same way, so
+# nothing is lost -- and goals that merely made progress are promoted to
+# the full budget by `allocate`.
+#
+# NOT a licence to run the whole sweep cheap. The depth round keeps the
+# full budget precisely because the borderline goals need it: a despia
+# pair measured hits at 17.7s, 32.8s and 45.4s across seeds, every one of
+# which a 15s budget would have called a brick.
+TRIAGE_MS = 15_000
 
 
 def _draw_seed(hand_seed, targets, draw):
@@ -213,7 +238,8 @@ def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
 
 
 def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
-               seed=0, first_hand=0, out=None, workers=None, log=None):
+               seed=0, first_hand=0, out=None, workers=None, log=None,
+               triage_ms=None):
     """Sweep one deck's opening hands, keeping the best board per hand.
 
     Appends demonstration JSONL as each hand completes, so a rerun
@@ -222,10 +248,22 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
     from ygorl.cards.ydk import load_ydk
     from ygorl.solver.batch import done_keys
 
-    say = log or (lambda m: None)
+    # A sweep is tens of minutes of solver, and its progress is the only
+    # sign it is alive. Python block-buffers stdout when it is redirected
+    # to a file, so a `log=print` caller saw an EMPTY log for the whole
+    # run -- which looks exactly like a hung job, and cost a debugging
+    # detour that way.
+    def say(m):
+        if log:
+            log(m)
+            sys.stdout.flush()
     engine.require()
     engine.preflight([deck_path])
     solve_ms = engine.SOLVE_MS if solve_ms is None else solve_ms
+    # Never triage ABOVE the real budget: with solve_ms below TRIAGE_MS
+    # (a smoke run) a fixed 15s would make breadth the expensive round.
+    triage_ms = min(TRIAGE_MS, solve_ms) if triage_ms is None \
+        else min(triage_ms, solve_ms)
     workers = workers or engine.DEFAULT_WORKERS
     deck_path = Path(deck_path).resolve()
     name = load_ydk(deck_path).name or deck_path.stem
@@ -239,15 +277,15 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
     # two is DEPTH, spending the rest only where round one showed it is
     # worth spending (see `allocate`). Same budget, better placed.
     work, hand_info = _hand_jobs(deck_path, name, hands, first_hand, seed,
-                                 pieces, solve_ms, 1, done)
+                                 pieces, triage_ms, 1, done)
     if not work:
         say(f"{name}: every hand already in {out.name}")
         return []
     n_hands = len({w[2] for w in work})
     n_goals = len(work) // max(1, n_hands)
-    say(f"{name}: {n_hands} hand(s), {n_goals} goals each, {draws} draws, "
-        f"{n_hands * n_goals * draws} solves of {solve_ms // 1000}s "
-        f"across {workers} worker(s)")
+    say(f"{name}: {n_hands} hand(s), {n_goals} goals each, {draws} draws "
+        f"across {workers} worker(s) — breadth at {triage_ms // 1000}s, "
+        f"depth at {solve_ms // 1000}s")
 
     per_hand, start = {}, time.monotonic()
 
