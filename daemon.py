@@ -14,7 +14,8 @@ from pathlib import Path
 
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
                     gate, gauntlet, handlab, images, importer,
-                    meta_scrape as ms, optimizer, report, scenarios, stats)
+                    meta_scrape as ms, optimizer, report, scenarios,
+                    stats, sweep)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -41,7 +42,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   doctor                    run every self-check: engine, data, guards
   setup                     build the merged engine card database
   engine                    engine setup status and pinned versions
-  solve <deck> [hands]      turn-1 line search: solve rate + board quality
+  solve <deck> [hands] [n]  turn-1 line search; n draws per goal (1 = old path)
   ladder <deck> [hands]     calibrate the solver budget (run this first)
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   boards [load]             meta end-board library (what you must break)
@@ -520,17 +521,39 @@ def cmd_solve(conn, args):
         print(f"no such deck: {args[0]}")
         return
     hands = int(args[1]) if len(args) > 1 else 8
+    draws = int(args[2]) if len(args) > 2 else sweep.DRAWS
+    # draws=1 is the old single-draw sweep, kept so the two can be compared
+    # on the same hands. It is NOT the default: one draw of a randomized
+    # search reports a floor as if it were a best (see skills/sweep.py).
+    if draws <= 1:
+        print(f"solving {hands} opening hands for {path.stem} — ONE draw per "
+              f"goal (the old path; a floor, not a best)")
+        summary = engine.solve_blocking(path, hands=hands)
+        for row in engine.summarise(summary):
+            print(f"\n  {row['deck']}")
+            print(f"    solve rate        {row['solved']}/{row['hands']} "
+                  f"({row['solve_rate']*100:.0f}%)")
+            print(f"    mean interrupts   {row['mean_interruptions']:.2f}")
+            print(f"    per hand          {row['s_per_hand']:.1f}s")
+            print(f"    distribution      {row['interruptions']}")
+        return
     print(f"solving {hands} opening hands for {path.stem} "
-          f"({engine.DEFAULT_WORKERS} workers, {engine.SOLVE_MS/1000:.0f}s/hand budget)")
-    print("this is CPU-bound and not fast — see STAGE3.md on budgets\n")
-    summary = engine.solve_blocking(path, hands=hands)
-    for row in engine.summarise(summary):
-        print(f"\n  {row['deck']}")
+          f"({engine.DEFAULT_WORKERS} workers, "
+          f"{engine.SOLVE_MS/1000:.0f}s per draw, {draws} draws per goal)")
+    print("this is CPU-bound and not fast — see skills/sweep.py on budgets\n")
+    out = ROOT / "results" / f"sweep_{path.stem}.jsonl"
+    table = sweep.sweep(path, hands=hands, draws=draws, out=out,
+                        summary=ROOT / "results" / f"sweep_{path.stem}.json",
+                        log=print)
+    for name, row in sorted((table.get("decks") or {}).items()):
+        print(f"\n  {name}")
         print(f"    solve rate        {row['solved']}/{row['hands']} "
               f"({row['solve_rate']*100:.0f}%)")
         print(f"    mean interrupts   {row['mean_interruptions']:.2f}")
-        print(f"    per hand          {row['s_per_hand']:.1f}s")
+        print(f"    per hand          {row['wall_per_hand_s']:.1f}s of solver")
         print(f"    distribution      {row['interruptions']}")
+        print(f"    top pieces        "
+              + ", ".join(f"{n} x{c}" for n, c in row["top_pieces"][:4]))
 
 
 def cmd_ladder(conn, args):
