@@ -336,7 +336,8 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
 
     def run(batch, phase):
         done_n = 0
-        with ProcessPoolExecutor(max_workers=workers) as ex:
+        with ProcessPoolExecutor(max_workers=workers,
+                                 initializer=engine.be_nice) as ex:
             for res in ex.map(_solve_one, batch):
                 collect(res)
                 done_n += 1

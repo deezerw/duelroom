@@ -106,7 +106,8 @@ def candidate_boards(deck_path, hand, keep=3, draws=DRAWS, pieces=4,
     work = [(deck_path, hand, g, label, solve_ms, 7000 + i, threads)
             for g, label in goals for i in range(draws)]
     found = {}
-    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS) as ex:
+    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS,
+                             initializer=engine.be_nice) as ex:
         for res in ex.map(_one_draw, work):
             if res is None:
                 continue
@@ -363,7 +364,8 @@ def floor(their_decks, hands=4, draws=DEFENCE_DRAWS, solve_ms=None,
     say(f"  floor: {len(work)} going-second searches against a board that "
         f"does nothing")
     results = {}
-    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS) as ex:
+    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS,
+                             initializer=engine.be_nice) as ex:
         for (args, res) in zip(work, ex.map(_attack, [w[:6] for w in work])):
             acc = results.setdefault((args[6], args[7]),
                                      {"through": 0, "searched": 0})
@@ -463,7 +465,8 @@ def defend(our_deck, our_hand, candidate, their_decks, hands=4,
     say(f"  {len(work)} going-second searches "
         f"({hands} hands x {draws} draws x {len(their_decks)} deck(s))")
     results = {}
-    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS) as ex:
+    with ProcessPoolExecutor(max_workers=engine.DEFAULT_WORKERS,
+                             initializer=engine.be_nice) as ex:
         for (args, res) in zip(work, ex.map(_attack, [w[:6] for w in work])):
             name, h = args[6], args[7]
             acc = results.setdefault((name, h), {"searched": 0, "through": 0,

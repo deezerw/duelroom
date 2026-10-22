@@ -65,6 +65,25 @@ SOLVE_MS = 60_000
 DEFAULT_WORKERS = max(1, (os.cpu_count() or 4) - 2)
 
 
+def be_nice():
+    """Pool initializer: drop the worker's priority, children included.
+
+    `engine.solve_blocking` runs its sweep under `nice -n 19` and its
+    docstring tells callers to do the same -- this box also serves
+    Jellyfin, Minecraft, Pi-hole and three web apps, and a sweep saturates
+    six cores for hours. Solvers spawned from the pool inherit the
+    worker's niceness, so setting it once per worker covers every solve.
+
+    Costs the sweep nothing when the machine is otherwise idle, which is
+    the normal case; it only yields when something interactive wants a
+    core.
+    """
+    try:
+        os.nice(19)
+    except (OSError, PermissionError):
+        pass
+
+
 class EngineNotReady(RuntimeError):
     pass
 
