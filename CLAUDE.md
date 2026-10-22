@@ -326,11 +326,16 @@ Honest gaps, so nobody mistakes a limit for a result:
   all three meta decks got through 0 of 6 hands each (18/18 stopped, and they
   *searched* on 6/6, so this is not the repair-mode no-op). A single vanilla monster
   cannot stop a meta deck, so the metric is not measuring board strength. The four
-  real boards that each stopped 18/18 measured nothing. Likely cause, from the
-  solver's own source: `main.cpp` calls `capture_target()` at `r.turns == 2`,
-  hardcoded — the end of player 0's turn. With `--player 1` that instant is the START
-  of the going-second player's turn, so the goal is their empty field plus the boss
-  card we asked for, which nothing can satisfy. `rank` reports `beats_floor` and
+  real boards that each stopped 18/18 measured nothing. **The cause is still open.**
+  A first guess — that `main.cpp` captures the target board at a hardcoded
+  `r.turns == 2`, so `--player 1` would be handed its own empty start-of-turn field
+  — is WRONG and was retracted on reading further: any `--target` sets
+  `target_scratch`, which builds the goal board from scratch and discards the
+  captured reference entirely (`main.cpp` ~7123, ~3229). The goal really is just
+  "their boss in a monster zone", which is reachable. Still unexplained, and the
+  going-second path now keeps each solver report (`_attack` writes a `solver.log`
+  and returns its `target board POSTED/EDITED` line) because discarding it is why
+  72 failed searches could not be diagnosed. `rank` reports `beats_floor` and
   refuses to print an ordering when nothing beats the floor; believe that refusal.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same

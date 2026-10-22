@@ -402,8 +402,25 @@ def _attack(args):
                         "--outdir", str(out)]
     r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
     wrote = list(out.glob("*.yrp"))
+    # KEEP the solver's report. Throwing it away is why "0 of 72 hands got
+    # through" could not be explained: the report prints the goal it is
+    # actually chasing ("--- target board POSTED/EDITED ---") and the
+    # starting position, which is the only direct evidence of what this
+    # mode is doing. `ygorl.solver.batch` writes a solver.log for the same
+    # reason; this path did not, and every investigation of it was blind.
+    log = scratch / "solver.log"
+    try:
+        log.write_text((r.stdout or "") + "\n--- stderr ---\n"
+                       + (r.stderr or ""), encoding="utf-8")
+    except OSError:
+        log = None
     return {"searched": breaking.searched(r.stdout or ""),
-            "through": bool(wrote), "returncode": r.returncode}
+            "through": bool(wrote), "returncode": r.returncode,
+            "log": str(log) if log else None,
+            # The one line that says what the goal was, so a caller does
+            # not have to open the file to find out.
+            "target_mode": next((ln.strip() for ln in (r.stdout or "").splitlines()
+                                 if "target board" in ln), None)}
 
 
 def defend(our_deck, our_hand, candidate, their_decks, hands=4,

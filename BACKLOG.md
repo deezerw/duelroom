@@ -27,13 +27,17 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 - [ ] FIX the going-second formulation, or `gauntlet` cannot rank anything. Floor
       measured 2026-10-22: one vanilla Alexandrite Dragon "stopped" 18/18 meta
-      going-second hands (searched on 6/6, so not the repair-mode no-op). Read
-      `main.cpp` around `capture_target()`: it fires at `r.turns == 2`, hardcoded to
-      the end of player 0's turn, so with `--player 1` the goal board is snapshotted
-      at the START of the opponent's turn -- their empty field plus the boss we asked
-      for, which is contradictory. Either the capture instant needs to follow
-      `--player` (a C++ change in the vendored solver) or the question needs a
-      different formulation. Everything `gauntlet` reports is on hold until this.
+      going-second hands (searched on 6/6, so not the repair-mode no-op).
+      RETRACTED first theory: `capture_target()` at a hardcoded `r.turns == 2` is
+      NOT the cause -- any `--target` sets `target_scratch`, which builds the goal
+      from scratch and throws the captured reference away (main.cpp ~7123, ~3229),
+      so the goal is simply "their boss in a monster zone" and is reachable.
+      Cause unknown. Next step is now possible: `_attack` keeps each solver.log and
+      returns its `target board POSTED/EDITED` line, so run ONE going-second search
+      and read what the solver says about its goal, its starting position and why it
+      wrote nothing. Candidates left: `--turns 2` not giving player 1 a full turn,
+      and the start replay's player-1 deck not lining up with `--deck`.
+      Everything `gauntlet` reports is on hold until this.
 
 - [ ] `--max-rollouts` instead of a wall-clock budget. A 60 s budget does less work
       when the box is busy, so two sweeps are not comparable unless the machine was
