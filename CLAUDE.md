@@ -148,6 +148,7 @@ daemon.py (CLI loop + report formatting)
   ├─→ skills/solver.py       Action-tree search over own legal moves
   ├─→ skills/scoring.py      End-board evaluation
   ├─→ skills/scenarios.py    Handtrap injection, board breaking, floodgates
+  ├─→ skills/sweep.py        The board library: multi-draw ladder, triaged budget
   ├─→ skills/gauntlet.py     Candidate end boards, ranked by what they stop
   ├─→ skills/optimizer.py    Flex-slot hill climb with paired seeds
   └─→ skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
@@ -228,6 +229,23 @@ response windows). Real counts need each line replayed through ygorl.
   budget builds, last format's deck, and rogue piles.
 - **Don't simulate what math solves:** pure "do I open card X" questions are
   hypergeometric — exact and instant. Reserve the engine for questions about lines.
+- **Where solver time goes** (all 952 attempts of the stored sweep, 2026-10-22):
+  attempts that SOLVED (632) take a median 12.5 s and a mean 16.8 s, and 64% of them
+  finish within 15 s; attempts that FAIL (320) burn the WHOLE budget by construction
+  (median 60.2 s). 64% of the sweep's 8.2 solver-hours went to failures. Two things
+  follow. The breadth pass does not need the full budget — `sweep.TRIAGE_MS` is 15 s,
+  and goals that solve there are kept outright. And the full budget still belongs on
+  the depth pass, because the borderline goals are exactly the slow ones: one despia
+  pair hit at 17.7 s, 32.8 s and 45.4 s across seeds, each of which 15 s calls a brick.
+- **Measured and NOT worth doing:** keeping 4 verified lines per solve instead of 1
+  costs 0.1 s (4.1 s vs 4.2 s, same seed, same search), and re-ranking over 32 written
+  lines instead of 4 did not improve the board in 4 of 4 cases. The line ceiling is not
+  a speed lever and not a quality lever. `default_cards()` is cached per worker (0.16 s
+  once) and `Workdir.create` is 2 ms, so per-solve setup is not a lever either.
+- **A target set is a CONJUNCTION, so it is monotone.** If the search cannot place one
+  card of {base, A} it cannot place {base, A, B}. The sweep therefore asks about pieces
+  first and builds stacks only from the pieces that solved — which is also the only way
+  the non-prefix stacks (A+C, B+D) ever get requested at all.
 - **The solver is a RANDOMIZED search, and one attempt is one draw.** Measured
   2026-10-20, same hand, same target set, same 60 s budget, only the solver seed
   differing: an elfnote hand returned end boards of 3, 3, 3, 3, 5 and 6 interruptions
@@ -303,6 +321,17 @@ Honest gaps, so nobody mistakes a limit for a result:
   yours. Every weighted ranking inherits whatever is in that file.
 - **The side plan and floodgate check are implemented but not run at scale.** Each side
   candidate is `hands` full going-second runs, roughly ten minutes apiece.
+- **`gauntlet`'s ranking does not work yet, and the floor proves it.** Measured
+  2026-10-22: going second against a board holding ONE vanilla Alexandrite Dragon,
+  all three meta decks got through 0 of 6 hands each (18/18 stopped, and they
+  *searched* on 6/6, so this is not the repair-mode no-op). A single vanilla monster
+  cannot stop a meta deck, so the metric is not measuring board strength. The four
+  real boards that each stopped 18/18 measured nothing. Likely cause, from the
+  solver's own source: `main.cpp` calls `capture_target()` at `r.turns == 2`,
+  hardcoded — the end of player 0's turn. With `--player 1` that instant is the START
+  of the going-second player's turn, so the goal is their empty field plus the boss
+  card we asked for, which nothing can satisfy. `rank` reports `beats_floor` and
+  refuses to print an ordering when nothing beats the floor; believe that refusal.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
   limitation the handtrap matrix has, generalised from a card to a board. It is not a

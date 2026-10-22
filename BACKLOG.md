@@ -25,6 +25,23 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
+- [ ] FIX the going-second formulation, or `gauntlet` cannot rank anything. Floor
+      measured 2026-10-22: one vanilla Alexandrite Dragon "stopped" 18/18 meta
+      going-second hands (searched on 6/6, so not the repair-mode no-op). Read
+      `main.cpp` around `capture_target()`: it fires at `r.turns == 2`, hardcoded to
+      the end of player 0's turn, so with `--player 1` the goal board is snapshotted
+      at the START of the opponent's turn -- their empty field plus the boss we asked
+      for, which is contradictory. Either the capture instant needs to follow
+      `--player` (a C++ change in the vendored solver) or the question needs a
+      different formulation. Everything `gauntlet` reports is on hold until this.
+
+- [ ] `--max-rollouts` instead of a wall-clock budget. A 60 s budget does less work
+      when the box is busy, so two sweeps are not comparable unless the machine was
+      equally loaded -- and the sweep is now `nice 19`, which makes that worse, not
+      better. A rollout count is load-independent AND reproducible. Needs a ladder
+      run to calibrate the count per deck; do it when the CPU is free.
+
+
 - [ ] RE-RUN the 40-hand board library with the multi-draw ladder. Everything in
       `results/boards*.jsonl` was built one draw per goal and capped at a pair, so
       every stored board is a floor, not a best. Measured on one elfnote hand: the
