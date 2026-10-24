@@ -246,9 +246,11 @@ PID.
   the detector was written it found **six more**, aged 4h20m, children of the one
   `funnel_eval` parent killed earlier in the session. So this recurs every time a
   long job is stopped, not just once.
-- **Still open:** the pools themselves should terminate their children on exit (a
-  signal handler in the sweep, or a hard timeout), so the leak stops happening rather
-  than being reported after the fact.
+- **NOW FIXED at the source:** `sweep._children_die_with_us` installs SIGTERM and
+  SIGINT handlers around every pool wave, terminates the workers, then chains to
+  whatever handler was already there so a `kill` still kills. SIGKILL cannot be
+  caught by anything in Python, so `kill -9` will still orphan workers — which is
+  why the `doctor` check stays as the backstop rather than being replaced.
 
 ### 17. `pkill -f` on a job pattern kills the caller — again
 
@@ -273,6 +275,12 @@ The test written for that very commit passed the whole time, because it only gre
 the source for `"rmtree(scratch"`. **A structural assertion cannot catch a missing
 import**, and `_solve_one` is stubbed out of every other test, so nothing in the suite
 ever called it.
+
+**It recurred.** The same mistake — an edit anchored on text that had already
+changed — silently dropped `import contextlib` an hour later and broke importing
+`sweep` at all. Now covered by a test that asserts every name the module uses
+resolves (`test_every_name_the_sweep_uses_resolves`), and the habit changed: insert
+by line number read from the file, never by a guessed text anchor.
 
 - **Lesson for the remaining structural tests in this file** (there are several —
   `test_the_spare_reaches_the_child_process`, `test_breadth_does_not_ask_for_stacks`,

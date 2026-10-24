@@ -35,8 +35,11 @@ which is the point -- two implementations of a number is how this
 project's worst bugs got in.
 """
 
+import contextlib
 import json
+import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -145,7 +148,59 @@ def _map_solves(batch, workers):
     """
     with ProcessPoolExecutor(max_workers=workers,
                              initializer=engine.be_nice) as ex:
-        yield from ex.map(_solve_one, batch)
+        with _children_die_with_us(ex):
+            yield from ex.map(_solve_one, batch)
+
+
+@contextlib.contextmanager
+def _children_die_with_us(ex):
+    """Terminate the pool's workers if this process is asked to stop.
+
+    A pool's spawn children are reparented to PID 1 when their parent
+    dies and then never exit, because they sit blocked on a queue nobody
+    will write to again. Measured twice on 2026-10-24: six aged six days,
+    and six more aged four hours that appeared the moment one funnel
+    parent was killed. `doctor` reports them now; this stops making them.
+
+    SIGTERM and SIGINT are what a `kill` or a Ctrl-C actually sends, and
+    both are catchable. SIGKILL is not, and nothing in Python can cover
+    it -- a `kill -9` will still orphan the workers, which is why the
+    `doctor` check stays.
+
+    Handlers are restored on the way out, and anything already installed
+    is chained rather than dropped: a caller that set its own SIGTERM
+    handler must still see it.
+    """
+    previous = {}
+
+    def stop(signum, frame):
+        for proc in list(getattr(ex, "_processes", {}).values() or []):
+            try:
+                proc.terminate()
+            except (OSError, AttributeError):
+                pass
+        old = previous.get(signum)
+        if callable(old):
+            old(signum, frame)
+        elif old == signal.SIG_DFL:
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                previous[sig] = signal.signal(sig, stop)
+            except (ValueError, OSError):
+                # Not the main thread, or the platform refuses: the
+                # doctor check is the fallback.
+                pass
+        yield
+    finally:
+        for sig, old in previous.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                pass
 
 
 def allocate(attempts, draws, n_goals):

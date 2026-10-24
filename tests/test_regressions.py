@@ -2574,3 +2574,57 @@ def test_orphan_check_survives_a_broken_ps(monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no ps")))
     assert daemon._orphaned_workers() == []
+
+
+def test_every_name_the_sweep_uses_resolves():
+    """Two bugs this session were a guessed import anchor that silently
+    did not match: `shutil` (broke every sweep) and then `contextlib`
+    (broke importing the module at all). Both were edits anchored on text
+    that had already changed. Assert the module's own names instead."""
+    from skills import sweep
+    for name in ("contextlib", "json", "os", "shutil", "signal", "sys",
+                 "tempfile", "time", "zlib"):
+        assert hasattr(sweep, name), f"sweep.py does not import {name}"
+
+
+def test_pool_children_are_terminated_on_a_catchable_signal():
+    """A pool's spawn children are reparented to PID 1 when the parent
+    dies and never exit. SIGTERM and SIGINT are what `kill` and Ctrl-C
+    send and both are catchable; SIGKILL is not, which is why the doctor
+    check stays."""
+    import signal as _signal
+    from skills import sweep
+
+    class FakeProc:
+        def __init__(self):
+            self.terminated = False
+
+        def terminate(self):
+            self.terminated = True
+
+    class FakeEx:
+        def __init__(self):
+            self._processes = {1: FakeProc(), 2: FakeProc()}
+
+    ex = FakeEx()
+    # Install a harmless predecessor first. The handler deliberately
+    # CHAINS to whatever was there, so against pytest's default SIG_DFL it
+    # re-raises and kills the test runner -- which is the correct
+    # production behaviour (a kill must still kill) and killed this suite
+    # with exit 143 on the first attempt.
+    chained = []
+    before = _signal.signal(_signal.SIGTERM,
+                            lambda *a: chained.append(True))
+    try:
+        with sweep._children_die_with_us(ex):
+            handler = _signal.getsignal(_signal.SIGTERM)
+            assert handler is not before, "no SIGTERM handler was installed"
+            handler(_signal.SIGTERM, None)  # simulate the kill
+        assert all(p.terminated for p in ex._processes.values()), (
+            "the workers were not terminated")
+        assert chained == [True], (
+            "the previous handler was dropped instead of chained")
+        assert _signal.getsignal(_signal.SIGTERM) is not handler, (
+            "the installed handler was not removed on exit")
+    finally:
+        _signal.signal(_signal.SIGTERM, before)
