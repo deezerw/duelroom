@@ -323,11 +323,18 @@ by line number read from the file, never by a guessed text anchor.
 - It also surfaced three dead names left by my own refactors, now removed:
   `distinct_solve` / `distinct_brick` in `cmd_optimize` (orphaned by the
   degeneracy-refusal rewrite) and an unused `shutil` import in `optimizer.py`.
-- **Still true of the remaining structural tests in this file** (several:
-  `test_the_spare_reaches_the_child_process`, `test_breadth_does_not_ask_for_stacks`,
-  the ledger tests): each proves the source *says* something, not that it *works*.
-  The name check now covers the specific failure that bit twice; the general weakness
-  stands.
+- **Partly addressed.** 48 assertions in the suite read source text. Converting them
+  all is neither feasible nor wise, so the most load-bearing one was converted:
+  `test_the_refusal_actually_suppresses_the_table` runs `cmd_optimize` against a
+  degenerate history with stubs and asserts no ranking prints, no "best:" line
+  appears and **no .ydk is written**. Verified by deleting the refusal's `return`:
+  it fails, and passes when restored.
+  - Honest accounting: for that particular break the structural test caught it too.
+    The behavioural one earns its place on the assertions source-matching cannot
+    make — that no file is written and no best line is announced.
+  - The general weakness stands for the rest (`test_the_spare_reaches_the_child_process`
+    needs a solver; several ledger and wave tests still only read source). The name
+    check covers the specific failure that bit twice.
 - Fixed by asserting the names resolve in the module AND calling `_solve_one` for real
   with the solver stubbed. Verified by deleting the import again: both tests fail,
   then pass when restored.

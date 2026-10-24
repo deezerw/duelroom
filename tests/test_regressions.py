@@ -2721,3 +2721,57 @@ def test_every_solved_only_mean_says_so():
     swept = inspect.getsource(sweep.sweep)
     assert "per solved hand" in swept, (
         "sweep's summary line prints a solved-only mean unqualified")
+
+
+def test_the_refusal_actually_suppresses_the_table(tmp_path, monkeypatch,
+                                                   capsys):
+    """BEHAVIOURAL version of the refusal check.
+
+    The existing test string-matches the order of two prints in the
+    source. That is the weakness that let a missing `import shutil` pass
+    its own test, so the most load-bearing safety property in the
+    optimiser -- that a degenerate objective prints NO ranking and writes
+    NO 'best list' -- is asserted by running it."""
+    import daemon
+    from skills import db, optimizer
+    from skills.deck import Deck
+
+    deck = Deck(name="d", main=[1, 2, 3], extra=[], side=[])
+    monkeypatch.setattr(daemon, "_resolve_deck",
+                        lambda *a, **k: tmp_path / "d.ydk")
+    monkeypatch.setattr(Deck, "from_ydk", staticmethod(lambda p: deck))
+    monkeypatch.setattr(Deck, "canonicalise", lambda self, conn: [])
+    monkeypatch.setattr(daemon, "_warn_if_busy", lambda *a, **k: 0)
+    monkeypatch.setattr(daemon.optimizer, "candidate_pool",
+                        lambda *a, **k: [{"card_id": 9, "name": "c9"}])
+    monkeypatch.setattr(daemon.optimizer, "removable",
+                        lambda *a, **k: [(2, 1)])
+    monkeypatch.setattr(daemon.optimizer, "card_name",
+                        lambda conn, c: f"c{c}")
+    monkeypatch.setattr(daemon.scenarios, "ensure_target",
+                        lambda *a, **k: "1@atk")
+    monkeypatch.setattr(daemon.ms, "identify_archetype",
+                        lambda *a, **k: [("A", 1.0, 3)])
+
+    # A history where only ONE term moves: the degenerate case.
+    hist = [optimizer.Candidate(
+        deck=deck, label=f"t{i}", score=0.3 - 0.01 * i,
+        summary={"brick_rate": 0.2, "best_line_rate": 0.8, "solved": 8,
+                 "hands": 10, "hand_trap_survival": 0.0,
+                 "combo_actions": {"mean": 9.0 + i},
+                 "window_recovery": {}}) for i in range(3)]
+    monkeypatch.setattr(daemon.optimizer, "hill_climb",
+                        lambda *a, **k: (hist[0], hist))
+
+    wrote = []
+    monkeypatch.setattr(Deck, "write_ydk",
+                        lambda self, path: wrote.append(path))
+
+    daemon.cmd_optimize(db.connect(tmp_path / "t.db"), ["d", "A", "10", "1"])
+    out = capsys.readouterr().out
+
+    assert "NO RANKING" in out, "the refusal did not fire"
+    # The ranked table's header must NOT appear.
+    assert "score" not in out.split("NO RANKING")[1].split("\n")[0]
+    assert "best:" not in out, "a best line was announced for an empty ranking"
+    assert not wrote, f"a 'best list' was written anyway: {wrote}"
