@@ -94,7 +94,7 @@ def to_ydeck(deck, name=None):
 
 
 def template_vs(path, their_deck, our_deck, seed, config=None, cards=None,
-                scripts=None):
+                scripts=None, shuffle=False):
     """Write a solver template whose opponent is a real deck.
 
     Mirrors ``ygorl.solver.batch.make_template`` except that deck b is
@@ -110,7 +110,16 @@ def template_vs(path, their_deck, our_deck, seed, config=None, cards=None,
         first=0,
         rule_flags=config.rule_flags,
         player=asdict(config.player),
-        shuffle_decks=False,
+        # shuffle_decks=False is upstream's choice and it is right for the
+        # SOLVING player, whose deck and hand the solver substitutes via
+        # --deck/--hand anyway. It is wrong for the other seat: with no
+        # shuffle, player 1's opening hand is simply the tail of its
+        # decklist, identical for every seed, which is why every
+        # going-second trial tested one hand -- and for kewl-tune that
+        # hand is four handtraps and a Synchro spell, which cannot
+        # assemble its payoff at any budget. Measured with shuffle on,
+        # seeds 0 and 7 deal different and functional hands.
+        shuffle_decks=shuffle,
         decks={"a": _deck_dict(theirs), "b": _deck_dict(ours)},
         responses=[],
     )

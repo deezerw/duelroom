@@ -104,35 +104,49 @@ escapes — but the feature is unusable until this is found.
 - **Next step, now cheap:** `_attack` keeps a `solver.log` per search and returns its
   `target board POSTED/EDITED` line. Run ONE going-second search and read what the
   solver says about its goal, its starting position, and why it wrote nothing.
-**Status after three fixes (2026-10-24): STILL BLOCKED.** Two real bugs were found
-and fixed on the way, neither of them the cause. What is now PROVEN:
+**Status after FIVE fixes (2026-10-24): BLOCKED, and the cause is now localised to
+the solver's going-second mode itself.** Four real bugs were found and fixed on the
+way and none of them was the cause. Stopping here deliberately.
 
-1. `--hand` does not reach player 1. The report's "starting position (player 1)"
-   listed cards nobody passed, and two template seeds dealt the same five.
-2. The hand is not the tail of the file passed as `--deck` either: with `--deck`
-   pointing at a rewritten copy, the solver dealt the last five of the ORIGINAL
-   light-and-darkness-ritual.ydk.
-3. Putting the dealt list into the START replay DOES change the hand — so that path
-   reaches player 1 — but not to the hand that was dealt.
-4. The start replay's side-b main deck is the **same multiset in a different order**
-   than the .ydk written for it (verified by reading the .yrpX back). And the hand
-   dealt is not that replay's tail either.
+The decisive measurement, which took five iterations to set up correctly:
+
+| kewl-tune reaching `15665977@atk` | |
+|---|---|
+| going FIRST (stored optimiser ledger, same target) | **10 of 12 — 83%** |
+| going SECOND into one vanilla Alexandrite Dragon, varied functional hands | **0 of 4** |
+
+A board holding a single vanilla monster cannot turn 83% into 0%. Every input is now
+verified correct, so what remains is the mode.
+
+What was PROVEN and fixed along the way (each real, none the cause):
+
+1. `--hand` does not reach player 1 — the report listed cards nobody passed, and two
+   template seeds dealt the same five.
+2. The hand is not the tail of the `--deck` file either.
+3. The dealt list must go into the START replay, not `--deck` — that path does reach
+   player 1 (fixed; it changed the hand).
+4. `template_vs` hardcoded `shuffle_decks=False`, so player 1's hand was simply its
+   decklist tail, identical for every seed — for kewl-tune, four handtraps and a
+   Synchro spell that cannot assemble its payoff at any budget. Fixed: `shuffle=True`
+   for the opposing seat, and `defend`/`floor` vary the seed per hand. **Verified in
+   the run: four different functional hands, including Kewl Tune Synchro, Cue and
+   Rotary.** Still 0 of 4 through.
 5. `--turns` is not involved: `--turns 3` changes nothing, 100% of rollouts still cut.
+6. The template preserves decklist order exactly — it is the solver's OUTPUT replay
+   that reorders, and its responses are only valid against that order, so the order
+   cannot be substituted back.
 
-So the order is lost somewhere between `template_vs` writing the template and
-`Replay.from_yrp` reading the solver's output replay, and the actual source of player
-1's opening hand is still unidentified.
+**What this is NOT:** hands, decks, decklist order, turn limits, target posting
+(`target_scratch` builds the goal from `--target` and discards the captured
+reference), or the repair-mode no-op (`searched` is true throughout).
 
-- **Next experiment, precise:** read the template `.yrpX` directly, BEFORE the solver
-  runs, and compare its side-b main order against the dealt .ydk. That isolates
-  whether `template_vs`/`to_yrpx` reorders, or the solver's output replay does.
-  Then find what the core actually draws from.
-- **Do not spend more loop iterations on this before the P0 optimiser items.** It is
-  one feature; the optimiser is the thing being asked for.
-
----
-
-## P2 — the data everything else reads is understated or unrepresentative
+- **Next step, for someone with a session to spend:** read the solver's `--player 1`
+  search from `main.cpp` directly. Every observable input is now correct, so the
+  remaining question is what that mode does with them. `_attack` keeps a `solver.log`
+  per search, which is the evidence to start from.
+- **Until then treat `gauntlet`'s board ranking and `second` as UNSUPPORTED.** `rank`
+  refuses to print an ordering when nothing beats the floor, so no false answer
+  escapes — believe that refusal.
 
 ### 5. The board library was built single-draw and pair-capped
 

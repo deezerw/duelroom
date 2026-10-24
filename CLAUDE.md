@@ -337,22 +337,19 @@ Honest gaps, so nobody mistakes a limit for a result:
   yours. Every weighted ranking inherits whatever is in that file.
 - **The side plan and floodgate check are implemented but not run at scale.** Each side
   candidate is `hands` full going-second runs, roughly ten minutes apiece.
-- **`gauntlet`'s ranking does not work yet, and the floor proves it.** Measured
-  2026-10-22: going second against a board holding ONE vanilla Alexandrite Dragon,
-  all three meta decks got through 0 of 6 hands each (18/18 stopped, and they
-  *searched* on 6/6, so this is not the repair-mode no-op). A single vanilla monster
-  cannot stop a meta deck, so the metric is not measuring board strength. The four
-  real boards that each stopped 18/18 measured nothing. **The cause is still open.**
-  A first guess — that `main.cpp` captures the target board at a hardcoded
-  `r.turns == 2`, so `--player 1` would be handed its own empty start-of-turn field
-  — is WRONG and was retracted on reading further: any `--target` sets
-  `target_scratch`, which builds the goal board from scratch and discards the
-  captured reference entirely (`main.cpp` ~7123, ~3229). The goal really is just
-  "their boss in a monster zone", which is reachable. Still unexplained, and the
-  going-second path now keeps each solver report (`_attack` writes a `solver.log`
-  and returns its `target board POSTED/EDITED` line) because discarding it is why
-  72 failed searches could not be diagnosed. `rank` reports `beats_floor` and
-  refuses to print an ordering when nothing beats the floor; believe that refusal.
+- **`gauntlet`'s board ranking and `second` are UNSUPPORTED.** The going-second metric
+  does not measure board strength. Decisive measurement 2026-10-24: kewl-tune reaches
+  its target `15665977@atk` in 10 of 12 hands going FIRST (stored optimiser ledger),
+  and 0 of 4 going second into a board holding one vanilla Alexandrite Dragon with
+  varied functional hands. A single vanilla monster cannot turn 83% into 0%.
+  Five real bugs were found and fixed chasing this and none was the cause: `--hand`
+  never reaches player 1; the `--deck` file's order does not either; the dealt list
+  has to go into the START replay; `template_vs` hardcoded `shuffle_decks=False` so
+  player 1's hand was its decklist tail for every seed (fixed — hands now vary and
+  are functional, still 0 of 4); and `--turns` is not involved. Every observable input
+  is now correct, so what remains is the solver's own `--player 1` search, which needs
+  reading from `main.cpp`. `_attack` keeps a `solver.log` per search as the evidence.
+  `rank` refuses to print an ordering when nothing beats the floor — believe it.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
   limitation the handtrap matrix has, generalised from a card to a board. It is not a

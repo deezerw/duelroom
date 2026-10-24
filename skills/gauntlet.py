@@ -227,8 +227,11 @@ def our_board_start(our_deck, their_deck, our_hand, our_targets, seed,
     sols = scratch / "sol"
     sols.mkdir(exist_ok=True)
 
+    # shuffle=True for the same reason as `inert_start`: it is what makes
+    # `seed` vary the opposing hand. Our own hand is unaffected -- the
+    # solver substitutes it from --hand.
     tpl = breaking.template_vs(scratch / "tpl.yrpX", our_deck, their_deck,
-                               seed=seed)
+                               seed=seed, shuffle=True)
     cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
     for d in wd.scriptdirs:
         cmd += ["--scriptdir", str(d)]
@@ -303,8 +306,10 @@ def inert_start(their_deck, seed, scratch, solve_ms=None):
     ydk.write_text("#created by duelroom\n#main\n"
                    + "\n".join([str(INERT)] * 40) + "\n#extra\n!side\n")
 
+    # shuffle=True so `seed` actually deals player 1 a hand. Without it
+    # the hand is the tail of their decklist, the same for every seed.
     tpl = breaking.template_vs(scratch / "tpl.yrpX", inert, their_deck,
-                               seed=seed)
+                               seed=seed, shuffle=True)
     cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
     for d in wd.scriptdirs:
         cmd += ["--scriptdir", str(d)]
@@ -360,11 +365,14 @@ def floor(their_decks, hands=4, draws=DEFENCE_DRAWS, solve_ms=None,
             their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
             sd = scratch / f"{name}_h{h}"
             sd.mkdir(parents=True, exist_ok=True)
-            dealt = breaking.deck_with_hand(deck_path, their_hand,
-                                            sd / "dealt.ydk")
+            # The SEED deals the opposing hand now that the template
+            # shuffles. `deck_with_hand` is no longer how the hand is
+            # chosen -- the shuffle would undo the ordering anyway -- so
+            # the deck goes in unmodified and the seed varies per hand.
+            dealt = deck_path
             try:
-                start = inert_start(dealt, seed=0, scratch=sd / "floor",
-                                    solve_ms=solve_ms)
+                start = inert_start(dealt, seed=3000 + h,
+                                    scratch=sd / "floor", solve_ms=solve_ms)
             except breaking.SolverFailed as e:
                 say(f"  {name} hand {h}: floor board failed — {e}")
                 rows.append({"deck": name, "hand": None, "error": str(e)})
@@ -481,11 +489,11 @@ def defend(our_deck, our_hand, candidate, their_decks, hands=4,
             sd = (scratch / f"{name}_h{h}_"
                   f"{abs(hash(candidate.board_key())) % 10**8}")
             sd.mkdir(parents=True, exist_ok=True)
-            dealt = breaking.deck_with_hand(deck_path, their_hand,
-                                            sd / "dealt.ydk")
+            # Same as `floor`: the seed deals their hand now.
+            dealt = deck_path
             try:
                 start = our_board_start(our_deck, dealt, our_hand,
-                                        candidate.targets, seed=0,
+                                        candidate.targets, seed=3000 + h,
                                         scratch=sd, solve_ms=solve_ms)
             except breaking.SolverFailed as e:
                 say(f"  {name} hand {h}: SOLVER FAILED building our board — {e}")
