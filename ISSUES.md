@@ -47,14 +47,26 @@ that a re-draw solves — meaning `brick_rate`, the second-heaviest term at -2.0
 measured by the noisiest available method. `skills/sweep.py` already does multi-draw
 properly for the board library.
 
-- **MEASURED 2026-10-24, same deck, same 20 hands:**
-  - multi-draw sweep: **20/20 solved, 0 bricks**, mean 4.1 interruptions
-  - single-draw funnel (what the optimiser scores on): **brick 5/20 = 0.25**
-    [0.1119, 0.4687]
+- **RETRACTED (2026-10-24). I claimed the brick rate was "25 points wrong" on the
+  active deck, comparing a sweep that solved 20/20 against a funnel reporting
+  5/20. That comparison was invalid and the claim is withdrawn.** The two runs
+  shared **neither their hands nor their goals**:
+  - 0 of 20 hand seeds overlap, and 0 of 20 hands match by card multiset — the two
+    tools seed their deals differently, so they dealt 20 entirely different hands.
+  - The sweep solves toward each hand's own planned ladder goals; the funnel solves
+    toward one fixed payoff card (`59822133@atk`, Blue-Eyes Spirit Dragon). Only 14
+    of the 20 sweep goals included that card at all.
 
-  So the optimiser's second-heaviest term is wrong by 25 points, in the pessimistic
-  direction, on the user's own deck. Those five "bricks" are false bricks — one draw
-  of a randomized search. Base score came out -0.193, dominated by an artifact.
+  So "20/20 solved" and "5/20 bricked" were never measuring the same thing. This is
+  the failure mode this project documents repeatedly, committed by me: reporting the
+  difference between two numbers that mean different things.
+- **What the evidence actually says:** `confirm_bricks` re-drew those 5 bricked hands
+  3 seeds each against the SAME target and found **zero** false bricks. For this deck
+  and this target the single-draw brick rate holds up. That is a reassuring result,
+  not a bug — and it is the first apples-to-apples check of it.
+- The safeguard is still worth having: it costs nothing when there are no false
+  bricks, and the solver's randomness is measured and real elsewhere. But it is now
+  a guard with a negative first result, not a fix for a known 25-point error.
 - Its heaviest term is dead too: `survival 0.0` on this deck, as on kewl-tune. So
   brick rate is wrong and survival cannot discriminate, which leaves combo length.
 - The same run logged `solver 857.09 s (budget 120 s: OVER)` — the budget guard is
@@ -244,6 +256,19 @@ ever called it.
 - Fixed by asserting the names resolve in the module AND calling `_solve_one` for real
   with the solver stubbed. Verified by deleting the import again: both tests fail,
   then pass when restored.
+
+### 19. Nothing can compare the sweep and the funnel on the same hands
+
+The two measurement paths seed their deals independently — `sweep` via
+`hand_seed(seed, name, i)`, funnel_eval via its own scheme — so there is no way to
+ask "does the multi-draw path solve the hand the single-draw path called a brick?"
+except by hand-plumbing seeds. That absence is what let me compare 20 unrelated hands
+and report the difference as a measurement error (see the retraction under P0 #3).
+
+- **Fix:** let `funnel_eval`/`gate.run_funnel` take explicit hands, or let `sweep`
+  take the funnel's hand seeds, so the two can be run paired. Paired seeds are
+  already this project's stated doctrine for deck comparisons; they are not available
+  across measurement methods, which is where they are most needed.
 
 ## P3 — correctness and housekeeping
 
