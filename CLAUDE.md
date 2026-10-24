@@ -317,9 +317,17 @@ Honest gaps, so nobody mistakes a limit for a result:
   hands an optimizer run scored an identical brick and solve rate for every trial, so
   the whole ranking rested on the handtrap-survival term. The code says so when it
   happens; raise `hands` before believing an ordering.
-- **Handtrap pairs are not supported.** `--fire` takes one card per invocation and
-  funnel_eval loops them separately, so Ash + Imperm together cannot be tested. Locals
-  players hold more than one, so the matrix understates how stoppable a deck is.
+- **Handtrap pairs are not supported, and this was checked rather than assumed
+  (2026-10-24).** `--fire` is singular — the solver's help does not mark it
+  "Repeatable" as it does `--target` and `--summon` — so a both-fired verdict cannot
+  be requested. `--opp-hand` *is* repeatable and reaches the solver through
+  `SolveRequest.extra_args` (verified: the flag appears on the command line), so the
+  opponent can HOLD a second handtrap while the first is fired. Measured on one
+  solved line of the active deck, Ash fired with and without Imperm held gave
+  identical verdicts — 2 windows, 1 converted, both ways — because the `--fire`
+  verdict counts windows of the fired card only. One hand and 2 windows rules out a
+  large effect, not a small one. The matrix still understates how stoppable a deck is,
+  and fixing it needs a repeatable `--fire`, not a flag combination.
 - **Maxx "C" is a measurement blind spot.** The metric asks only whether a line
   reached its target, and 94% of Maxx "C" windows convert, so lines do continue through
   it -- what it actually costs you, the cards it hands over, is invisible here. Droll

@@ -366,9 +366,21 @@ real trap, so the comment is worth keeping somewhere, but the class is not live 
 
 ### 11. Known blind spots, already documented, still open
 
-- **Handtrap pairs** (Ash + Imperm together) are not expressible: `--fire` takes one
-  card per invocation. Locals players hold more than one, so every "stoppable"
-  verdict understates.
+- **Handtrap pairs** (Ash + Imperm together): the limitation STANDS, now with the
+  mechanism pinned and a negative result rather than an assumption.
+  - `--fire` is singular — the solver's help does not mark it "Repeatable", unlike
+    `--target` and `--summon` — so a both-fired verdict cannot be requested.
+  - `--opp-hand` IS repeatable and `SolveRequest.extra_args` emits it with no
+    patching (verified: `extra_args=("--opp-hand", "10045474")` appears on the
+    command line). So the opponent CAN hold a second handtrap while the first fires.
+  - **It changed nothing measurable.** Ash fired on one solved line of the active
+    deck, with and without Imperm held: 2 windows and 1 converted, both ways. The
+    `--fire` verdict counts windows of the FIRED card only, so a held card creates
+    no new windows and any effect goes unreported.
+  - **Evidence is weak**: one hand, one line, 2 windows. That rules out a large
+    effect, not a small one.
+  - The matrix's understatement is real and needs a repeatable `--fire`, not a flag
+    combination — so nobody re-runs this hoping the flags are enough.
 - **Maxx "C"**: 94% of its windows convert, so lines continue through it, but what it
   *costs* — the cards handed over — is invisible to the metric.
 - **`special_summons`** is never populated in `trials`; real counts need each line
