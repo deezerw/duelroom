@@ -541,6 +541,18 @@ one-line notice was accurate and conveyed none of that.
 Behaviour unchanged — it is a reasonable default and changing it is the user's call.
 The notice now names what it replaced and gives the exact command to undo it.
 
+### 29. No test checked that the web routes answer — FIXED (and they do)
+
+The web UI is what the user actually opens, and it imports `skills/` that changed
+~30 times tonight. `test_web.py` asserted specific copy on a handful of pages and
+never checked the rest answer at all, so a route raising 500 would have been
+invisible to the suite.
+
+Walked all of them: **15 routes return 200**, the two missing-deck routes correctly
+302, no 5xx anywhere. So this is a clean result, not a defect — but the absence of
+the check was real, and it is now two tests: every read-only route answers, and a
+missing deck redirects rather than erroring or rendering a page about nothing.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

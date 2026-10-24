@@ -764,3 +764,38 @@ def test_partial_recovery_is_shown_as_partial(loggedin):
     assert "rebuild it without" in flat(h), "the caveat is missing"
     # A trap with no partials must not grow a misleading badge.
     assert "whole board" in flat(h)
+
+
+def test_every_read_only_route_answers(client):
+    """A smoke walk over every GET route.
+
+    The suite asserted specific copy on a handful of pages and never
+    checked that the rest answer at all. The web UI is what the user
+    opens, and it imports `skills/` that changes underneath it -- a
+    route raising 500 would have been invisible here. Walked manually
+    first: 15 routes 200, two missing-deck routes 302, no 5xx.
+    """
+    from skills import db
+    _logged_in(client)
+    name = db.get_meta(db.connect(), "active_deck") or "blue-eyes-branded-test"
+
+    urls = ["/", "/report", "/matrix", "/threats", "/drill", "/jobs",
+            "/build", "/maintenance", "/api/cards?q=blue",
+            f"/report/{name}", f"/drill/{name}", f"/deck/{name}",
+            f"/deck/{name}/ydk", f"/build/{name}", f"/pilot/{name}"]
+
+    bad = []
+    for url in urls:
+        code = client.get(url).status_code
+        if code >= 500 or code >= 400:
+            bad.append((url, code))
+    assert not bad, f"routes did not answer: {bad}"
+
+
+def test_a_missing_deck_redirects_rather_than_erroring(client):
+    """It must not 500, and it must not render a page about nothing."""
+    _logged_in(client)
+    for url in ("/report/does-not-exist", "/deck/does-not-exist"):
+        code = client.get(url).status_code
+        assert code < 500, f"{url} returned {code}"
+        assert code in (302, 303, 404), f"{url} returned {code}"
