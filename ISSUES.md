@@ -137,6 +137,32 @@ measurements across iterations, that silently loses all of them.
 - **Watch for:** a job that looks like it is progressing may be a restart from zero.
   Check `ps -o etime` against the elapsed time in its own log.
 
+### 14. The going-second hand was never dealt — FIXED (6714c1e)
+
+`--hand` does not reach player 1. The solver's "starting position (player 1)" block
+listed the last five entries of `kewl-tune.ydk` reversed — `shuffle_decks=False` plus
+`DUEL_PSEUDO_SHUFFLE` means nothing is shuffled and the hand is drawn off the END of
+the decklist. Two different template seeds dealt the same five cards.
+
+So every going-second trial tested ONE hand, and `hands=6` was that hand six times.
+For kewl-tune it is four handtraps and a Synchro spell, which cannot assemble its
+payoff — hence 0 of 72 searches and a vanilla monster "stopping" the meta. Fixed with
+`breaking.deck_with_hand`, wired into `gauntlet._attack` and `breaking.going_second`
+(so `second` was affected too). Retracted en route: `--turns 2`; `--turns 3` changes
+nothing.
+
+### 15. The optimiser explores one slot, not the flex space
+
+`cmd_optimize` cuts `removable(...)[0]` — a single fixed card — in every trial, so it
+answers "what is the best replacement for *this one card*", not "what change most
+improves the deck". On the active deck that is 26 candidate adds against 1 fixed cut,
+out of a real space of 22 removable slots x 26 candidates = 572 swaps.
+
+`removable` is NOT broken: it orders by the deck's own copy count, so it picks a 1-of
+(Blue-Eyes Jet Dragon) rather than a core card. The limitation is the search, not the
+choice of cut. It is also stated honestly in the command's own output — but "optimise
+my deck" reads as more than it does.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
