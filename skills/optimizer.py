@@ -353,6 +353,7 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 "combo_actions_mean": (summary.get("combo_actions")
                                        or {}).get("mean"),
                 "false_bricks": summary.get("false_bricks"),
+                "window_recovery": summary.get("window_recovery"),
                 "brick_rate_single_draw": summary.get("brick_rate_single_draw"),
                 "fire": fire,
             }) + "\n")
@@ -558,3 +559,55 @@ def _written(deck, scratch):
     p = scratch / f"{deck.name}.ydk"
     deck.write_ydk(p)
     return p
+
+def stored_trials(deck_name, scratch=None):
+    """Every stored funnel record for a deck's optimiser trials.
+
+    `evaluate` writes one JSONL per trial, named after the trial, and they
+    accumulate -- so a finished run can be re-ranked without spending the
+    solver time again. Returns [(label, summary)], base first.
+    """
+    scratch = Path(scratch or (engine.ROOT / "results" / "optimizer"))
+    out = []
+    for path in sorted(scratch.glob(f"{deck_name}*.jsonl")):
+        try:
+            rows = [json.loads(l) for l in
+                    path.read_text().splitlines() if l.strip()]
+        except (OSError, ValueError):
+            continue
+        if not rows:
+            continue
+        summary = rows[0].get("summary") or {}
+        if not summary:
+            continue
+        label = path.stem
+        out.append(("base" if label == deck_name else label, summary))
+    return sorted(out, key=lambda t: t[0] != "base")
+
+
+def rescore(deck_name, objective=None, scratch=None):
+    """Re-rank a finished run's trials under `objective`.
+
+    The weights in `Objective` are judgement calls -- `recovery` especially
+    -- and each run costs hours of solver, so being unable to ask "what
+    would this have ranked under different weights" meant the weights
+    could never be examined at all. Every term is in the stored summaries.
+
+    Returns rows sorted best first, each with the score and the terms it
+    came from.
+    """
+    objective = objective or Objective()
+    rows = []
+    for label, s in stored_trials(deck_name, scratch):
+        rows.append({
+            "label": label,
+            "score": objective.score(s),
+            "brick_rate": s.get("brick_rate"),
+            "best_line_rate": s.get("best_line_rate"),
+            "survival": s.get("hand_trap_survival"),
+            "combo_mean": (s.get("combo_actions") or {}).get("mean"),
+            "window_recovery": round(mean_window_recovery(s), 4),
+            "hands": s.get("hands"),
+        })
+    return sorted(rows, key=lambda r: -r["score"])
+

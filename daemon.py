@@ -55,6 +55,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
   second <theirs> <ours>    going second into their real board
   gauntlet <deck> <hand>    rank this hand's end boards by what they stop
+  rescore [deck] [w]        re-rank stored optimiser trials, no solver time
   floodgates <deck>         does the deck function under common floodgates
   help / quit
 """
@@ -1128,6 +1129,57 @@ def cmd_gauntlet(conn, args):
     print(f"  written to {path}")
 
 
+def cmd_rescore(conn, args):
+    """Re-rank a finished optimiser run under the current objective.
+
+    Each `optimize` run costs hours of solver, and the objective's weights
+    are judgement calls -- `recovery` especially. Without this, the weights
+    could never be examined: you would have to re-run to ask what a
+    different weighting would have ranked. Every term is already in the
+    stored per-trial summaries.
+    """
+    if not args and not db.get_meta(conn, "active_deck"):
+        print("usage: rescore [deck] [recovery_weight]")
+        print("  re-ranks stored optimiser trials with no solver time at all")
+        return
+    path = _resolve_deck(args[0] if args else None, conn)
+    name = path.stem if path else (args[0] if args else "")
+    obj = optimizer.Objective()
+    if len(args) > 1:
+        try:
+            obj = optimizer.Objective(recovery=float(args[1]))
+        except ValueError:
+            print(f"recovery weight must be a number, not {args[1]!r}")
+            return
+    rows = optimizer.rescore(name, objective=obj)
+    if not rows:
+        print(f"no stored optimiser trials for {name!r} — run `optimize` first")
+        return
+    print(f"{len(rows)} stored trial(s) for {name}, re-ranked with no solver time")
+    print(f"  weights: brick {obj.brick}, solve {obj.solve_rate}, "
+          f"survival {obj.survival}, actions {obj.actions}, "
+          f"recovery {obj.recovery}\n")
+    print(f"  {'score':>7} {'brick':>6} {'solve':>6} {'surv':>5} "
+          f"{'combo':>6} {'recov':>6}  change")
+    for r in rows:
+        tail = r["label"].split("_")[-1]
+        shown = ("(your current list)" if r["label"] == "base"
+                 else (handlab._name(conn, int(tail)) if tail.isdigit()
+                       else r["label"]))
+        print(f"  {r['score']:+7.3f} {(r['brick_rate'] or 0):6.2f} "
+              f"{(r['best_line_rate'] or 0):6.2f} {(r['survival'] or 0):5.2f} "
+              f"{(r['combo_mean'] or 0):6.2f} {r['window_recovery']:6.3f}  "
+              f"{shown}")
+    if rows[0]["label"] == "base":
+        print("\n  Your current list scores highest — none of the tested swaps "
+              "improved it.")
+    else:
+        print(f"\n  Best stored swap: {rows[0]['label']}. Re-run `optimize` at "
+              f"more hands before acting on it.")
+    print("  Weights are judgement calls. Pass a recovery weight to see how "
+          "the order moves.")
+
+
 def cmd_second(conn, args):
     if len(args) < 2:
         print("usage: second <their_deck> <our_deck> [hands]")
@@ -1504,6 +1556,7 @@ COMMANDS = {
     "optimize": cmd_optimize,
     "second": cmd_second,
     "gauntlet": cmd_gauntlet,
+    "rescore": cmd_rescore,
     "floodgates": cmd_floodgates,
 }
 

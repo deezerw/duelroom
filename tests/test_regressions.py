@@ -2371,3 +2371,48 @@ def test_degenerate_terms_counts_the_new_term():
     const, vary = optimizer.degenerate_terms(hist)
     assert vary == ["window recovery"], (const, vary)
     assert len(const) == 4
+
+
+def test_rescore_reranks_stored_trials_without_the_solver(tmp_path):
+    """Each `optimize` run costs hours, and the objective's weights are
+    judgement calls, so being unable to re-rank stored trials meant the
+    weights could never be examined at all."""
+    import json as _json
+    from skills import optimizer
+
+    def write(name, brick, recov, combo=8.0):
+        (tmp_path / f"{name}.jsonl").write_text(_json.dumps({
+            "summary": {"brick_rate": brick, "best_line_rate": 1 - brick,
+                        "hand_trap_survival": 0.0, "hands": 20,
+                        "combo_actions": {"mean": combo},
+                        "window_recovery": {"a": recov}}}) + "\n")
+
+    # A realistic gap: the swap bricks more and recovers a little better,
+    # which is the trade the recovery term exists to weigh. At the default
+    # weight consistency should still win; at a heavy weight it should not.
+    write("deck", 0.25, 0.30)            # base
+    write("deck_r0_111", 0.30, 0.40)     # worse bricks, better recovery
+    write("deck_r0_222", 0.30, 0.10)
+
+    rows = optimizer.rescore("deck", scratch=tmp_path)
+    assert [r["label"] for r in rows][0] == "base", rows
+    # With recovery weighted heavily the better-recovering swap must win,
+    # which is the whole point of being able to re-weight.
+    heavy = optimizer.rescore("deck", objective=optimizer.Objective(recovery=5.0),
+                              scratch=tmp_path)
+    assert heavy[0]["label"] == "deck_r0_111", heavy
+    # And with it off, recovery must not affect the order at all.
+    off = optimizer.rescore("deck", objective=optimizer.Objective(recovery=0),
+                            scratch=tmp_path)
+    assert off[0]["label"] == "base"
+
+
+def test_stored_trials_puts_base_first_and_skips_junk(tmp_path):
+    from skills import optimizer
+    (tmp_path / "deck.jsonl").write_text('{"summary": {"brick_rate": 0.1}}\n')
+    (tmp_path / "deck_r0_9.jsonl").write_text('{"summary": {"brick_rate": 0.2}}\n')
+    (tmp_path / "deck_bad.jsonl").write_text("not json\n")
+    (tmp_path / "deck_empty.jsonl").write_text("")
+    out = optimizer.stored_trials("deck", scratch=tmp_path)
+    assert out[0][0] == "base"
+    assert len(out) == 2, out
