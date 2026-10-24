@@ -307,6 +307,7 @@ def confirm_bricks(deck_path, record, draws=3, solve_ms=None, log=None):
 
 
 def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
+               slots=1,
                rounds=3, pool_limit=12, solve_ms=None, log=print):
     """Greedy one-card swaps until nothing improves.
 
@@ -375,9 +376,24 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
 
         improved = None
         for cand_row in pool:
-            for out_card, _ in outs:
+            # `slots` cut candidates per add, not one. The loop used to end
+            # with an unconditional `break` ("keeps this finite"), so only
+            # the first removable card was ever cut -- the search was 1 cut
+            # x 26 adds = 26 of a 22 x 26 = 572 space, and the one cut was
+            # whichever card `removable` ranked first.
+            #
+            # Default 1 keeps the old cost exactly: widening multiplies
+            # trials, and every trial is `hands` full funnel runs. slots=3
+            # on this deck is 78 trials, which is most of a day.
+            for out_card, _ in outs[:max(1, slots)]:
                 trial = swap(best.deck, out_card, cand_row["card_id"],
-                             name=f"{deck.name}_r{rnd}_{cand_row['card_id']}")
+                             # The cut belongs in the name. Without it two
+                             # trials that add the same card over different
+                             # cuts share a scratch path, so `evaluate`
+                             # overwrites one with the other and `rescore`
+                             # only ever sees the last.
+                             name=f"{deck.name}_r{rnd}_"
+                                  f"{out_card}_{cand_row['card_id']}")
                 problems = trial.validate(conn)
                 if problems:
                     continue
@@ -399,7 +415,6 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                                            or score > improved.score):
                     improved = Candidate(trial, f"-{out_name} +{cand_row['name']}",
                                          summary, score)
-                break  # one removal candidate per round keeps this finite
         if not improved:
             log(f"round {rnd}: no improvement, stopping")
             break

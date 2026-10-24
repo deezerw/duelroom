@@ -900,8 +900,10 @@ def cmd_matrix(conn, args):
 def cmd_optimize(conn, args):
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
-        print("usage: optimize [deck] [archetype] [hands] [rounds]"
+        print("usage: optimize [deck] [archetype] [hands] [rounds] [slots]"
               "   (or set one with `mydeck`)")
+        print("  slots = cut slots tried per candidate add (default 1);"
+              " widening multiplies runtime")
         return
     _warn_if_busy("this search")
     deck = Deck.from_ydk(path)
@@ -912,6 +914,10 @@ def cmd_optimize(conn, args):
     nums = [a for a in rest if a.isdigit()]
     hands = int(nums[0]) if nums else 8
     rounds = int(nums[1]) if len(nums) > 1 else 2
+    # How many cut slots to try per candidate add. 1 is the historical
+    # behaviour and the default, because widening multiplies trials and
+    # each trial is `hands` full funnel runs.
+    slots = int(nums[2]) if len(nums) > 2 else 1
 
     if archetype is None:
         guesses = ms.identify_archetype(conn, deck)
@@ -926,9 +932,19 @@ def cmd_optimize(conn, args):
     if not pool:
         print(f"no flex/fringe pool for {archetype!r} — run `meta` and check `archetypes`")
         return
-    cut = optimizer.card_name(conn, outs[0][0]) if outs else "?"
+    cuts = [optimizer.card_name(conn, o[0]) for o in outs[:slots]] or ["?"]
     print(f"{deck.name}: {len(outs)} non-core slots, {len(pool)} candidates")
-    print(f"each trial cuts {cut} (your least-played non-core card) and adds one")
+    if slots == 1:
+        print(f"each trial cuts {cuts[0]} (your least-played non-core card) "
+              f"and adds one")
+        print(f"  that is {len(pool)} of {len(outs) * len(pool)} possible "
+              f"swaps — pass a 3rd number to widen (e.g. `optimize "
+              f"{path.stem} {archetype} {hands} {rounds} 3`)")
+    else:
+        print(f"each trial cuts one of {slots} slots ({', '.join(cuts)}) "
+              f"and adds one")
+        print(f"  {slots * len(pool)} trials of {len(outs) * len(pool)} "
+              f"possible swaps")
     print(f"each trial is one funnel_eval run — {hands} hands at "
           f"{engine.SOLVE_MS/1000:.0f}s. This takes hours, not minutes.\n")
 
@@ -938,7 +954,8 @@ def cmd_optimize(conn, args):
         return
     print(f"holding the target fixed at {target} across all trials\n")
     best, history = optimizer.hill_climb(conn, deck, archetype, target,
-                                         hands=hands, rounds=rounds)
+                                         hands=hands, rounds=rounds,
+                                         slots=slots)
     rows = optimizer.report(history, hands)
     constant, varying = optimizer.degenerate_terms(history)
 

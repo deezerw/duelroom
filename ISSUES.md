@@ -198,17 +198,28 @@ payoff — hence 0 of 72 searches and a vanilla monster "stopping" the meta. Fix
 (so `second` was affected too). Retracted en route: `--turns 2`; `--turns 3` changes
 nothing.
 
-### 15. The optimiser explores one slot, not the flex space
+### 15. The optimiser explored one cut slot — FIXED (configurable)
 
-`cmd_optimize` cuts `removable(...)[0]` — a single fixed card — in every trial, so it
-answers "what is the best replacement for *this one card*", not "what change most
-improves the deck". On the active deck that is 26 candidate adds against 1 fixed cut,
-out of a real space of 22 removable slots x 26 candidates = 572 swaps.
+The effect was real and my first description of the mechanism was wrong. I wrote that
+`cmd_optimize` cuts `removable(...)[0]`; in fact `hill_climb` loops over every
+removable slot and then ends the inner loop with an unconditional
+
+    break  # one removal candidate per round keeps this finite
+
+so only the first slot was ever reached. Confirmed on the live run: 7 trials, 7
+distinct adds, **one** distinct cut (Blue-Eyes Jet Dragon). The search was 26 of a
+22 x 26 = 572 space, by design rather than by accident.
 
 `removable` is NOT broken: it orders by the deck's own copy count, so it picks a 1-of
-(Blue-Eyes Jet Dragon) rather than a core card. The limitation is the search, not the
-choice of cut. It is also stated honestly in the command's own output — but "optimise
-my deck" reads as more than it does.
+rather than a core card.
+
+- Now `slots` (CLI: 5th argument), default **1** so the cost is unchanged and
+  widening is opt-in — every extra slot multiplies trials, and each trial is `hands`
+  full funnel runs. `optimize <deck> <arch> 20 1 3` is 78 trials, most of a day.
+- `optimize` now prints how many of the possible swaps it will actually try.
+- Fixed alongside: the trial name omitted the cut, so two trials adding the same card
+  over different cuts shared a scratch path — `evaluate` overwrote one with the other
+  and `rescore` only ever saw the last. Harmless at slots=1, immediate at slots>1.
 
 ### 16. Orphaned pool workers survive for days
 

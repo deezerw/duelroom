@@ -2416,3 +2416,70 @@ def test_stored_trials_puts_base_first_and_skips_junk(tmp_path):
     out = optimizer.stored_trials("deck", scratch=tmp_path)
     assert out[0][0] == "base"
     assert len(out) == 2, out
+
+
+def test_slots_widens_the_cut_search(tmp_path, monkeypatch):
+    """The inner loop used to end with an unconditional `break` ("one
+    removal candidate per round keeps this finite"), so only the FIRST
+    removable card was ever cut: the search was 1 cut x 26 adds = 26 of a
+    22 x 26 = 572 space. Verified on the live run -- 7 trials, 7 distinct
+    adds, ONE distinct cut."""
+    from skills import db, optimizer
+    from skills.meta_scrape import DEFAULT_FORMAT as FMT
+
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [("A", FMT, 1, "main", 1.0, 1, 50, "now"),    # core
+             ("A", FMT, 8, "main", 0.10, 1, 50, "now"),   # weak slot 1
+             ("A", FMT, 9, "main", 0.12, 1, 50, "now"),   # weak slot 2
+             ("A", FMT, 50, "main", 0.40, 1, 50, "now")])
+        conn.executemany(
+            "INSERT INTO cards (id, name, last_fetched) VALUES (?,?,?)",
+            [(i, f"c{i}", "now") for i in (1, 8, 9, 50)])
+
+    base = Deck(name="base", main=[1, 8, 9], extra=[], side=[])
+    monkeypatch.setattr(Deck, "validate", lambda self, conn, region="tcg": [])
+    cuts = []
+
+    def fake_evaluate(deck, target, hands=12, solve_ms=None, scratch=None,
+                      fire=None, **kw):
+        cuts.append(deck.name)
+        return {"brick_rate": 0.5, "best_line_rate": 0.5, "solved": 2,
+                "hands": hands, "hand_trap_survival": 0.0,
+                "combo_actions": {"mean": 5.0}, "window_recovery": {}}
+
+    monkeypatch.setattr(optimizer, "evaluate", fake_evaluate)
+
+    cuts.clear()
+    optimizer.hill_climb(conn, base, "A", "1@atk", hands=2, rounds=1,
+                         slots=1, log=lambda *a: None)
+    one = len(cuts)
+
+    cuts.clear()
+    optimizer.hill_climb(conn, base, "A", "1@atk", hands=2, rounds=1,
+                         slots=2, log=lambda *a: None)
+    two = len(cuts)
+
+    assert two > one, (
+        f"slots=2 ran {two} trials and slots=1 ran {one}: the cut search "
+        f"did not widen")
+    # Trial names must distinguish the cut, or the scratch files collide.
+    trial_names = [c for c in cuts if c != "base"]
+    assert len(set(trial_names)) == len(trial_names), (
+        f"duplicate trial names: {trial_names}")
+
+
+def test_a_trial_name_includes_the_cut():
+    """Two trials adding the same card over different cuts shared a
+    scratch path, so `evaluate` overwrote one with the other and
+    `rescore` only ever saw the last. Harmless at slots=1 and immediate
+    at slots>1."""
+    import inspect
+    from skills import optimizer
+    src = inspect.getsource(optimizer.hill_climb)
+    assert "{out_card}_" in src, (
+        "the trial name omits the cut, so same-add trials collide")
