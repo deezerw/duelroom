@@ -163,8 +163,13 @@ value. The budget already has `ladder`; draws needs the same.
 
 - `locals.toml` covers **58%** of the stated meta; no deck exists for azamina, doomz,
   invoked, mitsurugi or rogue. Every weighted ranking inherits that.
-- The handtrap matrix is **partial**: 7 of ~10 decks. `doctor` says so; the matrix
-  output does not.
+- The handtrap matrix is **partial**: 7 of ~10 decks. `doctor` said so; the matrix
+  output did not, because its own threshold was `_n < 5` and 7 clears it. **FIXED:**
+  `matrix` now compares against the decks that actually exist — the same standard
+  `doctor` uses — and prints the share ("PARTIAL: 7 of ~10 decks, 70% of the field")
+  plus the note that every ranking shown is a ranking over those 7. Two views judging
+  the same file by different standards is how a caveat goes missing from the one that
+  drives a decision, and this view decides which handtraps to main deck.
 - The active deck is `blue-eyes-branded-test`, an untracked file with "test" in its
   name. If that is the tournament list it should be tracked and named as such.
 

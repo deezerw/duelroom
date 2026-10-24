@@ -877,8 +877,23 @@ def cmd_matrix(conn, args):
         print("no handtrap matrix yet — run scenarios.run_matrix first")
         return
     _n = len([l for l in path.read_text().splitlines() if l.strip()])
+    # Compare against the decks that actually exist, not a magic 5.
+    # `doctor` already calls this same 7-deck file PARTIAL ("only 7 of ~10")
+    # while this view said nothing, because 7 clears `_n < 5`. Two places
+    # judging the same file by different standards is how a caveat goes
+    # missing from the view that drives a decision -- and this one decides
+    # which handtraps to main deck.
+    _expected = max(0, len(list(DECKS.glob("*.ydk"))) - 2)
     print(f"  from {path.name} ({_n} deck(s))")
-    if _n < 5:
+    if _expected and _n < _expected:
+        print(f"  ! PARTIAL: {_n} of ~{_expected} decks "
+              f"({_n / _expected:.0%} of the field). Rows below cover only")
+        print(f"    the decks finished so far, and every ranking here is a")
+        print(f"    ranking over those {_n}.")
+        missing = sorted(p.stem for p in DECKS.glob("*.ydk"))
+        print(f"    deck files present: {', '.join(missing[:8])}"
+              + (" ..." if len(missing) > 8 else ""))
+    elif _n < 5:
         print("  ! this file looks PARTIAL — a sweep may still be writing it.")
         print("    Rows below cover only the decks finished so far.")
     print()

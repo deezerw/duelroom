@@ -2628,3 +2628,32 @@ def test_pool_children_are_terminated_on_a_catchable_signal():
             "the installed handler was not removed on exit")
     finally:
         _signal.signal(_signal.SIGTERM, before)
+
+
+def test_matrix_and_doctor_judge_partialness_the_same_way(tmp_path,
+                                                          monkeypatch):
+    """`doctor` called the 7-deck matrix PARTIAL ("only 7 of ~10") while
+    `matrix` itself said nothing, because 7 clears its `_n < 5` threshold.
+    Two places judging the same file by different standards is how a
+    caveat goes missing from the view that drives the decision — and this
+    view decides which handtraps to main deck."""
+    import inspect
+    import daemon
+
+    src = inspect.getsource(daemon.cmd_matrix)
+    assert "_expected" in src, "matrix still uses a magic threshold alone"
+    assert "DECKS.glob" in src, (
+        "matrix does not compare against the decks that exist")
+    # doctor's standard: len(decks) - 2
+    doc = inspect.getsource(daemon.cmd_doctor)
+    assert "len(decks) - 2" in doc
+    assert "len(list(DECKS.glob(\"*.ydk\"))) - 2" in src, (
+        "matrix and doctor use different expectations for the same file")
+
+
+def test_matrix_reports_the_share_not_just_the_count():
+    """A count without the denominator is what let 7 read as complete."""
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_matrix)
+    assert "of the field" in src and "_expected:.0%" in src
