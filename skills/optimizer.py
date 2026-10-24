@@ -626,3 +626,74 @@ def rescore(deck_name, objective=None, scratch=None):
         })
     return sorted(rows, key=lambda r: -r["score"])
 
+def paired_check(deck_path, record, draws=3, solve_ms=None, log=None):
+    """Re-solve EVERY hand of a funnel record with the multi-draw path.
+
+    This is the comparison that was missing, and its absence produced the
+    worst error of this project's 2026-10-24 session: I reported the
+    optimiser's brick rate as "25 points wrong" by holding a sweep that
+    solved 20/20 against a funnel that reported 5/20, when the two runs
+    shared neither their hands (0 of 20 seeds overlapped) nor their goals
+    (the sweep aims at each hand's own ladder; the funnel at one payoff
+    card). Two numbers measuring different things, reported as a defect.
+
+    Here the hands and the target are the funnel's own, so a disagreement
+    is a real disagreement. Returns per-hand rows plus the counts:
+
+      agree_solved   both reached the target
+      agree_brick    neither did, over `draws` seeds
+      funnel_pessimistic  funnel said brick, a re-draw reached it
+      funnel_optimistic   funnel said solved, no re-draw reached it
+
+    The last is possible and worth knowing: the funnel's single draw may
+    have found a line the re-draws missed, which bounds how much of its
+    solve rate is luck rather than reach.
+    """
+    from . import sweep
+
+    say = log or (lambda m: None)
+    solve_ms = solve_ms or engine.SOLVE_MS
+    targets = record.get("targets") or []
+    flat = [t for g in targets for t in
+            (g if isinstance(g, (list, tuple)) else [g])]
+    hands = [h for h in (record.get("hands") or []) if h.get("hand")]
+    if not flat or not hands:
+        return {"rows": [], "agree_solved": 0, "agree_brick": 0,
+                "funnel_pessimistic": 0, "funnel_optimistic": 0}
+
+    name = Path(deck_path).stem
+    work = []
+    for h in hands:
+        for d in range(draws):
+            work.append((str(deck_path), name, h.get("index", 0),
+                         h.get("hand_seed", 0), list(h["hand"]), list(flat),
+                         "paired", solve_ms, 200 + d))
+    say(f"  paired check: {len(hands)} hand(s) x {draws} draws against the "
+        f"funnel's own hands and target")
+
+    reached = set()
+    for res in sweep._map_solves(work, engine.DEFAULT_WORKERS):
+        if res.get("score") is not None:
+            reached.add(res["hand_index"])
+
+    rows, counts = [], {"agree_solved": 0, "agree_brick": 0,
+                        "funnel_pessimistic": 0, "funnel_optimistic": 0}
+    for h in hands:
+        i = h.get("index", 0)
+        funnel_solved = h.get("status") == "solved"
+        multi_solved = i in reached
+        if funnel_solved and multi_solved:
+            key = "agree_solved"
+        elif not funnel_solved and not multi_solved:
+            key = "agree_brick"
+        elif multi_solved:
+            key = "funnel_pessimistic"
+        else:
+            key = "funnel_optimistic"
+        counts[key] += 1
+        rows.append({"index": i, "hand_seed": h.get("hand_seed"),
+                     "funnel": h.get("status"),
+                     "multi_draw": "solved" if multi_solved else "unsolved",
+                     "verdict": key})
+    return {"rows": rows, **counts}
+

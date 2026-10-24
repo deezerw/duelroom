@@ -2483,3 +2483,55 @@ def test_a_trial_name_includes_the_cut():
     src = inspect.getsource(optimizer.hill_climb)
     assert "{out_card}_" in src, (
         "the trial name omits the cut, so same-add trials collide")
+
+
+def test_paired_check_classifies_both_directions_of_disagreement(monkeypatch,
+                                                                 tmp_path):
+    """The comparison whose absence produced this session's worst error:
+    I reported the brick rate "25 points wrong" by holding a sweep that
+    solved 20/20 against a funnel reporting 5/20, when the two shared
+    neither hands (0 of 20 seeds overlapped) nor goals. Here the hands
+    and target are the funnel's own, so a disagreement is real."""
+    from skills import optimizer
+
+    record = {
+        "targets": [["59822133@atk"]],
+        "hands": [
+            {"index": 0, "status": "solved", "hand": [1], "hand_seed": 10},
+            {"index": 1, "status": "brick", "hand": [2], "hand_seed": 11},
+            {"index": 2, "status": "brick", "hand": [3], "hand_seed": 12},
+            {"index": 3, "status": "solved", "hand": [4], "hand_seed": 13},
+        ],
+    }
+
+    # Multi-draw reaches hands 0 and 1 only.
+    def fake_map(batch, workers):
+        for b in batch:
+            i = b[2]
+            hit = i in (0, 1)
+            yield {"hand_index": i, "label": "paired",
+                   "attempt": {"label": "paired", "targets": [], "draw": 0,
+                               "solver_seed": 1,
+                               "status": "solved" if hit else "unsolved",
+                               "wall_s": 1.0},
+                   "score": {"interruptions": 1, "negates": 0,
+                             "pieces": []} if hit else None,
+                   "record": {} if hit else None,
+                   "unsolved_record": None if hit else {}}
+
+    monkeypatch.setattr("skills.sweep._map_solves", fake_map)
+    out = optimizer.paired_check(tmp_path / "d.ydk", record, draws=2)
+    assert out["agree_solved"] == 1          # hand 0
+    assert out["funnel_pessimistic"] == 1    # hand 1: brick, re-draw reached
+    assert out["agree_brick"] == 1           # hand 2
+    assert out["funnel_optimistic"] == 1     # hand 3: solved, re-draws missed
+    assert {r["index"] for r in out["rows"]} == {0, 1, 2, 3}
+
+
+def test_paired_check_is_a_noop_without_hands_or_targets(tmp_path):
+    from skills import optimizer
+    assert optimizer.paired_check(tmp_path / "d.ydk",
+                                  {"targets": [], "hands": []})["rows"] == []
+    assert optimizer.paired_check(
+        tmp_path / "d.ydk",
+        {"targets": [["1@atk"]], "hands": []})["agree_solved"] == 0
