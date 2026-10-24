@@ -2657,3 +2657,36 @@ def test_matrix_reports_the_share_not_just_the_count():
     import daemon
     src = inspect.getsource(daemon.cmd_matrix)
     assert "of the field" in src and "_expected:.0%" in src
+
+
+def test_the_project_has_no_undefined_names():
+    """Two bugs in one session were a NameError no test could see: a
+    missing `import shutil` broke every sweep while its own test passed
+    (it only grepped the source), and the same mistake dropped
+    `import contextlib` an hour later. Verified that pyflakes reports
+    both, by name and line, when the import is removed."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, str(root / "tools/check_names.py")],
+                       capture_output=True, text=True, cwd=str(root),
+                       timeout=180)
+    assert r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+
+
+def test_the_name_check_only_fails_on_undefined_names():
+    """Unused imports and f-string notes must NOT fail it, or the gate
+    becomes noise and gets ignored -- which is how a real finding hides."""
+    import inspect
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "tools/check_names.py"
+    spec = importlib.util.spec_from_file_location("check_names", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    src = inspect.getsource(mod)
+    assert '"undefined name" in l' in src
+    assert "non-fatal" in src

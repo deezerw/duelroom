@@ -433,8 +433,8 @@ def _orphaned_workers():
 def cmd_doctor(conn, args):
     """Everything that can be verified without burning solver time.
 
-    Four guards grew out of four different failure modes tonight and
-    none of them were wired together. This runs all of them plus the
+    Five guards grew out of five different failure modes and none of
+    them were wired together. This runs all of them plus the
     engine and data checks, and reports what is MISSING as loudly as
     what is broken -- an empty database passing every check is not a
     healthy install.
@@ -479,6 +479,11 @@ def cmd_doctor(conn, args):
         ("invariants", [str(engine.PYTHON), "tools/check_invariants.py"]),
         ("field audit", [str(engine.PYTHON), "tools/audit_fields.py"]),
         ("doc drift", [str(engine.PYTHON), "tools/check_docs.py"]),
+        # Added after two NameErrors in one session that no test could
+        # see: a missing `import shutil` broke every sweep while its own
+        # test passed, and the same mistake dropped `import contextlib`
+        # an hour later. pyflakes finds both by name and line.
+        ("undefined names", [str(engine.PYTHON), "tools/check_names.py"]),
     ):
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
         tail = (r.stdout or r.stderr).strip().splitlines()
@@ -1072,8 +1077,6 @@ def cmd_optimize(conn, args):
         for code, share in sorted(wr.items()):
             nm = handlab._name(conn, int(code)) if str(code).isdigit() else code
             print(f"    {nm:34s} {(share or 0)*100:5.1f}% of windows recovered")
-    distinct_solve = {round(r["solve_rate"], 4) for r in rows}
-    distinct_brick = {round(r["brick_rate"] or 0, 4) for r in rows}
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
     print("  most of these intervals overlap — treat the table as a shortlist")
     print("  to re-run at higher hand counts, not as a ranking.")

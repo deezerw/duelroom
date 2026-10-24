@@ -287,10 +287,21 @@ changed — silently dropped `import contextlib` an hour later and broke importi
 resolves (`test_every_name_the_sweep_uses_resolves`), and the habit changed: insert
 by line number read from the file, never by a guessed text anchor.
 
-- **Lesson for the remaining structural tests in this file** (there are several —
+- **FIXED SYSTEMATICALLY:** `tools/check_names.py` runs pyflakes and fails on
+  **undefined names only**, wired in as `doctor`'s fifth guard and asserted by the
+  test suite. Verified against both real bugs: deleting `import shutil` reports
+  `skills/sweep.py:115:9: undefined name 'shutil'`, and deleting `import contextlib`
+  reports `skills/sweep.py:154:2: undefined name 'contextlib'`. Unused imports and
+  f-string notes are printed but do NOT fail, so the gate stays actionable instead of
+  becoming noise that gets ignored — which is how a real finding would hide in it.
+- It also surfaced three dead names left by my own refactors, now removed:
+  `distinct_solve` / `distinct_brick` in `cmd_optimize` (orphaned by the
+  degeneracy-refusal rewrite) and an unused `shutil` import in `optimizer.py`.
+- **Still true of the remaining structural tests in this file** (several:
   `test_the_spare_reaches_the_child_process`, `test_breadth_does_not_ask_for_stacks`,
-  the ledger tests): each one proves the source *says* something, not that it *works*.
-  Where the path is cheap to exercise with a stub, it should be.
+  the ledger tests): each proves the source *says* something, not that it *works*.
+  The name check now covers the specific failure that bit twice; the general weakness
+  stands.
 - Fixed by asserting the names resolve in the module AND calling `_solve_one` for real
   with the solver stubbed. Verified by deleting the import again: both tests fail,
   then pass when restored.

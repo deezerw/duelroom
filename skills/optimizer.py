@@ -25,7 +25,6 @@ Two costs to respect:
 
 import json
 from datetime import datetime, timezone
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
