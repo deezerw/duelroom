@@ -462,7 +462,7 @@ def _stub_optimizer(monkeypatch, scores):
     calls = []
 
     def fake_evaluate(deck, target, hands=12, solve_ms=None, scratch=None,
-                      fire=None):
+                      fire=None, **kw):
         calls.append(deck.name)
         added = set(deck.main) - _stub_optimizer.base
         key = next(iter(added), None)
@@ -2176,3 +2176,38 @@ def test_evaluate_records_what_the_single_draw_said():
     assert "brick_rate_single_draw" in src, (
         "the corrected rate overwrites the original with no record of it")
     assert "false_bricks" in src
+
+
+def test_the_ledger_is_not_truncated_over_a_previous_run(tmp_path, monkeypatch):
+    """`ledger.write_text("")` made each attempt erase the last one's
+    trials, which is the opposite of the resumption insurance BACKLOG
+    describes. A crashed overnight run is exactly when those trials
+    matter."""
+    import inspect
+    from skills import optimizer
+    src = inspect.getsource(optimizer.hill_climb)
+    i_guard = src.index("if ledger.exists()")
+    i_trunc = src.index('ledger.write_text("")', i_guard)
+    assert i_guard < i_trunc, "the ledger is truncated before being kept"
+    assert "ledger.replace(kept)" in src, "the old ledger is not preserved"
+
+
+def test_the_ledger_records_all_four_objective_terms():
+    """degenerate_terms needs solve rate, brick rate, survival and combo
+    length. The ledger stored only two of them, so an empty ranking could
+    be detected live and never from a stored run."""
+    import inspect
+    from skills import optimizer
+    src = inspect.getsource(optimizer.hill_climb)
+    for key in ("brick_rate", "survival", "best_line_rate",
+                "combo_actions_mean"):
+        assert f'"{key}"' in src, f"the ledger drops {key}"
+
+
+def test_the_brick_correction_is_not_silent():
+    """A number quietly corrected is a number nobody can check."""
+    import inspect
+    from skills import optimizer
+    src = inspect.getsource(optimizer.hill_climb)
+    assert src.count("log=log") >= 2, (
+        "evaluate is called without a log, so confirm_bricks says nothing")

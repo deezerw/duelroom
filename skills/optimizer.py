@@ -24,6 +24,7 @@ Two costs to respect:
 """
 
 import json
+from datetime import datetime, timezone
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -294,6 +295,15 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
     # finished trial, so an interrupted run is still a usable shortlist.
     ledger = engine.ROOT / "results" / f"optimize_{deck.name}.jsonl"
     ledger.parent.mkdir(parents=True, exist_ok=True)
+    # Do NOT truncate. This file is described as resumption insurance, and
+    # `write_text("")` made the next attempt erase the previous one's work
+    # -- the opposite of a checkpoint. A crashed overnight run is exactly
+    # when you want the trials it did finish.
+    if ledger.exists() and ledger.stat().st_size:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        kept = ledger.with_name(f"{ledger.stem}.{stamp}.jsonl")
+        ledger.replace(kept)
+        log(f"previous ledger kept as {kept.name}")
     ledger.write_text("")
 
     def _record(label, summary, score):
@@ -303,9 +313,18 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 "solved": summary.get("solved"), "hands": summary.get("hands"),
                 "brick_rate": summary.get("brick_rate"),
                 "survival": summary.get("hand_trap_survival"),
+                # `degenerate_terms` needs all four terms. Without these
+                # two it could only be computed live, in memory, so a
+                # stored run could not be checked for an empty ranking.
+                "best_line_rate": summary.get("best_line_rate"),
+                "combo_actions_mean": (summary.get("combo_actions")
+                                       or {}).get("mean"),
+                "false_bricks": summary.get("false_bricks"),
+                "brick_rate_single_draw": summary.get("brick_rate_single_draw"),
                 "fire": fire,
             }) + "\n")
-    base_summary = evaluate(deck, target, hands, solve_ms, fire=fire)
+    base_summary = evaluate(deck, target, hands, solve_ms, fire=fire,
+                            log=log)
     best = Candidate(deck, "base", base_summary, objective.score(base_summary))
     _record("base", base_summary, best.score)
     log(f"base {deck.name}: score {best.score:+.3f} "
@@ -328,7 +347,8 @@ def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
                 problems = trial.validate(conn)
                 if problems:
                     continue
-                summary = evaluate(trial, target, hands, solve_ms, fire=fire)
+                summary = evaluate(trial, target, hands, solve_ms,
+                                   fire=fire, log=log)
                 score = objective.score(summary)
                 out_name = card_name(conn, out_card)
                 log(f"  -{out_name} +{cand_row['name']}: {score:+.3f}")
