@@ -60,10 +60,19 @@ properly for the board library.
   So "20/20 solved" and "5/20 bricked" were never measuring the same thing. This is
   the failure mode this project documents repeatedly, committed by me: reporting the
   difference between two numbers that mean different things.
-- **What the evidence actually says:** `confirm_bricks` re-drew those 5 bricked hands
-  3 seeds each against the SAME target and found **zero** false bricks. For this deck
-  and this target the single-draw brick rate holds up. That is a reassuring result,
-  not a bug — and it is the first apples-to-apples check of it.
+- **CLOSED with positive evidence (2026-10-24).** `paired_check` re-solved all 20 of
+  the funnel's own hands, 3 seeds each, against the funnel's own target:
+
+  | | |
+  |---|---|
+  | agree solved | **15** |
+  | agree brick | **5** |
+  | funnel pessimistic (brick, re-draw reached it) | **0** |
+  | funnel optimistic (solved, no re-draw reached it) | **0** |
+
+  **20 of 20 agreement.** The single-draw brick rate is reliable for this deck and
+  target — 0.25 is a real deck property. `confirm_bricks` stays as a guard that
+  currently finds nothing, which is the right state for a guard.
 - The safeguard is still worth having: it costs nothing when there are no false
   bricks, and the solver's randomness is measured and real elsewhere. But it is now
   a guard with a negative first result, not a fix for a known 25-point error.
@@ -276,10 +285,12 @@ ask "does the multi-draw path solve the hand the single-draw path called a brick
 except by hand-plumbing seeds. That absence is what let me compare 20 unrelated hands
 and report the difference as a measurement error (see the retraction under P0 #3).
 
-- **Fix:** let `funnel_eval`/`gate.run_funnel` take explicit hands, or let `sweep`
-  take the funnel's hand seeds, so the two can be run paired. Paired seeds are
-  already this project's stated doctrine for deck comparisons; they are not available
-  across measurement methods, which is where they are most needed.
+- **FIXED** by `optimizer.paired_check`: re-solves every hand of a funnel record with
+  the multi-draw path, using the funnel's own hands and its own target, and classifies
+  disagreement in BOTH directions — including `funnel_optimistic`, where the single
+  draw found a line the re-draws missed. That direction bounds how much of a solve
+  rate is luck rather than reach, and I would not have thought to look for it before
+  getting the comparison wrong.
 
 ### 20. `survival 0%` reads as a broken metric and is not one — FIXED (output)
 
