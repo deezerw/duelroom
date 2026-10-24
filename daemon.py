@@ -950,7 +950,7 @@ def cmd_optimize(conn, args):
     # tiebreak at weight -0.05.
     if len(varying) <= 1:
         only = varying[0] if varying else "nothing"
-        print(f"\n  !! NO RANKING. {len(constant)} of 4 objective terms did "
+        print(f"\n  !! NO RANKING. {len(constant)} of 5 objective terms did "
               f"not vary at all over {len(history)} trials:")
         print(f"     {', '.join(constant)}")
         print(f"     Only {only} moved, and at weight "
@@ -1000,7 +1000,7 @@ def cmd_optimize(conn, args):
     # Only reached when 2+ terms varied; the degenerate case returned above
     # before printing any table.
     if constant:
-        print(f"\n  ! {len(constant)} of 4 objective terms did not vary at all:")
+        print(f"\n  ! {len(constant)} of 5 objective terms did not vary at all:")
         print(f"    {', '.join(constant)}")
         print(f"    Ranking rests on: {', '.join(varying)}.")
     out = ROOT / "results" / f"optimize_{deck.name}.ydk"

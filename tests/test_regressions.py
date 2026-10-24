@@ -762,7 +762,11 @@ def test_degenerate_objective_terms_are_detected():
                             "combo_actions": {"mean": mean}}
     hist = [C(4.0), C(4.5), C(5.0)]
     constant, varying = optimizer.degenerate_terms(hist)
-    assert set(constant) == {"solve rate", "brick rate", "handtrap survival"}
+    # Five terms since window recovery joined the objective. The kewl-tune
+    # summaries carried no window_recovery at all, so it reads constant
+    # too -- which is itself correct: a term with no data cannot rank.
+    assert set(constant) == {"solve rate", "brick rate", "handtrap survival",
+                             "window recovery"}
     assert varying == ["combo length"]
 
     class D(C):
@@ -2324,3 +2328,46 @@ def test_the_optimizer_output_explains_the_survival_standard():
         "the output prints 0% survival without saying it is an all-windows "
         "standard")
     assert "window_recovery" in src
+
+
+def test_window_recovery_is_in_the_objective():
+    """The effect that dominates handtrap resilience was in the summary
+    and unused. Measured on the active deck: line length correlates +0.75
+    with Imperm windows while recoveries per hand stay flat at 3-4, so
+    short lines recover 49.0% of windows and long ones 23.7%. `survival`
+    cannot see it (all-or-nothing, saturated at 0.0) and `actions` was a
+    -0.05 tiebreak."""
+    from skills.optimizer import Objective, mean_window_recovery
+
+    s = {"brick_rate": 0.25, "best_line_rate": 0.75,
+         "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.9},
+         "window_recovery": {"10045474": 0.49, "14558127": 0.31}}
+    assert abs(mean_window_recovery(s) - 0.40) < 1e-9
+    assert Objective().score(s) > Objective(recovery=0).score(s), (
+        "recovery does not affect the score")
+    # Two decks identical but for recovery must order by it.
+    worse = dict(s, window_recovery={"10045474": 0.10, "14558127": 0.10})
+    assert Objective().score(s) > Objective().score(worse)
+    # And the old behaviour stays reachable exactly.
+    assert Objective(recovery=0).score(s) == Objective(recovery=0).score(worse)
+
+
+def test_window_recovery_handles_a_missing_or_empty_dict():
+    from skills.optimizer import mean_window_recovery
+    assert mean_window_recovery({}) == 0.0
+    assert mean_window_recovery({"window_recovery": {}}) == 0.0
+    assert mean_window_recovery({"window_recovery": {"a": None}}) == 0.0
+
+
+def test_degenerate_terms_counts_the_new_term():
+    """A ranking resting on window recovery alone must still be refused."""
+    from skills import optimizer
+    hist = [optimizer.Candidate(
+        deck=None, label=f"t{i}", score=0.1 * i,
+        summary={"brick_rate": 0.2, "best_line_rate": 0.8,
+                 "hand_trap_survival": 0.0,
+                 "combo_actions": {"mean": 9.0},
+                 "window_recovery": {"a": 0.1 * i}}) for i in range(3)]
+    const, vary = optimizer.degenerate_terms(hist)
+    assert vary == ["window recovery"], (const, vary)
+    assert len(const) == 4

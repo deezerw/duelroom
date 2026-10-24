@@ -47,6 +47,7 @@ class Objective:
     solve_rate: float = 1.0    # maximise
     survival: float = 1.5      # maximise, for our own deck
     actions: float = -0.05     # shorter lines are less interruptible
+    recovery: float = 0.5      # maximise: share of handtrap windows survived
 
     def score(self, summary):
         s = summary
@@ -56,7 +57,39 @@ class Objective:
             + self.solve_rate * (s.get("best_line_rate") or 0.0)
             + self.survival * (s.get("hand_trap_survival") or 0.0)
             + self.actions * combo
+            + self.recovery * mean_window_recovery(s)
         )
+
+
+
+def mean_window_recovery(summary):
+    """Mean share of handtrap windows recovered, over the fired cards.
+
+    Added because the objective could not SEE the effect that dominates
+    handtrap resilience on a real deck. Measured on the active deck, 20
+    hands, Infinite Impermanence:
+
+      line length vs windows : correlation +0.75 (6 actions -> 4-9
+                               windows; 12-13 actions -> 11-17)
+      recoveries per hand    : flat at 3-4 regardless of line length
+      short lines (6-8)      : 51 windows, 25 recovered = 49.0%
+      long lines (10-13)     : 93 windows, 22 recovered = 23.7%
+
+    So a longer line adds windows but not answers, and per-window
+    recovery halves. The objective's two handtrap-related terms both miss
+    this: `survival` is an all-or-nothing all-windows standard and
+    saturates at 0.0 for any deck with a long line, and `actions` was
+    treated as a -0.05 tiebreak. The quantity that actually varies, and
+    that a deckbuilder can act on, was in the summary and unused.
+
+    WEIGHT IS A JUDGEMENT CALL, not a measurement: 0.5 makes recovery
+    matter without letting it outvote bricking. It wants calibrating
+    against real results before anyone trusts the ordering it produces.
+    Set `recovery=0` to score exactly as before.
+    """
+    wr = summary.get("window_recovery") or {}
+    shares = [v for v in wr.values() if isinstance(v, (int, float))]
+    return sum(shares) / len(shares) if shares else 0.0
 
 
 @dataclass
@@ -385,7 +418,9 @@ def degenerate_terms(history):
 
     That ordering is not wrong so much as empty, and an empty ordering
     presented as a ranking is the failure this project keeps producing.
-    Returns (constant_terms, varying_terms).
+    Returns (constant_terms, varying_terms). Five terms now, not four:
+    window recovery was added to the objective and a ranking resting on it
+    alone would otherwise have passed this check unnoticed.
     """
     keys = {
         "solve rate": lambda c: (c.summary or {}).get("best_line_rate"),
@@ -393,6 +428,8 @@ def degenerate_terms(history):
         "handtrap survival": lambda c: (c.summary or {}).get("hand_trap_survival"),
         "combo length": lambda c: ((c.summary or {}).get("combo_actions")
                                    or {}).get("mean"),
+        "window recovery": lambda c: round(
+            mean_window_recovery(c.summary or {}), 6),
     }
     constant, varying = [], []
     for name, get in keys.items():
