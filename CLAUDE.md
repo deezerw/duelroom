@@ -358,7 +358,8 @@ Honest gaps, so nobody mistakes a limit for a result:
   The opponents come from `assets/decks/`, and `export` writes whichever scraped list
   happened to be stored first (`ORDER BY d.id LIMIT 1`), not a representative one:
   `branded.ydk` is a Branded/Blitzclique hybrid with one Fallen of Albaz and no
-  Branded Fusion, and it averages 1.0 interruptions over 40 hands. A gauntlet of weak
+  Branded Fusion, and it averages 1.6 interruptions over its 31 solved hands of 40
+  (1.2 if the 9 with no line count as zero). A gauntlet of weak
   lists flatters every board.
 
 **Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in

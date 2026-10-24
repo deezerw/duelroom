@@ -162,10 +162,22 @@ out at 5 int / 4 neg.
 
 `daemon.py cmd_export` selects with `ORDER BY d.id LIMIT 1` — not best-placing, not
 most representative. That is how `branded.ydk` became a Branded/Blitzclique hybrid
-with one Fallen of Albaz and **no Branded Fusion**, averaging 1.0 interruptions over
-40 hands. It is one of the three opponents `gauntlet` weights by default, and a
-gauntlet of weak lists flatters every board.
+with one Fallen of Albaz and **no Branded Fusion**, averaging 1.6 interruptions over
+its 31 solved hands of 40 (1.2 if the 9 with no line count as zero). It is one of
+the three opponents `gauntlet` weights by default, and a gauntlet of weak lists
+flatters every board.
 
+- **My own measurement error, corrected 2026-10-24.** I reported this deck at
+  "1.0 interruptions over 40 hands" all session, in ISSUES, CLAUDE.md and several
+  commit messages. That figure came from my iteration-1 script scoring unsolved
+  hands as **-1 interruptions**: (49 - 9)/40 = 1.00 exactly. Counting a brick as
+  minus one interruption is meaningless. The real figures are 1.6 over solved
+  hands and 1.2 counting bricks as zero. The qualitative point stands on the
+  decklist itself — no Branded Fusion — not on the number I attached to it.
+- Found because `boards` printed 1.6 for the same deck. Two views disagreeing is
+  what surfaced it, which is the fifth time that has worked tonight. `boards` now
+  states its denominator: "per SOLVED hand; hands with no line are not in this
+  library" — a bare mean invited reading it as per-hand.
 ### 7. `draws` has no per-deck calibration
 
 Four draws bought +0.10 mean interruptions on despia for 2.6x the solver time (one

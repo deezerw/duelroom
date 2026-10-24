@@ -713,7 +713,12 @@ def cmd_boards(conn, args):
     for archetype, boards in lib.items():
         total = sum(b["frequency"] for b in boards)
         mean = sum(b["negates"] * b["frequency"] for b in boards) / (total or 1)
-        print(f"\n  {archetype}  (mean {mean:.1f} interruptions)")
+        # Over the SOLVED hands only -- the library stores end boards, and
+        # a hand with no line contributes none. Printing a bare mean let
+        # it be read as "per hand", which is a different and lower number:
+        # branded is 1.6 over its 31 solved hands and 1.2 over all 40.
+        print(f"\n  {archetype}  (mean {mean:.1f} interruptions per SOLVED "
+              f"hand; hands with no line are not in this library)")
         for b in boards:
             print(f"    {b['frequency']*100:4.0f}%  {b['negates']} interrupts")
             for i in b["interruptions"]:
