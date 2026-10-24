@@ -224,6 +224,27 @@ solver children were orphaned rather than stopped.
   executable name (`pkill -x combosolver`), which cannot match a bash command line.
   Killing the parent does NOT stop its solver children; they need killing separately.
 
+### 18. A structural test passed while the code was broken — FIXED (6de8e84)
+
+`sweep.py` was missing `import shutil`, so every call to `_solve_one` died on
+`shutil.rmtree` in its `finally` — breaking every sweep and the optimiser's brick
+re-check, which routes through it. Cause: the edit adding the import was anchored on
+`import json\nimport os`, and `import os` had already been removed when `_be_nice`
+moved to `engine.py`, so the anchor never matched.
+
+The test written for that very commit passed the whole time, because it only grepped
+the source for `"rmtree(scratch"`. **A structural assertion cannot catch a missing
+import**, and `_solve_one` is stubbed out of every other test, so nothing in the suite
+ever called it.
+
+- **Lesson for the remaining structural tests in this file** (there are several —
+  `test_the_spare_reaches_the_child_process`, `test_breadth_does_not_ask_for_stacks`,
+  the ledger tests): each one proves the source *says* something, not that it *works*.
+  Where the path is cheap to exercise with a stub, it should be.
+- Fixed by asserting the names resolve in the module AND calling `_solve_one` for real
+  with the solver stubbed. Verified by deleting the import again: both tests fail,
+  then pass when restored.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
