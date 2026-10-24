@@ -47,6 +47,18 @@ that a re-draw solves — meaning `brick_rate`, the second-heaviest term at -2.0
 measured by the noisiest available method. `skills/sweep.py` already does multi-draw
 properly for the board library.
 
+- **MEASURED 2026-10-24, same deck, same 20 hands:**
+  - multi-draw sweep: **20/20 solved, 0 bricks**, mean 4.1 interruptions
+  - single-draw funnel (what the optimiser scores on): **brick 5/20 = 0.25**
+    [0.1119, 0.4687]
+
+  So the optimiser's second-heaviest term is wrong by 25 points, in the pessimistic
+  direction, on the user's own deck. Those five "bricks" are false bricks — one draw
+  of a randomized search. Base score came out -0.193, dominated by an artifact.
+- Its heaviest term is dead too: `survival 0.0` on this deck, as on kewl-tune. So
+  brick rate is wrong and survival cannot discriminate, which leaves combo length.
+- The same run logged `solver 857.09 s (budget 120 s: OVER)` — the budget guard is
+  being exceeded by 7x and only warns.
 - **Fix:** route `evaluate` through the sweep, or at minimum re-draw the hands it
   calls bricks before believing them.
 
