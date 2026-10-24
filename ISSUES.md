@@ -83,8 +83,31 @@ escapes — but the feature is unusable until this is found.
 - **Next step, now cheap:** `_attack` keeps a `solver.log` per search and returns its
   `target board POSTED/EDITED` line. Run ONE going-second search and read what the
   solver says about its goal, its starting position, and why it wrote nothing.
-- **Candidates left:** `--turns 2` not giving player 1 a full turn; the start
-  replay's player-1 deck not lining up with `--deck`.
+**Status after three fixes (2026-10-24): STILL BLOCKED.** Two real bugs were found
+and fixed on the way, neither of them the cause. What is now PROVEN:
+
+1. `--hand` does not reach player 1. The report's "starting position (player 1)"
+   listed cards nobody passed, and two template seeds dealt the same five.
+2. The hand is not the tail of the file passed as `--deck` either: with `--deck`
+   pointing at a rewritten copy, the solver dealt the last five of the ORIGINAL
+   light-and-darkness-ritual.ydk.
+3. Putting the dealt list into the START replay DOES change the hand — so that path
+   reaches player 1 — but not to the hand that was dealt.
+4. The start replay's side-b main deck is the **same multiset in a different order**
+   than the .ydk written for it (verified by reading the .yrpX back). And the hand
+   dealt is not that replay's tail either.
+5. `--turns` is not involved: `--turns 3` changes nothing, 100% of rollouts still cut.
+
+So the order is lost somewhere between `template_vs` writing the template and
+`Replay.from_yrp` reading the solver's output replay, and the actual source of player
+1's opening hand is still unidentified.
+
+- **Next experiment, precise:** read the template `.yrpX` directly, BEFORE the solver
+  runs, and compare its side-b main order against the dealt .ydk. That isolates
+  whether `template_vs`/`to_yrpx` reorders, or the solver's output replay does.
+  Then find what the core actually draws from.
+- **Do not spend more loop iterations on this before the P0 optimiser items.** It is
+  one feature; the optimiser is the thing being asked for.
 
 ---
 
