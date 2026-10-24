@@ -6,6 +6,7 @@ commands arrive with Stage 2+.
 """
 
 import json
+import os
 import shlex
 import sys
 import traceback
@@ -396,6 +397,39 @@ def cmd_check(conn, args):
         print(f"  ! {p}")
 
 
+def _orphaned_workers():
+    """Leaked pool workers: duelroom spawn children reparented to init.
+
+    When a pool's parent dies -- a killed sweep, a crashed optimiser --
+    its spawned children are reparented to PID 1 and never exit, because
+    they sit blocked on a queue nobody will write to again. Found six of
+    them on 2026-10-24 aged six days, 41 MB between them.
+
+    Harmless to correctness and invisible without looking, but they
+    accumulate, and stray Python processes make `_busy_solvers` and any
+    CPU reading misleading. Returns [(pid, etime)].
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["ps", "-u", os.environ.get("USER", ""), "-o", "pid=,ppid=,etime=,args="],
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = []
+    for line in (r.stdout or "").splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        pid, ppid, etime, args = parts
+        if ppid != "1" or "spawn_main" not in args:
+            continue
+        if "duelroom" not in args:
+            continue
+        out.append((pid, etime))
+    return out
+
+
 def cmd_doctor(conn, args):
     """Everything that can be verified without burning solver time.
 
@@ -453,6 +487,19 @@ def cmd_doctor(conn, args):
         if r.returncode != 0:
             ok = False
         print(f"    {mark}  {label:18} {summary[:60]}")
+
+    orphans = _orphaned_workers()
+    if orphans:
+        ok = False
+        print(f"\n  LEAKED PROCESSES")
+        print(f"    ! {len(orphans)} orphaned pool worker(s) — a dead sweep or")
+        print(f"      optimiser left children blocked on a queue nobody will")
+        print(f"      write to. They never exit on their own.")
+        for pid, etime in orphans[:6]:
+            print(f"        pid {pid:>8}  age {etime}")
+        if len(orphans) > 6:
+            print(f"        ... and {len(orphans) - 6} more")
+        print(f"      clear with: kill {' '.join(p for p, _ in orphans[:12])}")
 
     print("\n  WEAKEST DATA")
     mpath = _latest_matrix()

@@ -2535,3 +2535,42 @@ def test_paired_check_is_a_noop_without_hands_or_targets(tmp_path):
     assert optimizer.paired_check(
         tmp_path / "d.ydk",
         {"targets": [["1@atk"]], "hands": []})["agree_solved"] == 0
+
+
+def test_doctor_reports_orphaned_pool_workers(monkeypatch):
+    """Killing a pool's parent leaves its spawn children reparented to
+    PID 1, blocked on a queue nobody will write to. Found six aged six
+    days on 2026-10-24, and six MORE aged four hours immediately after
+    killing one funnel parent — so this recurs every time a long job is
+    stopped, and it is invisible without looking."""
+    import subprocess
+    import daemon
+
+    rows = "\n".join([
+        # pid ppid etime args
+        "111 1 6-01:31:55 /home/deezer/duelroom/venv/bin/python -c from multiprocessing.spawn import spawn_main; x",
+        "112 1 04:19:47 /home/deezer/duelroom/venv/bin/python -c from multiprocessing.spawn import spawn_main; x",
+        # a LIVE worker with a real parent must not be reported
+        "113 999 00:10 /home/deezer/duelroom/venv/bin/python -c from multiprocessing.spawn import spawn_main; x",
+        # another project's orphan is not ours to report
+        "114 1 1-00:00 /home/deezer/flipper/venv/bin/python -c from multiprocessing.spawn import spawn_main; x",
+        # the web service must never be listed
+        "115 1 9-00:00 /home/deezer/duelroom/venv/bin/python3 gunicorn web.wsgi:app",
+    ])
+
+    class R:
+        stdout = rows
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+    out = daemon._orphaned_workers()
+    pids = [p for p, _ in out]
+    assert pids == ["111", "112"], pids
+    assert "115" not in pids, "the web service was reported as an orphan"
+
+
+def test_orphan_check_survives_a_broken_ps(monkeypatch):
+    import subprocess
+    import daemon
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no ps")))
+    assert daemon._orphaned_workers() == []

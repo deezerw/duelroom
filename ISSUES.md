@@ -241,9 +241,14 @@ Harmless to correctness but it accumulates, and six stray Python processes is en
 to make a `doctor` CPU reading or a `_busy_solvers()` check misleading. Cleared by
 PID.
 
-- **Fix:** the pools should be context-managed with a hard timeout, or the sweep
-  should install a signal handler that terminates children before exiting. A cheaper
-  mitigation: have `doctor` report orphaned `spawn_main` workers whose parent is 1.
+- **PARTLY FIXED:** `doctor` now reports them, with the PIDs and a kill line, and
+  fails its check when any exist. It proved the point immediately — run right after
+  the detector was written it found **six more**, aged 4h20m, children of the one
+  `funnel_eval` parent killed earlier in the session. So this recurs every time a
+  long job is stopped, not just once.
+- **Still open:** the pools themselves should terminate their children on exit (a
+  signal handler in the sweep, or a hard timeout), so the leak stops happening rather
+  than being reported after the fact.
 
 ### 17. `pkill -f` on a job pattern kills the caller — again
 
