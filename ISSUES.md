@@ -455,6 +455,35 @@ restoring the old sort key: the test fails, and passes again with the fix.
 This is the same flat-count flaw that drove the end-board scoring at the start of the
 session, surfacing in a second place that nobody had looked at.
 
+### 24. `report` said "no funnel run yet" with a full record on disk — FIXED
+
+Found by running the command. `latest_funnel` globbed `results/*.jsonl` — **top level
+only** — while `optimizer.evaluate` writes its funnel records into
+`results/optimizer/`. So any deck that had been through `optimize` reported no
+measurement at all. The active deck had a complete 20-hand record — 15/20 solved,
+brick 0.25, the very one `paired_check` validated — and the view whose job is
+assembling what exists said there was nothing.
+
+Fixed with `rglob`. Trial records cannot be picked up by mistake: their
+`summary.deck` is the generated trial name, not the deck's.
+
+**That fix broke a different test, which was right to break.** Ranking by recency
+alone, `rglob` then preferred the optimiser's base record for kewl-tune — newer, but
+it fires only the top two threats (Imperm, Ash) — over the gate run that fired
+everything, silently dropping the Maxx "C" blind-spot note the report exists to
+carry. A genuine loss of information, not a test artefact.
+
+`latest_funnel` now ranks by **(handtraps fired, mtime)**: more of the question
+answered leads, recency breaks ties. Both views are now correct — the active deck
+reports its 20 hands, and kewl-tune keeps "Surviving it is not beating it".
+
+Now visible in the report for the active deck, and worth reading before the event:
+
+      PLAYS THROUGH (higher is better — this is YOUR deck)
+         0%  Infinite Impermanence    folds to it
+         0%  Ash Blossom              folds to it
+      -> Infinite Impermanence is your worst matchup card
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

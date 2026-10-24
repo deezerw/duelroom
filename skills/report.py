@@ -22,13 +22,21 @@ def latest_funnel(deck_name):
     at -- 10s reports a brick where 60s solves the same hand in nine
     actions -- and two runs of the same deck look identical on screen.
     """
-    best, best_mtime, best_src = None, -1, None
-    for p in (engine.ROOT / "results").glob("*.jsonl"):
+    best, best_key, best_src = None, (-1, -1.0), None
+    # rglob, not glob: `optimizer.evaluate` writes its funnel records into
+    # results/optimizer/, a SUBDIRECTORY, so a top-level glob missed every
+    # measurement a deck had been through `optimize` for. The active deck
+    # had a full 20-hand funnel record -- 15/20 solved, brick 0.25, the
+    # one `paired_check` validated -- and this view still said "no funnel
+    # run yet". A report whose job is to assemble what exists must look
+    # where it is written.
+    #
+    # Trial records cannot be picked up by mistake: their `summary.deck`
+    # is the generated trial name ("..._r0_17782288"), not the deck's.
+    for p in (engine.ROOT / "results").rglob("*.jsonl"):
         try:
             mtime = p.stat().st_mtime
         except OSError:
-            continue
-        if mtime <= best_mtime:
             continue
         for line in p.read_text().splitlines():
             if not line.strip():
@@ -39,9 +47,29 @@ def latest_funnel(deck_name):
                 continue
             s = rec.get("summary") or {}
             if s.get("deck") == deck_name:
-                best, best_mtime, best_src = rec, mtime, p
+                cand = (_fired_count(s), mtime)
+                if cand > best_key:
+                    best, best_key, best_src = rec, cand, p
                 break
     return best, best_src
+
+
+def _fired_count(summary):
+    """How many distinct hand traps a run actually fired.
+
+    Recency alone is the wrong ranking, and switching to `rglob` proved
+    it: the optimiser's base record for kewl-tune is NEWER than its gate
+    run but fires only the top two threats (Imperm, Ash), so picking it
+    silently dropped the Maxx "C" blind-spot note the report is supposed
+    to carry -- a test caught that. More handtraps fired is more of the
+    question answered, so that leads, with recency as the tiebreak.
+    """
+    keys = set()
+    for field in ("survival_given_line", "window_recovery"):
+        v = summary.get(field)
+        if isinstance(v, dict):
+            keys |= set(v)
+    return len(keys)
 
 
 def deck_report(conn, path, archetype=None):

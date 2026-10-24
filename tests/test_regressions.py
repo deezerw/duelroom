@@ -2819,3 +2819,35 @@ def test_drill_ranks_real_boards_above_holding_handtraps(tmp_path):
     assert found[1][1] == hand_line
     assert drill._on_field(field_line) == 1
     assert drill._on_field(hand_line) == 0
+
+
+def test_report_finds_funnel_records_in_subdirectories(tmp_path, monkeypatch):
+    """`latest_funnel` globbed `results/*.jsonl` — top level only — while
+    `optimizer.evaluate` writes its funnel records into
+    results/optimizer/. So any deck that had been through `optimize`
+    reported "no funnel run yet" despite a full record existing. The
+    active deck had 20 hands, 15 solved, brick 0.25 — the record
+    `paired_check` validated — and the view whose job is assembling what
+    exists said there was nothing."""
+    import json as _json
+    from skills import engine, report
+
+    results = tmp_path / "results"
+    (results / "optimizer").mkdir(parents=True)
+    rec = {"summary": {"deck": "d", "hands": 20, "solved": 15,
+                       "brick_rate": 0.25, "budget_s": 60.0}}
+    (results / "optimizer" / "d.jsonl").write_text(_json.dumps(rec) + "\n")
+    # A trial record must NOT be mistaken for the deck's own.
+    trial = {"summary": {"deck": "d_r0_999", "hands": 20, "solved": 2}}
+    (results / "optimizer" / "d_r0_999.jsonl").write_text(
+        _json.dumps(trial) + "\n")
+
+    monkeypatch.setattr(engine, "ROOT", tmp_path)
+    found, src = report.latest_funnel("d")
+    assert found is not None, "the subdirectory record was not found"
+    assert found["summary"]["solved"] == 15
+    assert src.name == "d.jsonl"
+
+    # And a deck with no record anywhere still reports nothing.
+    none_found, _ = report.latest_funnel("other")
+    assert none_found is None
