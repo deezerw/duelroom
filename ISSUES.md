@@ -398,6 +398,35 @@ materially different claims: branded is 1.6 and 1.2 respectively. All three now 
 their denominator, and a test asserts both that the field really is solved-only and
 that every view saying it says so.
 
+### 22. The deployed web service is 5 days stale — checked, LOW impact
+
+`web/worker.py` and the gunicorn masters have been up **5 days 7 hours** (since
+~2026-10-19 01:00). The first change in this work landed 2026-10-20 and tonight's
+~30 commits are from 2026-10-24, so the deployed service runs code older than all of
+it. CLAUDE.md is explicit that `skills/` changes used by the worker need a **full
+restart**, not a SIGHUP.
+
+So the question is which changed modules the web app actually imports. It imports
+`carddb`, `db`, `engine`, `handlab` and `skills.deck`. Of the seven `skills/` files
+changed since the worker started, only **two** are on that list:
+
+| module | what changed | effect on the web UI |
+|---|---|---|
+| `handlab.py` | the board score was clobbering the plan's piece list (231f2b2) | **none on any reported number** — nothing read that field; it is diagnostic only |
+| `engine.py` | added `be_nice` | none — it only niced the sweep/gauntlet pools, which web does not use |
+
+`gauntlet`, `sweep`, `optimizer`, `breaking` and `meta_scrape` all changed tonight and
+**none of them is imported by the web app**, so none of tonight's measurement fixes —
+and none of the defects they fixed — reaches the web UI either way.
+
+**Conclusion: the stale deployment does not serve wrong numbers.** Worth restarting
+to pick up the diagnostic fix, but not urgent, and deliberately NOT done while the
+user is asleep: it is an internet-facing service (TLS :8446), a failed restart leaves
+it down with nobody to fix it, and the gain is a field nothing reads. The worker is
+idle (`jobs.active` is None), so when awake:
+
+    sudo systemctl restart duelroom.service      # full restart: skills/ changed
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
