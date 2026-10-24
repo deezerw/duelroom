@@ -119,6 +119,46 @@ def template_vs(path, their_deck, our_deck, seed, config=None, cards=None,
     return Path(path)
 
 
+def deck_with_hand(deck_path, hand, out_path):
+    """Write a copy of `deck_path` whose main deck ENDS with `hand`.
+
+    `--hand` does not reach the going-second player. Proven 2026-10-24:
+    the solver's own "starting position (player 1)" block listed five
+    cards nobody asked for -- Synchro Overtake and three Effect Veiler and
+    a Dominus Purge -- while `--hand` carried six different ones, and two
+    different template seeds produced the SAME five. Those five are the
+    last five entries of kewl-tune.ydk, reversed: `template_vs` sets
+    shuffle_decks=False and the core runs with DUEL_PSEUDO_SHUFFLE, so
+    nothing is ever shuffled and the hand is drawn off the end of the
+    list.
+
+    The consequence was that every going-second trial tested one hand --
+    whatever sits at the bottom of the decklist file -- so `hands=6` was
+    the same hand six times, and for kewl-tune that hand is four handtraps
+    and a Synchro spell, which cannot assemble its payoff. Hence 0 of 72
+    searches getting through, and a board of vanilla monsters "stopping"
+    the whole meta.
+
+    So the hand is placed where the core will actually draw it, which is
+    what `ygorl.solver.batch` already does for the solitaire path (it
+    writes the shuffled order out as a per-hand .ydk). Order inside the
+    hand does not matter -- only which cards are in it.
+    """
+    deck = Deck.from_ydk(Path(deck_path))
+    rest = list(deck.main)
+    for code in hand:
+        if code in rest:
+            rest.remove(code)
+        else:
+            raise ValueError(
+                f"{Path(deck_path).stem}: {code} is not in the main deck, so "
+                f"it cannot be dealt as part of the opening hand")
+    out = Deck(name=deck.name, main=rest + list(hand),
+               extra=list(deck.extra), side=list(deck.side))
+    out.write_ydk(Path(out_path))
+    return Path(out_path)
+
+
 def going_second_args(start_replay, our_deck_path, our_hand, target,
                       solve_ms=None, turns=2):
     """Solver arguments for "can we still do our thing through their board".
@@ -316,13 +356,15 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
         out.mkdir(exist_ok=True)
         # Going second draws for turn, so six cards rather than five.
         hand, _ = sample_hand(ours_deck, seed=1000 + seed, size=6)
-        cmd = [str(engine.SOLVER_BIN)] + going_second_args(
-            start, our_deck, hand, our_target, solve_ms)
-        cmd = [cmd[0], cmd[1], "--workdir", str(wd.path)]
+        # The hand has to be dealt through the DECKLIST; `--hand` does not
+        # reach the going-second player (see deck_with_hand). Without this
+        # every seed tested the same hand -- the tail of the .ydk file.
+        dealt = deck_with_hand(our_deck, hand, sd / "dealt.ydk")
+        args_ = going_second_args(start, dealt, hand, our_target, solve_ms)
+        cmd = [str(engine.SOLVER_BIN), args_[0], "--workdir", str(wd.path)]
         for d in wd.scriptdirs:
             cmd += ["--scriptdir", str(d)]
-        cmd += going_second_args(start, our_deck, hand, our_target,
-                                 solve_ms)[1:]
+        cmd += args_[1:]
         cmd += ["--threads", "2", "--outdir", str(out)]
         r = subprocess.run(cmd, capture_output=True, text=True,
                            env=engine.env(), timeout=None)

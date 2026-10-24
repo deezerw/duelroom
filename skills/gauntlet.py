@@ -399,7 +399,12 @@ def _attack(args):
     wd = Workdir.create(scratch / "workdir")
     out = scratch / "gs"
     out.mkdir(exist_ok=True)
-    args_ = breaking.going_second_args(start, their_deck, their_hand,
+    # `--hand` never reaches player 1 -- the core draws off the end of the
+    # decklist and nothing is shuffled. Put the hand where it will be
+    # drawn. See breaking.deck_with_hand for the proof.
+    dealt = breaking.deck_with_hand(their_deck, their_hand,
+                                    scratch / "dealt.ydk")
+    args_ = breaking.going_second_args(start, dealt, their_hand,
                                        their_target, solve_ms)
     cmd = [str(engine.SOLVER_BIN), args_[0], "--workdir", str(wd.path)]
     for d in wd.scriptdirs:

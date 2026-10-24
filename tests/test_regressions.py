@@ -1973,3 +1973,48 @@ def test_the_solve_paths_clean_up_their_scratch_root():
         assert "finally:" in src, f"{fn.__name__} has no cleanup"
         assert "rmtree(scratch" in src, (
             f"{fn.__name__} does not remove its mkdtemp root")
+
+
+def test_the_opposing_hand_is_dealt_through_the_decklist(tmp_path):
+    """`--hand` does not reach the going-second player. Proven on the
+    solver's own report: its "starting position (player 1)" block listed
+    Synchro Overtake + 3x Effect Veiler + Dominus Purge -- the last five
+    entries of kewl-tune.ydk, reversed -- while --hand carried six
+    different cards, and two different template seeds dealt the SAME
+    five. shuffle_decks=False plus DUEL_PSEUDO_SHUFFLE means nothing is
+    ever shuffled, so the hand comes off the end of the list.
+
+    Consequence: every going-second trial tested one hand, so `hands=6`
+    was the same hand six times."""
+    from skills.breaking import deck_with_hand
+    from ygorl.cards.ydk import load_ydk
+
+    src = Path(__file__).resolve().parent.parent / "assets" / "decks" / "kewl-tune.ydk"
+    original = load_ydk(src)
+    hand = list(original.main[:5])
+    out = deck_with_hand(src, hand, tmp_path / "dealt.ydk")
+    dealt = load_ydk(out)
+
+    assert sorted(dealt.main) == sorted(original.main), (
+        "the deck's contents changed; only the ORDER may move")
+    assert sorted(dealt.main[-len(hand):]) == sorted(hand), (
+        "the requested hand is not at the end, where the core draws from")
+    assert list(dealt.extra) == list(original.extra)
+
+
+def test_a_card_not_in_the_deck_cannot_be_dealt(tmp_path):
+    from skills.breaking import deck_with_hand
+    src = Path(__file__).resolve().parent.parent / "assets" / "decks" / "kewl-tune.ydk"
+    with pytest.raises(ValueError, match="not in the main deck"):
+        deck_with_hand(src, [1], tmp_path / "x.ydk")
+
+
+def test_both_going_second_callers_deal_through_the_decklist():
+    """gauntlet._attack and breaking.going_second both pass a rewritten
+    decklist, not the original, or the hand they sampled is ignored."""
+    import inspect
+    from skills import breaking, gauntlet
+    for fn in (gauntlet._attack, breaking.going_second):
+        src = inspect.getsource(fn)
+        assert "deck_with_hand" in src, (
+            f"{fn.__name__} still deals the hand with --hand alone")
