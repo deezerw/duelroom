@@ -545,3 +545,60 @@ def identify_archetype(conn, deck, fmt=DEFAULT_FORMAT, min_overlap=0.5):
         scored.append((arch, hit / len(cards), len(cards)))
     scored.sort(key=lambda t: (-t[1], -t[2]))
     return [s for s in scored if s[1] >= min_overlap] or scored[:1]
+
+# Tournament placement, best first. `export` used to take whichever list
+# was stored FIRST (`ORDER BY d.id LIMIT 1`), which is an artefact of
+# scrape order and nothing else -- that is how `branded.ydk` became a
+# Branded/Blitzclique hybrid with one Fallen of Albaz and no Branded
+# Fusion, averaging 1.0 interruptions over 40 hands while sitting in the
+# board library as a meta deck.
+PLACEMENT_RANK = {
+    "winner": 0, "1st place": 0, "champion": 0,
+    "runner-up": 1, "2nd place": 1, "finalist": 1,
+    "3rd place": 2, "4th place": 3,
+    "top 4": 4, "top 8": 5, "top 16": 6, "top 32": 7, "top 64": 8,
+}
+
+
+def placement_rank(placement):
+    """Sort key for a placement string; unknown or missing sorts last."""
+    if not placement:
+        return 99
+    key = str(placement).strip().lower()
+    if key in PLACEMENT_RANK:
+        return PLACEMENT_RANK[key]
+    # "Top N" for an N nobody listed yet.
+    if key.startswith("top "):
+        tail = key[4:].strip()
+        if tail.isdigit():
+            return 4 + max(0, min(20, int(tail).bit_length() - 2))
+    return 98
+
+
+def best_list(conn, tag):
+    """The best-placing stored list for `tag`, most recent as the tiebreak.
+
+    Returns a row with id/title/placement, or None. Replaces
+    `ORDER BY d.id LIMIT 1`, which ranked by scrape order.
+    """
+    rows = conn.execute(
+        """SELECT d.id, d.title, d.placement, d.deck_date FROM decks d
+             JOIN deck_tags t ON t.deck_id = d.id
+            WHERE t.tag = ?""",
+        (tag,),
+    ).fetchall()
+    if not rows:
+        return None
+    return sorted(
+        rows,
+        key=lambda r: (placement_rank(r["placement"]),
+                       -(_date_key(r["deck_date"])), r["id"]),
+    )[0]
+
+
+def _date_key(value):
+    """A sortable integer from a date string; 0 when absent or unparsable."""
+    if not value:
+        return 0
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    return int(digits[:8]) if len(digits) >= 8 else 0

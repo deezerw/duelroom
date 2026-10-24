@@ -1187,15 +1187,16 @@ def cmd_export(conn, args):
         print("usage: export <archetype> [filename]")
         return
     archetype = args[0]
-    row = conn.execute(
-        """SELECT d.id, d.title, d.placement FROM decks d
-             JOIN deck_tags t ON t.deck_id = d.id
-            WHERE t.tag = ? ORDER BY d.id LIMIT 1""",
-        (archetype,),
-    ).fetchone()
+    # Best PLACING list, not the first one scraped. `ORDER BY d.id LIMIT 1`
+    # ranked by scrape order, which is how branded.ydk became a hybrid
+    # with no Branded Fusion that averages 1.0 interruptions over 40 hands
+    # while serving as a meta deck in the board library.
+    row = ms.best_list(conn, archetype)
     if not row:
         print(f"no stored lists tagged {archetype!r}")
         return
+    print(f"  best placing of the stored {archetype!r} lists: "
+          f"{row['placement'] or 'placement unknown'}")
     secs = {"main": [], "extra": [], "side": []}
     for r in conn.execute(
         "SELECT card_id, section, copies FROM deck_cards WHERE deck_id = ?",

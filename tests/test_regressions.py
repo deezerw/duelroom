@@ -2253,3 +2253,43 @@ def test_the_brick_correction_is_not_silent():
     src = inspect.getsource(optimizer.hill_climb)
     assert src.count("log=log") >= 2, (
         "evaluate is called without a log, so confirm_bricks says nothing")
+
+
+def test_export_ranks_by_placement_not_scrape_order():
+    """`ORDER BY d.id LIMIT 1` ranked lists by the accident of scrape
+    order. That is how branded.ydk became a Branded/Blitzclique hybrid
+    with one Fallen of Albaz and no Branded Fusion, averaging 1.0
+    interruptions over 40 hands while sitting in the board library as a
+    meta deck."""
+    import sqlite3
+    from skills import meta_scrape as ms
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE decks (id INTEGER PRIMARY KEY, title TEXT,
+                            placement TEXT, deck_date TEXT);
+        CREATE TABLE deck_tags (deck_id INTEGER, tag TEXT);
+    """)
+    rows = [(1, "scraped first, did badly", "Top 64", "2026-01-01"),
+            (2, "the winner", "Winner", "2026-01-02"),
+            (3, "also a winner but older", "Winner", "2025-06-01"),
+            (4, "no placement recorded", None, "2026-05-01")]
+    conn.executemany("INSERT INTO decks VALUES (?,?,?,?)", rows)
+    conn.executemany("INSERT INTO deck_tags VALUES (?,?)",
+                     [(r[0], "branded") for r in rows])
+
+    best = ms.best_list(conn, "branded")
+    assert best["id"] == 2, (
+        f"picked {best['id']} ({best['placement']}); the newest Winner is 2")
+    assert ms.best_list(conn, "nothing-tagged-this") is None
+
+
+def test_placement_rank_orders_and_tolerates_junk():
+    from skills import meta_scrape as ms
+    assert (ms.placement_rank("Winner") < ms.placement_rank("Runner-Up")
+            < ms.placement_rank("3rd Place") < ms.placement_rank("Top 4")
+            < ms.placement_rank("Top 32") < ms.placement_rank(""))
+    assert ms.placement_rank(None) == ms.placement_rank("")
+    # An unrecognised string must not sort ahead of a real placement.
+    assert ms.placement_rank("weird") > ms.placement_rank("Top 64")
