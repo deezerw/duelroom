@@ -484,6 +484,32 @@ Now visible in the report for the active deck, and worth reading before the even
          0%  Ash Blossom              folds to it
       -> Infinite Impermanence is your worst matchup card
 
+### 25. `drift` would have reported "the meta is stable" from one scrape — FIXED
+
+Found by checking before running the command. `snapshot` freezes the `inclusion`
+table; `inclusion.computed_at` moves every time anything recomputes it, so six-day-old
+scraped lists look fresh. Nothing recorded which SCRAPE a snapshot came from, so two
+snapshots of the same data differ only by when they were taken — and `drift` between
+them reports about zero movement, which reads as "the meta did not move" when it means
+"no new lists were gathered".
+
+Already live: `baseline-2026-10-18` and `2026-10-18` are both **5599 rows from the
+same scrape, 3.5 hours apart**. The newest scraped list is 2026-10-18; `inclusion` was
+recomputed 2026-10-24.
+
+- `scrape_fingerprint` is the newest scraped list plus the list count — what actually
+  has to change for drift to mean anything. Stored with each snapshot (added by
+  `ALTER TABLE` if the column is absent, so existing databases keep working).
+- `same_scrape` compares two snapshots and returns **None** when either predates the
+  column, which must not be read as "different".
+- `drift` now refuses BEFORE computing anything when both share a scrape, and says
+  what to do instead. Verified end to end: two fresh snapshots of one scrape are
+  detected and refused; a new list changes the fingerprint; the two pre-existing
+  snapshots correctly report "could not be checked" rather than guessing.
+
+`ydke` was exercised in the same pass and is correct — the URI round-trips to an
+identical 44/14/15 deck.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

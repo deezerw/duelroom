@@ -431,6 +431,28 @@ def classify(conn, archetype, fmt=DEFAULT_FORMAT, section="main"):
 MIN_LISTS_FOR_DRIFT = 15
 
 
+
+def scrape_fingerprint(conn):
+    """What scrape the current `inclusion` table was computed from.
+
+    A snapshot records inclusion rates, and `inclusion.computed_at` moves
+    every time anything recomputes them -- which makes six-day-old data
+    look fresh. Two snapshots of the SAME scrape then differ only by when
+    they were taken, and `drift` between them reports about zero
+    movement, which reads as "the meta is stable" when it means "these
+    are the same data".
+
+    That is not hypothetical: `baseline-2026-10-18` and `2026-10-18` are
+    both 5599 rows from the same scrape, 3.5 hours apart.
+
+    The fingerprint is the newest scraped list plus the list count, which
+    is what actually has to change for drift to mean anything.
+    """
+    r = conn.execute(
+        "SELECT MAX(scraped_at) AS newest, COUNT(*) AS n FROM decks"
+    ).fetchone()
+    return f"{(r['newest'] or 'none')}|{r['n'] or 0}"
+
 def snapshot_inclusion(conn, label=None):
     """Freeze the current `inclusion` table under a label.
 
@@ -442,15 +464,19 @@ def snapshot_inclusion(conn, label=None):
     label = label or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with conn:
+        cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(inclusion_history)")}
+        if "scrape" not in cols:
+            conn.execute("ALTER TABLE inclusion_history ADD COLUMN scrape TEXT")
         conn.execute("DELETE FROM inclusion_history WHERE label = ?", (label,))
         conn.execute(
             """INSERT INTO inclusion_history
                  (label, archetype, format, card_id, section, pct_lists,
-                  avg_copies, n_lists, captured_at)
+                  avg_copies, n_lists, captured_at, scrape)
                SELECT ?, archetype, format, card_id, section, pct_lists,
-                      avg_copies, n_lists, ?
+                      avg_copies, n_lists, ?, ?
                  FROM inclusion""",
-            (label, now),
+            (label, now, scrape_fingerprint(conn)),
         )
         n = conn.execute(
             "SELECT COUNT(*) AS n FROM inclusion_history WHERE label = ?",
@@ -466,6 +492,31 @@ def snapshots(conn):
             """SELECT label, COUNT(*) AS n, MAX(captured_at) AS captured_at
                  FROM inclusion_history GROUP BY label ORDER BY captured_at""")
     ]
+
+
+def same_scrape(conn, old_label, new_label):
+    """True when both snapshots were taken from the SAME scrape.
+
+    Drift across one scrape is zero by construction. Reporting it without
+    saying so reads as "the meta did not move"; the truth is that no new
+    lists were gathered. Returns None when either snapshot predates the
+    `scrape` column and cannot be checked -- which must not be mistaken
+    for "different".
+    """
+    got = {}
+    for label in (old_label, new_label):
+        try:
+            r = conn.execute(
+                "SELECT scrape FROM inclusion_history WHERE label = ? LIMIT 1",
+                (label,)).fetchone()
+        except Exception:
+            return None
+        if r is None:
+            return None
+        got[label] = r["scrape"]
+    if any(v is None for v in got.values()):
+        return None
+    return got[old_label] == got[new_label]
 
 
 def drift(conn, archetype, old_label, new_label, fmt=DEFAULT_FORMAT,

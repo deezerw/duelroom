@@ -827,8 +827,23 @@ def cmd_drift(conn, args):
     archetype = args[0]
     old = args[1] if len(args) > 1 else snaps[-2][0]
     new = args[2] if len(args) > 2 else snaps[-1][0]
+    # Refuse before printing, not after. Drift across ONE scrape is zero by
+    # construction, and a table of zeros reads as "the meta did not move"
+    # when it means "no new lists were gathered". Both existing snapshots
+    # are 5599 rows from the same scrape, 3.5 hours apart.
+    shared = ms.same_scrape(conn, old, new)
+    if shared:
+        print(f"  !! NO DRIFT TO REPORT. {old} and {new} were both taken from")
+        print(f"     the SAME scrape, so any difference between them is zero by")
+        print(f"     construction — it is not evidence the meta is stable.")
+        print(f"     Re-scrape with `meta` on a later day, `snapshot` again, and")
+        print(f"     compare that against one of these.")
+        return
     rows, note = ms.drift(conn, archetype, old, new)
     print(f"{archetype}: {old} -> {new}")
+    if shared is None:
+        print("  ! one of these snapshots predates the scrape fingerprint, so")
+        print("    whether they share a scrape could not be checked.")
     if note:
         print(f"  ! {note}")
     if not rows:

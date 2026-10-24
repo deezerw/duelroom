@@ -2851,3 +2851,50 @@ def test_report_finds_funnel_records_in_subdirectories(tmp_path, monkeypatch):
     # And a deck with no record anywhere still reports nothing.
     none_found, _ = report.latest_funnel("other")
     assert none_found is None
+
+
+def test_drift_refuses_two_snapshots_of_one_scrape(tmp_path):
+    """Drift across a single scrape is zero by construction, and a table
+    of zeros reads as "the meta did not move" when it means "no new lists
+    were gathered". Both pre-existing snapshots are 5599 rows from the
+    same scrape, 3.5 hours apart — so this was already live."""
+    from skills import db, meta_scrape as ms
+
+    conn = db.connect(tmp_path / "t.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO decks (archetype, format, source_url, list_hash, "
+            "scraped_at) VALUES (?,?,?,?,?)",
+            [("A", ms.DEFAULT_FORMAT, "u1", "h1",
+              "2026-10-18T00:00:00+00:00")])
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) VALUES (?,?,?,?,?,?,?,?)",
+            [("A", ms.DEFAULT_FORMAT, 1, "main", 0.5, 1, 20, "now")])
+
+    ms.snapshot_inclusion(conn, "one")
+    ms.snapshot_inclusion(conn, "two")
+    assert ms.same_scrape(conn, "one", "two") is True, (
+        "two snapshots of the same scrape were not detected")
+
+    # A new list arriving changes the fingerprint.
+    with conn:
+        conn.execute(
+            "INSERT INTO decks (archetype, format, source_url, list_hash, "
+            "scraped_at) VALUES (?,?,?,?,?)",
+            ("A", ms.DEFAULT_FORMAT, "u2", "h2",
+             "2026-10-25T00:00:00+00:00"))
+    ms.snapshot_inclusion(conn, "three")
+    assert ms.same_scrape(conn, "two", "three") is False, (
+        "a new scrape was not distinguished")
+
+    # An unknown snapshot must not read as "different".
+    assert ms.same_scrape(conn, "one", "missing") is None
+
+
+def test_the_drift_refusal_comes_before_the_table():
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_drift)
+    assert src.index("NO DRIFT TO REPORT") < src.index("ms.drift("), (
+        "drift computes and prints before checking the scrape")
