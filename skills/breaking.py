@@ -340,8 +340,12 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
     ours_deck = to_ydeck(our_deck)
     for seed in range(hands):
         sd = scratch / f"h{seed}"
+        # The dealt decklist must go into the START replay: `--deck` does
+        # not reach the going-second player (see deck_with_hand).
         try:
-            start = build_start(their_deck, our_deck, their_target, seed, sd,
+            hand_pre, _ = sample_hand(ours_deck, seed=1000 + seed, size=6)
+            dealt_pre = deck_with_hand(our_deck, hand_pre, sd / "dealt.ydk")
+            start = build_start(their_deck, dealt_pre, their_target, seed, sd,
                                 solve_ms)
         except SolverFailed as e:
             rows.append({"seed": seed, "their_board": None, "searched": False,
@@ -355,11 +359,7 @@ def going_second(their_deck, our_deck, their_target, our_target, hands=4,
         out = sd / "gs"
         out.mkdir(exist_ok=True)
         # Going second draws for turn, so six cards rather than five.
-        hand, _ = sample_hand(ours_deck, seed=1000 + seed, size=6)
-        # The hand has to be dealt through the DECKLIST; `--hand` does not
-        # reach the going-second player (see deck_with_hand). Without this
-        # every seed tested the same hand -- the tail of the .ydk file.
-        dealt = deck_with_hand(our_deck, hand, sd / "dealt.ydk")
+        hand, dealt = hand_pre, dealt_pre
         args_ = going_second_args(start, dealt, hand, our_target, solve_ms)
         cmd = [str(engine.SOLVER_BIN), args_[0], "--workdir", str(wd.path)]
         for d in wd.scriptdirs:

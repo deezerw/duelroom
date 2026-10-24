@@ -2080,3 +2080,31 @@ def test_the_sweep_docstring_does_not_promise_incremental_writes():
     assert doc.index("until every wave has finished") < \
         doc.index("as each hand completes"), (
         "the correction must precede the quoted claim, or it reads as a promise")
+
+
+def test_the_dealt_deck_goes_into_the_start_replay():
+    """Player 1's deck AND hand come from the start replay; `--deck` and
+    `--hand` do not reach them. Proven 2026-10-24: with `--deck` pointing
+    at a rewritten copy, the solver still dealt the last five entries of
+    the ORIGINAL light-and-darkness-ritual.ydk (3x Pot of Sloth, 2x Black
+    Chaos). So the reordered list must be built into the REPLAY, which
+    means one board build per hand."""
+    import inspect
+    from skills import breaking, gauntlet
+
+    for fn in (gauntlet.defend, gauntlet.floor):
+        src = inspect.getsource(fn)
+        i_deal = src.index("deck_with_hand")
+        i_start = min((src.index(x) for x in ("inert_start(", "our_board_start(")
+                       if x in src))
+        assert i_deal < i_start, (
+            f"{fn.__name__} builds the start before dealing the hand into "
+            f"the decklist, so the replay carries the original order")
+        assert "for h in range(hands)" in src
+        # the start builder must receive `dealt`, not the original path
+        assert ("inert_start(dealt" in src or "our_board_start(our_deck, dealt"
+                in src), f"{fn.__name__} passes the original deck to the start"
+
+    gs = inspect.getsource(breaking.going_second)
+    assert "deck_with_hand" in gs and "build_start(their_deck, dealt_pre" in gs, (
+        "going_second builds its start from the undealt deck")

@@ -347,24 +347,36 @@ def floor(their_decks, hands=4, draws=DEFENCE_DRAWS, solve_ms=None,
     work, rows = [], []
     for deck_path, target in their_decks:
         name = Path(deck_path).stem
-        try:
-            start = inert_start(deck_path, seed=0, scratch=scratch / name,
-                                solve_ms=solve_ms)
-        except breaking.SolverFailed as e:
-            say(f"  {name}: floor board failed to build — {e}")
-            rows.append({"deck": name, "hand": None, "error": str(e)})
-            continue
-        if start is None:
-            say(f"  {name}: could not even summon a vanilla monster — "
-                f"the floor itself is broken, not the deck")
-            rows.append({"deck": name, "hand": None,
-                         "error": "inert board not built"})
-            continue
         theirs = breaking.to_ydeck(deck_path)
+        # The start replay carries player 1's deck AND the hand the core
+        # deals them; `--deck` and `--hand` do not reach player 1. Proven
+        # 2026-10-24: the solver dealt the last five entries of the
+        # ORIGINAL .ydk even when `--deck` pointed at a rewritten copy. So
+        # the reordered decklist has to go into the REPLAY, which means
+        # one board build per hand -- exactly what
+        # `breaking.going_second` already did before `defend` "optimised"
+        # it into one build per deck.
         for h in range(hands):
             their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
+            sd = scratch / f"{name}_h{h}"
+            sd.mkdir(parents=True, exist_ok=True)
+            dealt = breaking.deck_with_hand(deck_path, their_hand,
+                                            sd / "dealt.ydk")
+            try:
+                start = inert_start(dealt, seed=0, scratch=sd / "floor",
+                                    solve_ms=solve_ms)
+            except breaking.SolverFailed as e:
+                say(f"  {name} hand {h}: floor board failed — {e}")
+                rows.append({"deck": name, "hand": None, "error": str(e)})
+                continue
+            if start is None:
+                say(f"  {name} hand {h}: could not summon a vanilla monster "
+                    f"— the floor itself is broken, not the deck")
+                rows.append({"deck": name, "hand": None,
+                             "error": "inert board not built"})
+                continue
             for d in range(draws):
-                work.append((start, deck_path, their_hand, target, solve_ms,
+                work.append((start, dealt, their_hand, target, solve_ms,
                              5000 + d, name, h))
 
     say(f"  floor: {len(work)} going-second searches against a board that "
@@ -455,39 +467,40 @@ def defend(our_deck, our_hand, candidate, their_decks, hands=4,
     rows, work = [], []
     for deck_path, target in their_decks:
         name = Path(deck_path).stem
-        sd = scratch / f"{name}_{abs(hash(candidate.board_key())) % 10**8}"
-        try:
-            start = our_board_start(our_deck, deck_path, our_hand,
-                                    candidate.targets, seed=0, scratch=sd,
-                                    solve_ms=solve_ms)
-        except breaking.SolverFailed as e:
-            say(f"  {name}: SOLVER FAILED building our board — {e}")
-            rows.append({"deck": name, "hand": None, "error": str(e)})
-            continue
-        if start is None:
-            # The candidate was reached against the PASSIVE opponent and
-            # not against this deck. That is a real finding, not an error:
-            # the same goal is not always reachable in a real duel.
-            say(f"  {name}: our board did not come together against this deck")
-            rows.append({"deck": name, "hand": None,
-                         "error": "board not reached vs this deck"})
-            continue
         theirs = breaking.to_ydeck(deck_path)
+        # One board build per HAND, not per deck. The start replay carries
+        # player 1's deck and the hand the core deals them -- `--deck` and
+        # `--hand` do not reach player 1 (see breaking.deck_with_hand), so
+        # the only way to vary the opposing hand is to put a reordered
+        # decklist into the REPLAY. `breaking.going_second` always did it
+        # this way; building the start once per deck and varying `--hand`
+        # was my optimisation, and it silently made `hands=N` one hand
+        # tested N times.
         for h in range(hands):
-            # Going second draws for turn: six cards, not five.
-            #
-            # Only the HAND varies across trials. The rest of their deck
-            # order comes from the start replay's template and the .ydk,
-            # so every trial against one deck searches the same remaining
-            # order -- what they draw or dig to beyond the opening six is
-            # identical. That is common random numbers, the same variance
-            # reduction `optimizer` relies on, and it is the right default
-            # for comparing BOARDS against each other. It also means
-            # `hands` counts opening hands, not full independent shuffles,
-            # so it understates the spread of a single board's stop rate.
             their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
+            sd = (scratch / f"{name}_h{h}_"
+                  f"{abs(hash(candidate.board_key())) % 10**8}")
+            sd.mkdir(parents=True, exist_ok=True)
+            dealt = breaking.deck_with_hand(deck_path, their_hand,
+                                            sd / "dealt.ydk")
+            try:
+                start = our_board_start(our_deck, dealt, our_hand,
+                                        candidate.targets, seed=0,
+                                        scratch=sd, solve_ms=solve_ms)
+            except breaking.SolverFailed as e:
+                say(f"  {name} hand {h}: SOLVER FAILED building our board — {e}")
+                rows.append({"deck": name, "hand": None, "error": str(e)})
+                continue
+            if start is None:
+                # The candidate was reached against the PASSIVE opponent and
+                # not against this deck. A real finding, not an error.
+                say(f"  {name} hand {h}: our board did not come together "
+                    f"against this deck")
+                rows.append({"deck": name, "hand": None,
+                             "error": "board not reached vs this deck"})
+                continue
             for d in range(draws):
-                work.append((start, deck_path, their_hand, target, solve_ms,
+                work.append((start, dealt, their_hand, target, solve_ms,
                              5000 + d, name, h))
 
     say(f"  {len(work)} going-second searches "
