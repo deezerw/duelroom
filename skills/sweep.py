@@ -36,6 +36,7 @@ project's worst bugs got in.
 """
 
 import json
+import shutil
 import sys
 import tempfile
 import time

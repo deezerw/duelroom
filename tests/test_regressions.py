@@ -13,6 +13,7 @@ Pure Python: no solver, no engine, no network. Runs in under a second.
 
 import json
 import math
+import tempfile
 import sys
 from pathlib import Path
 
@@ -1965,7 +1966,13 @@ def test_the_optimizer_refusal_precedes_any_table():
 def test_the_solve_paths_clean_up_their_scratch_root():
     """`solve_hand` removes its own `job` subdirectory, not the mkdtemp
     ROOT it is handed, so every draw leaked a directory: 914 of them
-    under /tmp over two days (122 MB), one per (hand, goal, draw)."""
+    under /tmp over two days (122 MB), one per (hand, goal, draw).
+
+    The first version of this test only grepped the source for
+    "rmtree(scratch" -- and passed while `sweep.py` was missing
+    `import shutil`, so EVERY sweep raised NameError at run time. A
+    structural assertion cannot catch a missing import. This one runs the
+    cleanup path."""
     import inspect
     from skills import gauntlet, sweep
     for fn in (sweep._solve_one, gauntlet._one_draw):
@@ -1973,6 +1980,41 @@ def test_the_solve_paths_clean_up_their_scratch_root():
         assert "finally:" in src, f"{fn.__name__} has no cleanup"
         assert "rmtree(scratch" in src, (
             f"{fn.__name__} does not remove its mkdtemp root")
+    # Every name the cleanup uses must actually resolve in that module.
+    for mod in (sweep, gauntlet):
+        assert hasattr(mod, "shutil"), (
+            f"{mod.__name__} calls shutil.rmtree without importing shutil")
+        assert hasattr(mod, "tempfile"), f"{mod.__name__} lacks tempfile"
+
+
+def test_solve_one_reaches_the_solver_without_a_nameerror(monkeypatch, tmp_path):
+    """`_solve_one` is stubbed out of every other test, so a NameError in
+    it is invisible to the suite. This calls it for real with the solver
+    itself replaced, which exercises the mkdtemp + finally + rmtree path
+    that broke every sweep and the optimiser's brick re-check."""
+    from skills import sweep
+
+    class FakeDemo:
+        status = "unsolved"
+        lines = []
+        solver = {"wall_s": 0.1}
+
+        def to_json(self):
+            return {"deck": {"name": "t"}, "status": "unsolved",
+                    "lines": [], "solver": dict(self.solver)}
+
+    monkeypatch.setattr("ygorl.solver.batch.solve_hand",
+                        lambda job, cards=None, scripts=None: FakeDemo())
+    monkeypatch.setattr("ygorl.engine.duel.default_cards", lambda: object())
+    monkeypatch.setattr("ygorl.solver.find_solver", lambda: tmp_path / "bin")
+
+    before = set(Path(tempfile.gettempdir()).glob("duelroom-sweep-*"))
+    res = sweep._solve_one((str(tmp_path / "d.ydk"), "t", 0, 7, [1, 2, 3],
+                            ["9@atk"], "piece:9", 1000, 0))
+    assert res["hand_index"] == 0
+    assert res["score"] is None
+    after = set(Path(tempfile.gettempdir()).glob("duelroom-sweep-*"))
+    assert after == before, "the scratch directory was left behind"
 
 
 def test_the_opposing_hand_is_dealt_through_the_decklist(tmp_path):
