@@ -42,6 +42,7 @@ than assumed:
 """
 
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -175,7 +176,12 @@ def _one_draw(args):
         scratch=scratch / "job", solve_ms=solve_ms, threads=threads,
         hand=tuple(hand), lines=4, binary=find_solver(), solver_seed=seed,
         timeout_s=solve_ms / 1000 + 300)
-    demo = solve_hand(job, cards=cards)
+    try:
+        demo = solve_hand(job, cards=cards)
+    finally:
+        # Same leak as sweep._solve_one: solve_hand cleans its own `job`
+        # subdir, never the mkdtemp root.
+        shutil.rmtree(scratch, ignore_errors=True)
     if demo.status != "solved" or not demo.lines:
         return None
     scored = [(board_interruptions(ln.board, cards), ln) for ln in demo.lines]

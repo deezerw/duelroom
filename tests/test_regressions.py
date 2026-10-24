@@ -1960,3 +1960,16 @@ def test_the_optimizer_refusal_precedes_any_table():
     assert "return" in branch, "the degenerate branch falls through to writing a list"
     assert "write_ydk" not in branch, (
         "a degenerate run still writes a 'best list'")
+
+
+def test_the_solve_paths_clean_up_their_scratch_root():
+    """`solve_hand` removes its own `job` subdirectory, not the mkdtemp
+    ROOT it is handed, so every draw leaked a directory: 914 of them
+    under /tmp over two days (122 MB), one per (hand, goal, draw)."""
+    import inspect
+    from skills import gauntlet, sweep
+    for fn in (sweep._solve_one, gauntlet._one_draw):
+        src = inspect.getsource(fn)
+        assert "finally:" in src, f"{fn.__name__} has no cleanup"
+        assert "rmtree(scratch" in src, (
+            f"{fn.__name__} does not remove its mkdtemp root")

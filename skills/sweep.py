@@ -102,7 +102,14 @@ def _solve_one(args):
         solve_ms=solve_ms, threads=1, hand=tuple(hand), lines=4,
         binary=find_solver(), solver_seed=seed,
         timeout_s=solve_ms / 1000 + 300)
-    demo = solve_hand(job, cards=cards)
+    try:
+        demo = solve_hand(job, cards=cards)
+    finally:
+        # `solve_hand` removes its own `job` subdirectory, not the mkdtemp
+        # ROOT we handed it, so every draw leaked one directory. Measured
+        # 2026-10-24: 914 of them under /tmp going back two days, 122 MB,
+        # and a sweep adds one per (hand, goal, draw) -- hundreds per run.
+        shutil.rmtree(scratch, ignore_errors=True)
     rec = demo.to_json()
     attempt = {"label": label, "targets": list(targets), "draw": draw,
                "solver_seed": seed, "status": demo.status,
