@@ -114,6 +114,29 @@ value. The budget already has `ladder`; draws needs the same.
 
 ---
 
+## P2b — found on the 2026-10-24 02:00 pass
+
+### 12. Every solver draw leaked a scratch directory — FIXED
+
+`solve_hand` removes the `job` subdirectory it is handed, never the mkdtemp ROOT the
+caller made, so `sweep._solve_one` and `gauntlet._one_draw` each leaked one directory
+per solve. 914 of them under /tmp over two days, 126 MB, growing by one per
+(hand, goal, draw). Fixed in af67334 with a `finally` in both paths plus a test; 856
+stale dirs cleared (126M -> 16M).
+
+### 13. Long background jobs do not survive a turn boundary
+
+The 20-hand sweep launched with `nohup … &` at the end of the previous pass had
+written **zero** records and its parent process was 90 seconds old at the next pass —
+i.e. it died and something restarted it. For a loop that is supposed to run hour-long
+measurements across iterations, that silently loses all of them.
+
+- **Workaround in use:** launch with `setsid` and a closed stdin
+  (`nohup setsid … < /dev/null &`), then verify the process age on the next pass
+  rather than assuming it survived.
+- **Watch for:** a job that looks like it is progressing may be a restart from zero.
+  Check `ps -o etime` against the elapsed time in its own log.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
