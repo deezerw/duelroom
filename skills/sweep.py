@@ -682,6 +682,6 @@ def sweep(decks, hands=8, draws=DRAWS, pieces=4, solve_ms=None, seed=0,
     say(f"\n{len(records)} record(s) -> {out}")
     for name, row in sorted(table.items()):
         say(f"  {name:28} {row['solved']}/{row['hands']} solved, "
-            f"mean {row['mean_interruptions']} interruptions, "
+            f"mean {row['mean_interruptions']} interruptions per solved hand, "
             f"{row['wall_per_hand_s']:.0f}s/hand")
     return {"decks": table}

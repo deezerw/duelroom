@@ -372,6 +372,25 @@ and the per-window recovery share alongside, and `optimizer.report` carries
 `window_recovery` so 0% is never shown bare. The underlying exposure is a deckbuilding
 question, not a code fix — shorter lines create fewer windows.
 
+### 21. Solved-only means printed as if they were per-hand — FIXED
+
+Audited after my own "1.0 interruptions" error, to see whether production code shared
+the shape of it. The sentinel part did not — no `-1`-for-unsolved anywhere outside my
+throwaway script. But the *labelling* did.
+
+`summarize` appends to `row["interruptions"]` only after
+`if r["status"] != "solved": continue`, so `mean_interruptions` is a mean over solved
+hands. Three views printed it bare:
+
+- `solve` (both branches) — "mean interrupts 4.10"
+- `sweep`'s summary line — "mean 4.1 interruptions"
+- `boards` — fixed in the previous commit
+
+For a deck that bricks a quarter of its hands, "per solved hand" and "per hand" are
+materially different claims: branded is 1.6 and 1.2 respectively. All three now name
+their denominator, and a test asserts both that the field really is solved-only and
+that every view saying it says so.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

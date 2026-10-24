@@ -586,7 +586,8 @@ def cmd_solve(conn, args):
             print(f"\n  {row['deck']}")
             print(f"    solve rate        {row['solved']}/{row['hands']} "
                   f"({row['solve_rate']*100:.0f}%)")
-            print(f"    mean interrupts   {row['mean_interruptions']:.2f}")
+            print(f"    mean interrupts   {row['mean_interruptions']:.2f}"
+                  f"  (per SOLVED hand)")
             print(f"    per hand          {row['s_per_hand']:.1f}s")
             print(f"    distribution      {row['interruptions']}")
         return
@@ -602,7 +603,13 @@ def cmd_solve(conn, args):
         print(f"\n  {name}")
         print(f"    solve rate        {row['solved']}/{row['hands']} "
               f"({row['solve_rate']*100:.0f}%)")
-        print(f"    mean interrupts   {row['mean_interruptions']:.2f}")
+        # Solved-only: `summarize` appends to `interruptions` after its
+        # `if r["status"] != "solved": continue`. Printed bare it reads as
+        # per-hand, which for a deck that bricks a quarter of the time is
+        # a different and lower number -- the mistake that produced a
+        # "1.0 interruptions" claim for branded that stood all session.
+        print(f"    mean interrupts   {row['mean_interruptions']:.2f}"
+              f"  (per SOLVED hand, not per hand)")
         print(f"    per hand          {row['wall_per_hand_s']:.1f}s of solver")
         print(f"    distribution      {row['interruptions']}")
         print(f"    top pieces        "

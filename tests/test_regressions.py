@@ -2690,3 +2690,34 @@ def test_the_name_check_only_fails_on_undefined_names():
     src = inspect.getsource(mod)
     assert '"undefined name" in l' in src
     assert "non-fatal" in src
+
+
+def test_every_solved_only_mean_says_so():
+    """`summarize` appends to `interruptions` only after its
+    `if r["status"] != "solved": continue`, so `mean_interruptions` is a
+    mean over solved hands. Printed bare it reads as per-hand, which for
+    a deck that bricks a quarter of the time is a different and lower
+    number — the mistake behind the "1.0 interruptions" claim for branded
+    that stood all session (real figures: 1.6 solved-only, 1.2 per hand).
+
+    Any view printing that field must name its denominator."""
+    import inspect
+    import daemon
+    from skills import sweep
+
+    # The field really is solved-only.
+    src = inspect.getsource(sweep.summarize)
+    i = src.index('row["interruptions"].append')
+    before = src[:i]
+    assert 'if r["status"] != "solved":' in before and "continue" in before, (
+        "summarize no longer filters to solved hands; the label is now wrong")
+
+    for fn in (daemon.cmd_solve, daemon.cmd_boards):
+        body = inspect.getsource(fn)
+        if "mean_interruptions" in body or "mean {mean:.1f}" in body:
+            assert "SOLVED" in body, (
+                f"{fn.__name__} prints a solved-only mean without saying so")
+
+    swept = inspect.getsource(sweep.sweep)
+    assert "per solved hand" in swept, (
+        "sweep's summary line prints a solved-only mean unqualified")
