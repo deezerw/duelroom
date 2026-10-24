@@ -571,6 +571,28 @@ apart from the sort key again, and a test asserts all three places carry it.
 Found by checking whether the iteration-23 fix had reached the web UI at all. It had
 — `lines_from` is shared — which is exactly why the display went out of step with it.
 
+### 31. OPEN: `drill`'s flat count silently reads 0 for hands outside the summary
+
+Confirmed, not yet fixed — the loop was stopped here.
+
+`drill.interruption_counts` reads a companion `*_summary.json` keyed by hand, and
+returns **0** for any hand it does not find. That is indistinguishable from "this
+board has no interruptions". The function's own docstring records a previous version
+of the same bug ("Ranking on the line field silently scored every line 0").
+
+Live example: `results/sweep_active.jsonl` has 40 hands, but its companion summary
+covers only hands **0-19** — the second 20 were added by calling `solve_deck`
+directly, and only `sweep()` writes a summary. So hands 20-39 report flat count 0
+while their records carry the real value (hand 23: 4, hand 27: 5, hand 39: 3).
+
+Masked by the iteration-30 fix: ranking is now on `_on_field`, computed from the board
+itself, so the ORDER is unaffected. Only the displayed "counting cards held in hand"
+figure is wrong, and only for hands missing from the summary.
+
+- **Fix:** read `solver.blocking.interruptions` from the record, which the sweep
+  populates, and fall back to the summary only when absent — returning None rather
+  than 0 for genuinely unknown, so it cannot be mistaken for zero.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
