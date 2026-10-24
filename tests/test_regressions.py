@@ -2108,3 +2108,71 @@ def test_the_dealt_deck_goes_into_the_start_replay():
     gs = inspect.getsource(breaking.going_second)
     assert "deck_with_hand" in gs and "build_start(their_deck, dealt_pre" in gs, (
         "going_second builds its start from the undealt deck")
+
+
+def test_a_false_brick_is_corrected_before_scoring(monkeypatch, tmp_path):
+    """The optimiser weights brick rate -2.0 and funnel_eval measures it
+    with ONE draw of a randomized search. Measured on the active deck,
+    same 20 hands: sweep solved 20/20 with zero bricks, the funnel
+    reported 5/20 = 0.25. Those five hit the heaviest negative term."""
+    from skills import optimizer
+
+    record = {
+        "targets": [["59822133@atk"]],
+        "summary": {"hands": 4, "bricks": 2, "brick_rate": 0.5,
+                    "best_line_rate": 0.5, "hand_trap_survival": 0.0,
+                    "combo_actions": {"mean": 8.0}},
+        "hands": [
+            {"index": 0, "status": "solved", "hand": [1], "hand_seed": 11},
+            {"index": 1, "status": "solved", "hand": [2], "hand_seed": 12},
+            {"index": 2, "status": "brick", "hand": [3], "hand_seed": 13},
+            {"index": 3, "status": "brick", "hand": [4], "hand_seed": 14},
+        ],
+    }
+
+    # Hand 2 solves on a re-draw; hand 3 never does.
+    def fake_solve(args):
+        hand_index = args[2]
+        solved = hand_index == 2
+        return {"hand_index": hand_index, "label": "recheck",
+                "attempt": {"label": "recheck", "targets": [], "draw": 0,
+                            "solver_seed": 1,
+                            "status": "solved" if solved else "unsolved",
+                            "wall_s": 1.0},
+                "score": {"interruptions": 2, "negates": 0, "pieces": []}
+                if solved else None,
+                "record": {} if solved else None,
+                "unsolved_record": None if solved else {}}
+
+    def fake_map(batch, workers):
+        for b in batch:
+            yield fake_solve(b)
+
+    monkeypatch.setattr("skills.sweep._map_solves", fake_map)
+    out = optimizer.confirm_bricks(tmp_path / "d.ydk", record, draws=2)
+    assert out["rechecked"] == 2
+    assert out["false_bricks"] == 1, out
+    assert out["bricks"] == 1, out
+
+
+def test_confirm_bricks_is_a_noop_without_targets_or_bricks(tmp_path):
+    from skills import optimizer
+    assert optimizer.confirm_bricks(
+        tmp_path / "d.ydk",
+        {"targets": [], "hands": [{"index": 0, "status": "brick",
+                                   "hand": [1]}]})["rechecked"] == 0
+    assert optimizer.confirm_bricks(
+        tmp_path / "d.ydk",
+        {"targets": [["1@atk"]], "hands": [
+            {"index": 0, "status": "solved", "hand": [1]}]})["bricks"] == 0
+
+
+def test_evaluate_records_what_the_single_draw_said():
+    """A corrected number must not erase the one it replaced, or the
+    25-point gap becomes invisible on the next run."""
+    import inspect
+    from skills import optimizer
+    src = inspect.getsource(optimizer.evaluate)
+    assert "brick_rate_single_draw" in src, (
+        "the corrected rate overwrites the original with no record of it")
+    assert "false_bricks" in src

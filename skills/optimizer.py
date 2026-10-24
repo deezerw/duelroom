@@ -152,7 +152,8 @@ def threat_handtraps(top=2):
     return live or [14558127, 10045474]
 
 
-def evaluate(deck, target, hands=12, solve_ms=None, scratch=None, fire=None):
+def evaluate(deck, target, hands=12, solve_ms=None, scratch=None, fire=None,
+             confirm_draws=3, log=None):
     """Score one list. Writes a temp .ydk plus a targets file for it.
 
     funnel_eval keys targets by deck NAME and refuses a deck it has no
@@ -196,7 +197,79 @@ def evaluate(deck, target, hands=12, solve_ms=None, scratch=None, fire=None):
             f"asked to fire {sorted(fire)} but the run only fired "
             f"{sorted(fired)} (missing {missing}) — the objective would be "
             f"scoring the wrong handtraps")
-    return rec["summary"]
+
+    summary = dict(rec["summary"])
+    # Correct the brick rate before it is scored. One draw of a randomized
+    # search called 5 of this deck's 20 hands bricks; the multi-draw sweep
+    # solves all 20. Those false bricks hit the term weighted -2.0.
+    if confirm_draws:
+        check = confirm_bricks(path, rec, draws=confirm_draws,
+                               solve_ms=solve_ms, log=log)
+        n = summary.get("hands") or len(rec.get("hands") or []) or 0
+        if check["false_bricks"] and n:
+            summary["brick_rate"] = round(check["bricks"] / n, 4)
+            summary["bricks"] = check["bricks"]
+            summary["best_line_rate"] = round(1 - check["bricks"] / n, 4)
+            summary["false_bricks"] = check["false_bricks"]
+            summary["brick_rate_single_draw"] = rec["summary"].get("brick_rate")
+    return summary
+
+
+def confirm_bricks(deck_path, record, draws=3, solve_ms=None, log=None):
+    """Re-solve the hands funnel_eval called bricks, with several draws.
+
+    The optimiser weights brick rate at -2.0, the second heaviest term,
+    and funnel_eval measures it with ONE draw of a randomized search.
+    Measured 2026-10-24 on the user's own deck, same 20 hands: the
+    multi-draw sweep solved 20/20 with zero bricks while the funnel
+    reported brick 5/20 = 0.25. Five false bricks, all in the pessimistic
+    direction, on the term that dominates the score.
+
+    Only the bricked hands are re-drawn, so the cost is proportional to
+    how wrong the measurement was: nothing when the deck really bricks,
+    and a few solves when it does not. A hand stays a brick only if no
+    draw reaches the target.
+
+    Returns {"bricks", "false_bricks", "rechecked", "hand_seeds"} and does
+    not mutate `record`.
+    """
+    from . import sweep
+
+    say = log or (lambda m: None)
+    solve_ms = solve_ms or engine.SOLVE_MS
+    targets = record.get("targets") or []
+    # funnel_eval nests one target list per deck.
+    flat = [t for group in targets for t in
+            (group if isinstance(group, (list, tuple)) else [group])]
+    bricked = [h for h in (record.get("hands") or [])
+               if h.get("status") == "brick" and h.get("hand")]
+    if not flat or not bricked:
+        return {"bricks": len(bricked), "false_bricks": 0,
+                "rechecked": 0, "hand_seeds": []}
+
+    name = Path(deck_path).stem
+    work = []
+    for h in bricked:
+        for d in range(draws):
+            work.append((str(deck_path), name, h.get("index", 0),
+                         h.get("hand_seed", 0), list(h["hand"]), list(flat),
+                         "recheck", solve_ms, 100 + d))
+    say(f"  re-drawing {len(bricked)} bricked hand(s) x {draws} draws "
+        f"to tell a brick from one bad draw")
+
+    solved = set()
+    # Through sweep's own seam rather than a second pool: it already
+    # carries the nice initializer, and it is the point tests replace.
+    for res in sweep._map_solves(work, engine.DEFAULT_WORKERS):
+        if res.get("score") is not None:
+            solved.add(res["hand_index"])
+    false_n = sum(1 for h in bricked if h.get("index", 0) in solved)
+    if false_n:
+        say(f"  {false_n} of {len(bricked)} were NOT bricks — a different "
+            f"seed reached the target")
+    return {"bricks": len(bricked) - false_n, "false_bricks": false_n,
+            "rechecked": len(bricked),
+            "hand_seeds": [h.get("hand_seed") for h in bricked]}
 
 
 def hill_climb(conn, deck, archetype, target, objective=None, hands=12,
