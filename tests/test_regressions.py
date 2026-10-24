@@ -2018,3 +2018,65 @@ def test_both_going_second_callers_deal_through_the_decklist():
         src = inspect.getsource(fn)
         assert "deck_with_hand" in src, (
             f"{fn.__name__} still deals the hand with --hand alone")
+
+
+def test_the_sweep_checkpoints_each_depth_round(tmp_path, monkeypatch):
+    """Nothing is written until every wave finishes -- a hand's best is not
+    known until the last round that could improve it. A 20-hand sweep sat
+    at depth round three with 545s of solver spent and no output file. The
+    docstring claimed records appended "as each hand completes", which was
+    false. A .partial checkpoint makes a killed run salvageable."""
+    from skills import sweep
+
+    def fake_map(batch, workers):
+        for b in batch:
+            targets = tuple(b[5])
+            yield {"hand_index": b[2], "label": b[6],
+                   "attempt": {"label": b[6], "targets": list(targets),
+                               "draw": b[8], "solver_seed": 1,
+                               "status": "solved", "wall_s": 1.0,
+                               "interruptions": 2, "negates": 1},
+                   "score": {"interruptions": 2, "negates": 1, "pieces": []},
+                   "record": {"deck": {"name": "t"}, "status": "solved",
+                              "targets": list(targets),
+                              "lines": [{"board": {}}], "solver": {}},
+                   "unsolved_record": None}
+
+    monkeypatch.setattr(sweep, "_map_solves", fake_map)
+    monkeypatch.setattr(sweep.engine, "require", lambda: None)
+    monkeypatch.setattr(sweep.engine, "preflight", lambda d: None)
+    monkeypatch.setattr(sweep, "_breadth_goals",
+                        lambda p, h, n: [(("A",), "piece:A")])
+
+    class FakeDeck:
+        name = "t"
+        main = list(range(40))
+        extra = []
+
+    monkeypatch.setattr("ygorl.cards.ydk.load_ydk", lambda p: FakeDeck())
+    monkeypatch.setattr("ygorl.solver.batch.sample_hand",
+                        lambda deck, seed, *a, **k: (list(range(5)), None))
+    monkeypatch.setattr("ygorl.solver.batch.hand_seed", lambda s, n, i: 7)
+
+    out = tmp_path / "s.jsonl"
+    sweep.solve_deck(tmp_path / "t.ydk", hands=1, draws=3, out=out,
+                     solve_ms=60_000, workers=1)
+    partial = Path(str(out) + ".partial")
+    assert partial.exists(), "no checkpoint was written during the depth rounds"
+    rows = [l for l in partial.read_text().splitlines() if l.strip()]
+    assert rows, "the checkpoint is empty"
+    rec = json.loads(rows[0])
+    assert rec["hand_index"] == 0 and rec["hand_seed"] == 7
+
+
+def test_the_sweep_docstring_does_not_promise_incremental_writes():
+    import inspect
+    from skills import sweep
+    doc = inspect.getdoc(sweep.solve_deck) or ""
+    # The old phrase still appears -- quoted, as the thing that was wrong.
+    # What matters is that it is marked false and the real behaviour stated.
+    assert "until every wave has finished" in doc
+    assert "was false" in doc, "the claim is stated without being corrected"
+    assert doc.index("until every wave has finished") < \
+        doc.index("as each hand completes"), (
+        "the correction must precede the quoted claim, or it reads as a promise")

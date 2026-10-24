@@ -291,13 +291,51 @@ def _hand_jobs(deck_path, name, hands, first_hand, seed, pieces, solve_ms,
     return out, hand_info
 
 
+def _checkpoint(per_hand, hand_info, out, draws, say):
+    """Rewrite the per-hand bests so far beside `out`, as .partial.jsonl.
+
+    Not the real output: a later round may still improve a hand, so these
+    are provisional. They exist so that a run killed at round three is
+    salvageable rather than wasted.
+    """
+    partial = Path(str(out) + ".partial")
+    rows = []
+    for i in sorted(per_hand):
+        acc = per_hand[i]
+        if not acc["best"]:
+            continue
+        rec = acc["best"][1]
+        hs, hand = hand_info[i]
+        rec.setdefault("hand", hand)
+        rec["hand_index"], rec["hand_seed"] = i, hs
+        rows.append(json.dumps(rec))
+    if not rows:
+        return
+    try:
+        partial.write_text("\n".join(rows) + "\n")
+    except OSError as e:
+        say(f"    (could not checkpoint: {e})")
+
+
 def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
                seed=0, first_hand=0, out=None, workers=None, log=None,
                triage_ms=None, patience=None):
     """Sweep one deck's opening hands, keeping the best board per hand.
 
-    Appends demonstration JSONL as each hand completes, so a rerun
-    resumes. Returns the list of records written this run.
+    Returns the records written this run.
+
+    **Nothing is written until every wave has finished.** The docstring
+    used to claim records append "as each hand completes, so a rerun
+    resumes", and that was false: a hand's best board is not known until
+    the last depth round that could improve it, so the append loop runs
+    at the very end. A 20-hand sweep of the active deck sat at depth round
+    three with 545 seconds of solver spent and an output file that did not
+    exist yet.
+
+    `resume_path` mitigates it: after each depth round the per-hand bests
+    so far are rewritten there, so an interrupted run can be salvaged
+    instead of repeated. Resumption across RUNS still works at hand
+    granularity -- `done_keys` skips hands already in `out`.
     """
     from ygorl.cards.ydk import load_ydk
     from ygorl.solver.batch import done_keys
@@ -457,6 +495,9 @@ def solve_deck(deck_path, hands=8, draws=DRAWS, pieces=4, solve_ms=None,
                     active.discard(i)
         say(f"    improved: {sum(1 for i in before if flat[i] == 0)}, "
             f"still climbing: {len(active)}")
+        # Checkpoint the bests so far. Hours of solver with nothing on
+        # disk is how a killed job loses everything.
+        _checkpoint(per_hand, hand_info, out, draws, say)
 
     written = []
     for i in sorted(per_hand):
