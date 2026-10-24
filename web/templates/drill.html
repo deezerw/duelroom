@@ -15,8 +15,9 @@
 {% for l in lines %}
 <div class="panel">
   <div class="two" style="align-items:baseline">
-    <div><span class="big">{{ l.interrupts }}</span>
-      <span class="muted">interruption{{ '' if l.interrupts == 1 else 's' }}</span></div>
+    <div><span class="big">{{ l.on_field }}</span>
+      <span class="muted">on field{% if l.interrupts != l.on_field %},
+        {{ l.interrupts }} counting cards held in hand{% endif %}</span></div>
     <div class="muted">{{ l.actions }} actions</div>
   </div>
   <p class="muted" style="margin:10px 0 2px">opening hand</p>

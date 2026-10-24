@@ -553,6 +553,24 @@ Walked all of them: **15 routes return 200**, the two missing-deck routes correc
 the check was real, and it is now two tests: every read-only route answers, and a
 missing deck redirects rather than erroring or rendering a page about nothing.
 
+### 30. My own drill fix made the display contradict the order — FIXED
+
+Caused by the iteration-23 fix. `lines_from` now ranks on ON-FIELD interruptions
+(correct: a card held in hand is not a line you can rehearse), but both the CLI and
+the web page still printed the **flat** count, which includes cards in hand. On the
+active deck's 80 lines that put a "4 interruptions" entry above a "5" **three times**
+— at positions 6, 36 and 69.
+
+To a reader that is a sorting bug, not a measure being wrong. The ranking was right
+and the number shown did not explain it.
+
+Both views now lead with the number they rank by: "4 on field, 5 counting cards held
+in hand". `drill.export` returns it, so the CLI and the web template cannot drift
+apart from the sort key again, and a test asserts all three places carry it.
+
+Found by checking whether the iteration-23 fix had reached the web UI at all. It had
+— `lines_from` is shared — which is exactly why the display went out of step with it.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

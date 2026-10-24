@@ -2929,3 +2929,30 @@ def test_rescore_labels_distinguish_the_cut(tmp_path):
     # Both shapes must render: with a cut, and the older add-only names.
     assert 'f"-{handlab._name(conn, int(parts[-2]))}"' in src
     assert 'f"+{handlab._name(conn, int(parts[-1]))}"' in src
+
+
+def test_drill_reports_the_number_it_ranks_by(tmp_path):
+    """`lines_from` ranks on ON-FIELD interruptions while callers printed
+    the flat count, which includes cards merely held in hand. On the
+    active deck's 80 lines that put a "4 interruptions" line above a "5"
+    three times — which reads as a sorting bug rather than as the flat
+    count being the wrong measure."""
+    import inspect
+    import daemon
+    from skills import drill
+
+    # export must hand the ranked number to its callers.
+    src = inspect.getsource(drill.export)
+    assert "_on_field(line)" in src, (
+        "export does not return the number the ranking uses")
+
+    cli = inspect.getsource(daemon.cmd_drill)
+    assert "on_field" in cli and "on field" in cli, (
+        "the CLI still leads with the flat count")
+
+    views = (Path(__file__).resolve().parent.parent / "web" / "views.py").read_text()
+    assert '"on_field": drill._on_field(line)' in views, (
+        "the web drill view does not carry the ranked number")
+    tpl = (Path(__file__).resolve().parent.parent / "web" / "templates"
+           / "drill.html").read_text()
+    assert "on field" in tpl, "the web drill page still shows only the flat count"

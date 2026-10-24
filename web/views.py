@@ -273,6 +273,12 @@ def drill_view(name=None):
             for rec, line, n in found[:12]:
                 lines.append({
                     "interrupts": n,
+                    # What `lines_from` actually RANKS by. Showing only
+                    # the flat count put a "4 interruptions" line above a
+                    # "5 interruptions" one three times in the active
+                    # deck's 80 lines, which reads as a sorting bug --
+                    # the flat count includes cards merely held in hand.
+                    "on_field": drill._on_field(line),
                     "actions": len(line.get("actions") or []),
                     "hand": [card_db.resolve(c, x)["name"] if card_db.resolve(c, x)
                              else str(x) for x in (rec.get("hand") or [])],

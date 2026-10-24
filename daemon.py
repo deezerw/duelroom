@@ -1641,8 +1641,12 @@ def cmd_drill(conn, args):
         print(f"no solved lines stored for {path.stem} — run `solve` or `gate` first")
         return
 
-    for yrpx, txt, n in written:
-        print(f"\n  {n} interruptions -> {yrpx.name}")
+    for yrpx, txt, n, on_field in written:
+        # Ranked on ON-FIELD interruptions, so printing the flat count
+        # alone put "4 interruptions" above "5 interruptions" three times
+        # in the active deck's 80 lines. Lead with what the order is by.
+        extra = (f", {n} counting cards held in hand" if n != on_field else "")
+        print(f"\n  {on_field} on field{extra} -> {yrpx.name}")
         for line in txt.read_text().splitlines():
             if line.startswith("  ") or line.startswith("ends on"):
                 print(f"  {line}")

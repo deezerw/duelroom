@@ -169,5 +169,10 @@ def export(conn, jsonl_path, deck_name, limit=3, out_dir=None):
             f"replay: {yrpx.name}  (open in EDOPro)",
         ]
         txt.write_text("\n".join(body) + "\n")
-        written.append((yrpx, txt, interrupts))
+        # Carry the ranked number too. Callers printed `interrupts` (the
+        # flat count, which includes cards merely held in hand) while the
+        # ORDER comes from on-field interruptions, so a "4" could sit
+        # above a "5" with nothing explaining it -- three times in the
+        # active deck's 80 lines.
+        written.append((yrpx, txt, interrupts, _on_field(line)))
     return written
