@@ -974,6 +974,24 @@ def cmd_optimize(conn, args):
               f"[{lo*100:3.0f}-{hi*100:3.0f}]  "
               f"{(r['brick_rate'] or 0)*100:5.0f}%  "
               f"{(r['survival'] or 0)*100:5.0f}%  {r['label']}")
+    # `surv` is an ALL-WINDOWS standard and 0% is its normal reading, not a
+    # broken metric. `fire_survives` counts a hand only when the solver
+    # recovered from EVERY window the handtrap had, because the opponent
+    # picks the timing. Measured on the active deck: Infinite Impermanence
+    # gets a median of 11 windows per line (max 17) and about a third are
+    # recoverable, so 0 of 15 hands recovered from all of them. Printing
+    # 0% with no explanation invites either dismissing the column or
+    # panicking at it; the window-recovery share is the number that moves.
+    base_row = next((r for r in rows if r["label"] == "base"), None)
+    wr = ((base_row or {}).get("window_recovery")
+          or (best.summary or {}).get("window_recovery") or {})
+    if wr:
+        print("\n  surv = share of hands that recover from EVERY window of every")
+        print("  fired handtrap (the opponent chooses when to drop it). 0% is")
+        print("  common and is not a broken reading. Per-window recovery:")
+        for code, share in sorted(wr.items()):
+            nm = handlab._name(conn, int(code)) if str(code).isdigit() else code
+            print(f"    {nm:34s} {(share or 0)*100:5.1f}% of windows recovered")
     distinct_solve = {round(r["solve_rate"], 4) for r in rows}
     distinct_brick = {round(r["brick_rate"] or 0, 4) for r in rows}
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")

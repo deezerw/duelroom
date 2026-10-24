@@ -270,6 +270,31 @@ and report the difference as a measurement error (see the retraction under P0 #3
   already this project's stated doctrine for deck comparisons; they are not available
   across measurement methods, which is where they are most needed.
 
+### 20. `survival 0%` reads as a broken metric and is not one — FIXED (output)
+
+Chased this as a suspected bug and it is correct behaviour, worth recording because
+the next reader will chase it too. `fire_survives` counts a hand as surviving only
+when the solver recovered from **every** window the handtrap had, because the
+opponent chooses when to drop it. So `hand_trap_survival` is 0.0 whenever any window
+is unrecoverable — which on a long combo is almost guaranteed.
+
+**Measured on the active deck (20 hands):**
+
+| handtrap | windows per line (median / max) | recovered | all windows | window recovery |
+|---|---|---|---|---|
+| Infinite Impermanence | 11 / 17 | median 3 | **0 of 15** | 32.6% |
+| Ash Blossom | 3 / 4 | median 1 | **0 of 15** | 31.0% |
+
+This is the most tournament-relevant number found so far, and it is NOT a bug: the
+deck is consistent (15/20 reach Blue-Eyes Spirit Dragon, mean 4.1 interruptions) but
+its lines hand Imperm a median of eleven chances and only a third are survivable.
+Since the opponent picks the window, they pick one you cannot recover from.
+
+Mitigated by making the output say so: `optimize` now prints the all-windows standard
+and the per-window recovery share alongside, and `optimizer.report` carries
+`window_recovery` so 0% is never shown bare. The underlying exposure is a deckbuilding
+question, not a code fix — shorter lines create fewer windows.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

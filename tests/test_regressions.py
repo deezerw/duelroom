@@ -2293,3 +2293,34 @@ def test_placement_rank_orders_and_tolerates_junk():
     assert ms.placement_rank(None) == ms.placement_rank("")
     # An unrecognised string must not sort ahead of a real placement.
     assert ms.placement_rank("weird") > ms.placement_rank("Top 64")
+
+
+def test_report_carries_window_recovery_beside_survival():
+    """`survival` counts only hands that recover from EVERY window, since
+    the opponent picks the timing. On the active deck Infinite
+    Impermanence gets a median of 11 windows per line and about a third
+    are recoverable, so survival is a correct 0% while per-window
+    recovery is 32.6%. Showing 0% alone invites dismissing the column or
+    panicking at it."""
+    from skills import optimizer
+
+    hist = [optimizer.Candidate(
+        deck=None, label="base", score=0.1,
+        summary={"solved": 15, "hands": 20, "brick_rate": 0.25,
+                 "hand_trap_survival": 0.0,
+                 "window_recovery": {"10045474": 0.326, "14558127": 0.31},
+                 "combo_actions": {"mean": 8.9}})]
+    row = optimizer.report(hist, hands=20)[0]
+    assert row["survival"] == 0.0
+    assert row["window_recovery"]["10045474"] == 0.326, (
+        "window recovery is dropped, so 0% survival has no context")
+
+
+def test_the_optimizer_output_explains_the_survival_standard():
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_optimize)
+    assert "EVERY window" in src, (
+        "the output prints 0% survival without saying it is an all-windows "
+        "standard")
+    assert "window_recovery" in src

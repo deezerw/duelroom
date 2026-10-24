@@ -415,6 +415,12 @@ def report(history, hands):
             "ci": (lo, hi),
             "brick_rate": s.get("brick_rate"),
             "survival": s.get("hand_trap_survival"),
+            # `survival` is an all-windows standard, so it reads 0% on
+            # decks whose lines merely give the handtrap too many chances.
+            # Per-window recovery is the number that actually moves, and
+            # without it here the caller cannot show the two together.
+            "window_recovery": s.get("window_recovery") or {},
+            "false_bricks": s.get("false_bricks"),
         })
     return sorted(rows, key=lambda r: -r["score"])
 
