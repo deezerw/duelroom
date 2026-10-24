@@ -427,6 +427,34 @@ idle (`jobs.active` is None), so when awake:
 
     sudo systemctl restart duelroom.service      # full restart: skills/ changed
 
+### 23. `drill` told you to practise passing — FIXED
+
+Found by running the command, which had never been exercised this session. `drill`
+exports your best lines as EDOPro replays to rehearse, and it ranked them on the flat
+interruption count — which scores a card HELD IN HAND the same as a negate on the
+field. The top line it offered for practice on the active deck:
+
+    5 interruption(s), 12 actions
+    opening hand: Effect Veiler, Dominus Purge, Ash Blossom, Mulcharmy Fuwalos,
+                  Dominus Purge
+    ends on: Dominus Purge (set) x2 | hand: Mulcharmy, Ash, Veiler
+
+An all-handtrap hand with no engine, where the "line" is *set two traps and hold
+three*. It outranked two genuine boards — Blue-Eyes Spirit Dragon + Maiden of White,
+and Spirit Dragon + Hieratic Seal — at four interruptions each.
+
+Practising "I had no engine so I passed" is not practice, and this is the command
+whose entire purpose is telling you which lines to rehearse before a tournament.
+
+Fixed: `lines_from` ranks on `_on_field` first (interruptions the board holds on the
+field, set or face-up), then the flat count as the tiebreak. Cards in hand are real
+interaction but not a line you can rehearse — you hold them whatever you drew. Now
+the two real boards rank first and the do-nothing line drops to third. Verified by
+restoring the old sort key: the test fails, and passes again with the fix.
+
+This is the same flat-count flaw that drove the end-board scoring at the start of the
+session, surfacing in a second place that nobody had looked at.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

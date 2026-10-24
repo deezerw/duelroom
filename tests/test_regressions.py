@@ -2775,3 +2775,47 @@ def test_the_refusal_actually_suppresses_the_table(tmp_path, monkeypatch,
     assert "score" not in out.split("NO RANKING")[1].split("\n")[0]
     assert "best:" not in out, "a best line was announced for an empty ranking"
     assert not wrote, f"a 'best list' was written anyway: {wrote}"
+
+
+def test_drill_ranks_real_boards_above_holding_handtraps(tmp_path):
+    """`drill` tells you which lines to REHEARSE, and it ranked on the
+    flat interruption count — which scores a card held in hand the same
+    as a negate on the field. On the active deck the top line offered for
+    practice was: open five handtraps with no engine, set two Dominus
+    Purge, hold three. Five "interruptions", and it beat two real boards
+    (Blue-Eyes Spirit Dragon + Hieratic Seal) at four."""
+    import json as _json
+    from skills import drill
+
+    # 59822133 Blue-Eyes Spirit Dragon interrupts from the field;
+    # 14558127 Ash Blossom only from the hand.
+    field_line = {"board": {"players": [
+        {"mzone": [{"code": 59822133, "position": 0x1}], "szone": [],
+         "hand": [], "grave": []}]}}
+    hand_line = {"board": {"players": [
+        {"mzone": [], "szone": [],
+         "hand": [14558127, 14558127, 14558127], "grave": []}]}}
+
+    path = tmp_path / "d.jsonl"
+    path.write_text("\n".join([
+        # the hand-only record carries the HIGHER flat count
+        _json.dumps({"status": "solved", "deck": {"name": "d"},
+                     "hand_index": 0, "lines": [hand_line],
+                     "solver": {"blocking": {"interruptions": 5}}}),
+        _json.dumps({"status": "solved", "deck": {"name": "d"},
+                     "hand_index": 1, "lines": [field_line],
+                     "solver": {"blocking": {"interruptions": 4}}}),
+    ]) + "\n")
+
+    found = drill.lines_from(path, "d")
+    assert len(found) == 2
+    # `lines_from` parses JSON, so compare content -- identity cannot
+    # survive the round trip, which is how the first version of this
+    # assertion failed against correct behaviour.
+    first = found[0][1]
+    assert first == field_line, (
+        "the hand-only line was ranked first; drill is still ranking on the "
+        "flat count and would have you practise passing")
+    assert found[1][1] == hand_line
+    assert drill._on_field(field_line) == 1
+    assert drill._on_field(hand_line) == 0

@@ -66,8 +66,44 @@ def lines_from(jsonl_path, deck_name=None):
         n = counts.get((name, rec.get("hand_index")), 0)
         for ln in rec.get("lines") or []:
             out.append((rec, ln, n))
-    out.sort(key=lambda t: -t[2])
+    # Rank by what is ON THE FIELD first, then by the flat count.
+    #
+    # The flat interruption count scores a card HELD IN HAND the same as a
+    # negate on the field, so the top line offered for practice on the
+    # active deck was: open five handtraps with no engine, set two
+    # Dominus Purge, hold three. Five "interruptions", 12 actions, and it
+    # outranked two real boards (Blue-Eyes Spirit Dragon + Hieratic Seal)
+    # at four. Practising "I had no engine so I passed" is not practice,
+    # and `drill` exists to tell you which lines to rehearse.
+    out.sort(key=lambda t: (-_on_field(t[1]), -t[2]))
     return out
+
+
+def _on_field(line):
+    """Interruptions the end board holds on the FIELD, set or face-up.
+
+    Cards in hand are real interaction but they are not a line you can
+    practise -- you hold them whatever you drew. Ranking on them puts the
+    hands with no engine at the top.
+    """
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    board = line.get("board") or {}
+    players = board.get("players") or []
+    if not players:
+        return 0
+    me, cards, n = players[0], default_cards(), 0
+    for c in me.get("mzone") or []:
+        if any(i.where == "field" for i in card_interruptions(c["code"], cards)):
+            n += 1
+    for c in me.get("szone") or []:
+        faceup = bool(c.get("position", 0) & 0x5)
+        where = "field" if faceup else "set"
+        if any(i.where == where
+               for i in card_interruptions(c["code"], cards)):
+            n += 1
+    return n
 
 
 def describe(conn, line):
