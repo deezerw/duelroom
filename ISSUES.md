@@ -198,6 +198,32 @@ out of a real space of 22 removable slots x 26 candidates = 572 swaps.
 choice of cut. It is also stated honestly in the command's own output — but "optimise
 my deck" reads as more than it does.
 
+### 16. Orphaned pool workers survive for days
+
+Found 2026-10-24: six `multiprocessing.spawn` workers from a duelroom run, parent
+PID 1, **age 6 days 01:31**, 41 MB resident between them. When a pool's parent dies
+(a killed sweep, a crashed optimiser) its spawned children are reparented to init
+and never exit — they sit blocked on a queue that will never be written to.
+
+Harmless to correctness but it accumulates, and six stray Python processes is enough
+to make a `doctor` CPU reading or a `_busy_solvers()` check misleading. Cleared by
+PID.
+
+- **Fix:** the pools should be context-managed with a hard timeout, or the sweep
+  should install a signal handler that terminates children before exiting. A cheaper
+  mitigation: have `doctor` report orphaned `spawn_main` workers whose parent is 1.
+
+### 17. `pkill -f` on a job pattern kills the caller — again
+
+CLAUDE.md documents this as the exit-144 footgun for the gunicorn pattern. It applies
+to ANY `-f` pattern typed into a shell whose own command line contains it: `pkill -f
+"daemon.py optimize"` exited 144 having killed the invoking shell, and the target's
+solver children were orphaned rather than stopped.
+
+- **Rule:** never `pkill -f` from the loop. Kill by explicit PID, or by exact
+  executable name (`pkill -x combosolver`), which cannot match a bash command line.
+  Killing the parent does NOT stop its solver children; they need killing separately.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
