@@ -1919,3 +1919,44 @@ def test_a_single_draw_does_not_silently_become_a_cheap_run():
     src = inspect.getsource(sweep.solve_deck)
     assert "if draws <= 1:" in src and "triage_ms = solve_ms" in src, (
         "draws=1 can run the whole sweep at the triage budget")
+
+
+def test_a_degenerate_objective_refuses_to_rank(monkeypatch, capsys):
+    """A ranked table with a caveat underneath still reads as a ranking,
+    which is the shape of every wrong answer this project has produced.
+    Measured on the stored kewl-tune run: brick rate, survival and solve
+    rate were each ONE distinct value over all 10 trials, so the whole
+    order came from the combo-length tiebreak at weight -0.05."""
+    import daemon
+    from skills import optimizer
+
+    # Three terms constant, one moving: the degenerate case.
+    hist = [optimizer.Candidate(
+        deck=None, label=f"swap{i}", score=0.3 - i * 0.01,
+        summary={"brick_rate": 0.1667, "best_line_rate": 0.8333,
+                 "hand_trap_survival": 0.0,
+                 "combo_actions": {"mean": 9.0 + i}}) for i in range(4)]
+    const, vary = optimizer.degenerate_terms(hist)
+    assert len(vary) == 1 and vary[0] == "combo length", (const, vary)
+
+    rows = optimizer.report(hist, hands=12)
+    assert rows, "report produced nothing to rank"
+    # The scores DO differ, so without the guard a table would be printed.
+    assert len({r["score"] for r in rows}) > 1
+
+
+def test_the_optimizer_refusal_precedes_any_table():
+    """Order matters: the refusal must be emitted before the trial list,
+    and the degenerate branch must not write a 'best list' file."""
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_optimize)
+    i_refuse = src.index("NO RANKING")
+    i_table = src.index('"change"') if '"change"' in src else src.index("change")
+    assert i_refuse < i_table, (
+        "the ranked table is printed before the no-ranking refusal")
+    # The refusal branch returns rather than writing optimize_*.ydk.
+    branch = src[i_refuse:src.index("best:", i_refuse)]
+    assert "return" in branch, "the degenerate branch falls through to writing a list"
+    assert "write_ydk" not in branch, (
+        "a degenerate run still writes a 'best list'")

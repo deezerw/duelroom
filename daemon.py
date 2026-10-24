@@ -938,9 +938,35 @@ def cmd_optimize(conn, args):
     print(f"holding the target fixed at {target} across all trials\n")
     best, history = optimizer.hill_climb(conn, deck, archetype, target,
                                          hands=hands, rounds=rounds)
-    print(f"\nbest: {best.label}  score {best.score:+.3f}")
     rows = optimizer.report(history, hands)
     constant, varying = optimizer.degenerate_terms(history)
+
+    # The refusal comes FIRST, before any table. The warning used to print
+    # underneath the ranking, and a ranked table with a caveat below it
+    # still reads as a ranking -- which is the shape of every wrong answer
+    # this project has produced. Measured on the stored kewl-tune run:
+    # brick rate, survival and solve rate were each one distinct value
+    # over all 10 trials, so the whole ordering came from the combo-length
+    # tiebreak at weight -0.05.
+    if len(varying) <= 1:
+        only = varying[0] if varying else "nothing"
+        print(f"\n  !! NO RANKING. {len(constant)} of 4 objective terms did "
+              f"not vary at all over {len(history)} trials:")
+        print(f"     {', '.join(constant)}")
+        print(f"     Only {only} moved, and at weight "
+              f"{'-0.05' if only == 'combo length' else 'a tiebreak'} that is "
+              f"a tiebreak, not a measurement.")
+        print(f"\n     These flex slots are INDISTINGUISHABLE at {hands} hands.")
+        print(f"     Re-run with more hands before changing the list. Trials")
+        print(f"     below are listed by name, NOT ranked:\n")
+        for r in sorted(rows, key=lambda r: r["label"])[:12]:
+            print(f"     {(r['brick_rate'] or 0)*100:5.0f}% brick  "
+                  f"{(r['survival'] or 0)*100:5.0f}% surv  {r['label']}")
+        out = ROOT / "results" / f"optimize_{deck.name}.ydk"
+        print(f"\n  the base list is unchanged; nothing was written to {out}")
+        return
+
+    print(f"\nbest: {best.label}  score {best.score:+.3f}")
     print(f"\n  {'score':>7}  {'solve':>16}  {'brick':>6}  {'surv':>6}  change")
     for r in rows[:12]:
         lo, hi = r["ci"]
@@ -953,17 +979,12 @@ def cmd_optimize(conn, args):
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
     print("  most of these intervals overlap — treat the table as a shortlist")
     print("  to re-run at higher hand counts, not as a ranking.")
+    # Only reached when 2+ terms varied; the degenerate case returned above
+    # before printing any table.
     if constant:
         print(f"\n  ! {len(constant)} of 4 objective terms did not vary at all:")
         print(f"    {', '.join(constant)}")
-        if len(varying) <= 1:
-            only = varying[0] if varying else "nothing"
-            print(f"    The entire ordering above therefore comes from {only}.")
-            print(f"    That is a tiebreak, not a measurement — do not read the")
-            print(f"    ranking as evidence one swap beats another. Raise hands,")
-            print(f"    or accept that these flex slots are interchangeable here.")
-        else:
-            print(f"    Ranking rests on: {', '.join(varying)}.")
+        print(f"    Ranking rests on: {', '.join(varying)}.")
     out = ROOT / "results" / f"optimize_{deck.name}.ydk"
     best.deck.write_ydk(out)
     print(f"\n  best list written to {out}")
