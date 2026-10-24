@@ -510,6 +510,37 @@ recomputed 2026-10-24.
 `ydke` was exercised in the same pass and is correct — the URI round-trips to an
 identical 44/14/15 deck.
 
+### 26. `optimize` announced more than twice the work it does — FIXED
+
+`cmd_optimize` built its display pool with `candidate_pool(...)`, whose own default
+limit is 30, while `hill_climb` passes `pool_limit=12`. So it printed "26 candidates
+... 78 trials of 572 possible swaps" and then ran **36** (37 records including base).
+The 3-slot run completing at 37 trials rather than 79 is what exposed it — and that
+count was correct, the announcement was not.
+
+Fixed: one `pool_limit` is computed, announced, and passed to `hill_climb`, so the
+stated work is the work. Now reads "12 candidates ... 36 trials of 264 possible
+swaps".
+
+### 27. `rescore` rendered a 3-slot run as duplicate rows — FIXED
+
+Trial names became `<deck>_r<round>_<cut>_<add>` when the cut was added to them, but
+the label parser read only the last segment. So two trials adding the same card over
+**different cuts** rendered identically — "Called by the Grave" twice — which looks
+like a bug in the data rather than in the display. Now shows `-cut  +add`, and still
+renders the older add-only names from the single-slot run.
+
+### 28. `import` silently repoints every bare command — notice improved
+
+Exercising `import` moved the active deck from the tournament list to the imported
+one. That is deliberate and right for the common case, but `solve`, `report`,
+`optimize`, `drill` and `gauntlet` all default to the active deck, so importing an
+opponent's list or a meta deck for the gauntlet silently moves the target. The
+one-line notice was accurate and conveyed none of that.
+
+Behaviour unchanged — it is a reasonable default and changing it is the user's call.
+The notice now names what it replaced and gives the exact command to undo it.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

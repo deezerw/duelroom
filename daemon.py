@@ -1021,7 +1021,13 @@ def cmd_optimize(conn, args):
         archetype = guesses[0][0]
         print(f"identified as {archetype} "
               f"({guesses[0][1]*100:.0f}% of its {guesses[0][2]}-card core)")
-    pool = optimizer.candidate_pool(conn, archetype, deck)
+    # Announce the pool `hill_climb` will ACTUALLY use. It passes
+    # pool_limit=12 by default, while candidate_pool's own default is 30 --
+    # so this printed "26 candidates ... 78 trials" and then ran 36
+    # (1 base + 12 x 3 slots = 37 records). Overstating the work by more
+    # than 2x is the same defect as any other unqualified number.
+    pool_limit = 12
+    pool = optimizer.candidate_pool(conn, archetype, deck, limit=pool_limit)
     outs = optimizer.removable(conn, deck, archetype)
     if not pool:
         print(f"no flex/fringe pool for {archetype!r} — run `meta` and check `archetypes`")
@@ -1049,7 +1055,7 @@ def cmd_optimize(conn, args):
     print(f"holding the target fixed at {target} across all trials\n")
     best, history = optimizer.hill_climb(conn, deck, archetype, target,
                                          hands=hands, rounds=rounds,
-                                         slots=slots)
+                                         slots=slots, pool_limit=pool_limit)
     rows = optimizer.report(history, hands)
     constant, varying = optimizer.degenerate_terms(history)
 
@@ -1271,10 +1277,19 @@ def cmd_rescore(conn, args):
     print(f"  {'score':>7} {'brick':>6} {'solve':>6} {'surv':>5} "
           f"{'combo':>6} {'recov':>6}  change")
     for r in rows:
-        tail = r["label"].split("_")[-1]
-        shown = ("(your current list)" if r["label"] == "base"
-                 else (handlab._name(conn, int(tail)) if tail.isdigit()
-                       else r["label"]))
+        # Trial names are "<deck>_r<round>_<cut>_<add>" since the cut was
+        # added to them. Reading only the last segment showed the ADD and
+        # dropped the cut, so a 3-slot run rendered as duplicate rows --
+        # "Called by the Grave" twice, over two different cuts.
+        parts = r["label"].split("_")
+        shown = r["label"]
+        if r["label"] == "base":
+            shown = "(your current list)"
+        elif len(parts) >= 2 and parts[-1].isdigit() and parts[-2].isdigit():
+            shown = (f"-{handlab._name(conn, int(parts[-2]))}"
+                     f"  +{handlab._name(conn, int(parts[-1]))}")
+        elif parts[-1].isdigit():
+            shown = f"+{handlab._name(conn, int(parts[-1]))}"
         print(f"  {r['score']:+7.3f} {(r['brick_rate'] or 0):6.2f} "
               f"{(r['best_line_rate'] or 0):6.2f} {(r['survival'] or 0):5.2f} "
               f"{(r['combo_mean'] or 0):6.2f} {r['window_recovery']:6.3f}  "
@@ -1422,9 +1437,21 @@ def cmd_import(conn, args):
         print(f"  ! {len(bad)} card(s) the ENGINE cannot load — solver runs on this")
         print("    deck would segfault. Try `setup` to rebuild the merged database.")
 
+    # Name what this REPLACED. Importing repoints every bare command --
+    # solve, report, optimize, drill, gauntlet all default to the active
+    # deck -- so importing an opponent's list or a meta deck for the
+    # gauntlet silently moves the target away from your own list. The
+    # behaviour is deliberate and right for the common case; the one-line
+    # notice just did not convey the blast radius or how to undo it.
+    previous = db.get_meta(conn, "active_deck")
     db.set_meta(conn, "active_deck", deck.name)
     conn.commit()
-    print(f"  set as your active deck (`mydeck` to change)")
+    if previous and previous != deck.name:
+        print(f"  set as your active deck, replacing {previous}")
+        print(f"    every bare command (solve / report / optimize / drill) now")
+        print(f"    targets {deck.name}. To switch back:  mydeck {previous}")
+    else:
+        print(f"  set as your active deck (`mydeck` to change)")
 
 
 def cmd_mydeck(conn, args):

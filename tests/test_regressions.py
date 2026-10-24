@@ -2898,3 +2898,34 @@ def test_the_drift_refusal_comes_before_the_table():
     src = inspect.getsource(daemon.cmd_drift)
     assert src.index("NO DRIFT TO REPORT") < src.index("ms.drift("), (
         "drift computes and prints before checking the scrape")
+
+
+def test_optimize_announces_the_pool_it_will_actually_use():
+    """`cmd_optimize` called `candidate_pool` with its own default limit
+    of 30 while `hill_climb` passes pool_limit=12, so it printed
+    "26 candidates ... 78 trials" and then ran 36 (37 records with base).
+    Overstating the work by more than 2x is the same defect as any other
+    unqualified number."""
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_optimize)
+    assert "pool_limit = 12" in src
+    assert "limit=pool_limit" in src, (
+        "the announced pool is not the one hill_climb will use")
+    assert "pool_limit=pool_limit" in src, (
+        "hill_climb is not told the limit that was announced")
+
+
+def test_rescore_labels_distinguish_the_cut(tmp_path):
+    """Trial names are "<deck>_r<round>_<cut>_<add>" since the cut was
+    added to them, but the label parser read only the last segment — so a
+    3-slot run rendered as duplicate rows ("Called by the Grave" twice,
+    over two different cuts)."""
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_rescore)
+    assert 'parts[-2].isdigit()' in src, (
+        "rescore still reads only the add card from the trial name")
+    # Both shapes must render: with a cut, and the older add-only names.
+    assert 'f"-{handlab._name(conn, int(parts[-2]))}"' in src
+    assert 'f"+{handlab._name(conn, int(parts[-1]))}"' in src
