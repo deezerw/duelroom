@@ -4152,3 +4152,56 @@ def test_extra_target_tie_is_broken_deterministically():
         seen.add(target)
     assert len(seen) == 1, (
         f"a three-way tie resolved differently by input order: {seen}")
+
+
+def test_an_unreadable_banlist_status_does_not_break_the_app():
+    """`banlist_limit` raises; every caller must decide what that means.
+
+    ISSUES #40 made `card_db.limit_for_status` raise rather than guess 3
+    for a status it does not recognise, because guessing permissively is
+    how 121 forbidden cards became legal. That is right for
+    `Deck.validate`, which catches it and reports the card as
+    unverifiable. It was NOT handled at the two other call sites, both
+    added or touched by the same work:
+
+      * `builder._card` feeds the deckbuilder's search results, so one
+        odd card raised out of `builder.search` and would have 500'd
+        `/api/cards` -- breaking the WHOLE search, not one row.
+      * `optimizer.candidate_pool` would have died mid-pool-build, taking
+        an `optimize` run of several hours with it.
+
+    Both now treat an unreadable status as the MOST restrictive answer
+    (0 copies / exclude the candidate), never the permissive one. That is
+    the direction the original bug got wrong.
+    """
+    from skills import builder, card_db, db, optimizer
+    from skills.deck import Deck
+
+    conn = db.connect(":memory:")
+    conn.executemany(
+        "INSERT INTO cards (id,name,frame,banlist_tcg,last_fetched) "
+        "VALUES (?,?,?,?,?)",
+        [(1, "Weird Card", "effect", "Semi-Forbidden?", "now"),
+         (2, "Normal Card", "effect", None, "now")])
+    conn.commit()
+
+    # The authoritative check reports it rather than crashing.
+    d = Deck(name="t", main=[1] * 20 + [2] * 20, extra=[], side=[])
+    assert any("unknown tcg ban-list status" in p for p in d.validate(conn))
+
+    # The display path survives, and errs restrictive.
+    rows = {r["name"]: r for r in builder.search(conn, "Card", limit=5)[0]}
+    assert rows["Weird Card"]["limit"] == 0, \
+        "an unreadable status must not render as unrestricted"
+    assert rows["Normal Card"]["limit"] == 3
+
+    # And the raise is still the default for anyone who wants it.
+    import pytest
+    with pytest.raises(ValueError):
+        card_db.limit_for_status("Semi-Forbidden?")
+
+    # The optimizer excludes rather than dying.
+    import inspect
+    src = inspect.getsource(optimizer.candidate_pool)
+    assert "except ValueError" in src, \
+        "an unreadable status must exclude the candidate, not kill the pool"

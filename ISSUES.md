@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 58 items, as tagged on each heading:** 49 FIXED · 1 RESOLVED
+**Status of the 59 items, as tagged on each heading:** 50 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -2109,3 +2109,57 @@ consumers by eye. Two unpack sites existed and I changed one — the same
 shape of mistake as #53, where I fixed one copy of the ban-list map and
 left the other. Both times a cheap mechanical check would have found it
 immediately, and now one exists.
+
+---
+
+## 59. My own #40 fix could 500 the card search — FIXED 2026-10-25
+
+Generalising #58's lesson — I changed a data shape and missed a consumer
+— into a sweep of **every** shape and behaviour I changed tonight. One
+real problem, created by me, worse than the bug it came from.
+
+#40 made `card_db.limit_for_status` **raise** rather than guess 3 for an
+unrecognised ban-list status, because guessing permissively is exactly how
+121 forbidden cards became legal. That is right for the authoritative
+check: `Deck.validate` catches it and reports the card as unverifiable.
+
+I protected **one of three** call sites.
+
+| caller | before this fix |
+|---|---|
+| `deck.validate` | catches, reports the card — correct |
+| **`builder._card`** | **raises out of `builder.search`** |
+| **`optimizer.candidate_pool`** | **raises mid-pool-build** |
+
+Demonstrated on a scratch mirror holding one status of
+`"Semi-Forbidden?"`: `validate` returned a clean per-card problem, and
+`builder.search` raised `ValueError`. That path feeds `/api/cards`, so a
+single odd card would have **500'd the whole deckbuilder search** — not
+one row, the entire search. And `candidate_pool` would have died mid-build,
+taking an `optimize` run of several hours with it.
+
+So my fix traded a wrong number for a dead feature at two sites. Both now
+treat an unreadable status as the **most restrictive** answer — 0 copies,
+exclude the candidate — never the permissive one, which is the direction
+the original bug got wrong. Verified: the odd card renders `limit=0`
+(forbidden badge) and the normal card `limit=3`. The raise remains the
+default for anyone who wants it. Mutation-checked.
+
+**The rest of the sweep — every shape I changed tonight, all CLEAN:**
+
+| change | consumers | verdict |
+|---|---|---|
+| `surv_rows` 3→5-tuple | 2 sites | **was broken (#58)**, now fixed |
+| `drill.export` 3→4-tuple | `daemon.py:1917` unpacks 4; web uses `lines_from` | clean |
+| `report.deck_report` + `survival_tested` | additive key | clean |
+| `sweep.summarize` + `errors` | additive key | clean |
+| `special_summons` + `attempted`/`failed` | additive; web spreads `**v` | clean |
+| `special_summons.json` + `_source` | **was broken (#52)**, now fixed | fixed |
+| `_board_library` new tuple return | both callers written with it | clean |
+| `handtrap_matrix` → `survival_from_hands` | same shape returned | clean |
+
+Three of eight shape changes I made tonight broke a consumer (#52, #58,
+this one). That rate is the argument for the mechanical checks rather than
+reading call sites by eye, and all three were caught by a guard rather
+than by me noticing: `test_web.py`'s route walk, the new
+`tests/test_cli.py` walk, and this sweep.

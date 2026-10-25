@@ -29,6 +29,26 @@ TOKEN_FRAMES = {"token", "skill"}
 LIMIT_WORD = {0: "forbidden", 1: "limited", 2: "semi-limited"}
 
 
+def _limit(status, card_id):
+    """Copy limit for display, treating an unreadable status as 0.
+
+    `card_db.limit_for_status` RAISES on a status it does not recognise,
+    which is right for `Deck.validate` -- the authoritative check, which
+    catches it and reports the card as unverifiable. It is wrong here:
+    this feeds the deckbuilder's search results, so one odd card would
+    500 `/api/cards` and break the WHOLE search rather than one row.
+
+    Unknown therefore means 0, the most restrictive answer, not 3. That
+    is the direction the original bug got wrong (ISSUES #40, #53): a
+    status nobody can read must not render as "play as many as you
+    like".
+    """
+    try:
+        return card_db.limit_for_status(status, card_id=card_id)
+    except ValueError:
+        return 0
+
+
 def is_extra(frame):
     return (frame or "") in EXTRA_FRAMES
 
@@ -155,7 +175,7 @@ def _card(r, p):
         # warning never fired. `Deck.validate` still refused to save such
         # a list, so this was a lying display rather than an illegal
         # deck -- but it is the display you build a tournament list in.
-        "limit": card_db.limit_for_status(status, card_id=r["id"]),
+        "limit": _limit(status, r["id"]),
         "status": status,
         "play": p,
     }

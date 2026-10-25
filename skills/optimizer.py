@@ -113,7 +113,16 @@ def candidate_pool(conn, archetype, deck, fmt=ms.DEFAULT_FORMAT, limit=30):
         for row in buckets[bucket]:
             if row["card_id"] in have:
                 continue
-            if card_db.banlist_limit(conn, row["card_id"]) == 0:
+            # `banlist_limit` raises on a status it cannot read. Here
+            # the check EXCLUDES forbidden candidates, so an unreadable
+            # status must also exclude -- never suggest a card whose
+            # legality could not be established. Unguarded, one odd card
+            # killed the whole pool build and with it an `optimize` run
+            # that costs hours.
+            try:
+                if card_db.banlist_limit(conn, row["card_id"]) == 0:
+                    continue
+            except ValueError:
                 continue
             pool.append(row)
     pool.sort(key=lambda r: -r["pct"])
