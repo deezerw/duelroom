@@ -832,3 +832,40 @@ def test_build_page_takes_its_section_caps_from_deck_py(client):
     tpl = (pathlib.Path(__file__).resolve().parent.parent
            / "web" / "templates" / "build.html").read_text()
     assert "main:[40,60]" not in tpl
+
+
+# Each entry: (path, what it guards, regex that must appear).
+#
+# The route walk above proves a page answers 200. It does not prove the
+# page says the right thing, and every correction this review made to a
+# user-facing number lives in a template where a later edit could drop it
+# without failing anything. These pin the corrections themselves.
+CORRECTED_COPY = [
+    # ISSUES #38: survival is per HAND with a window, not per window.
+    ("/matrix", "survival denominator is hands",
+     r"hands</strong> where the"),
+    ("/matrix", "the all-windows standard is named",
+     r"every</strong> window"),
+    # ISSUES #49: the honest per-hand survival, with its live count.
+    ("/report", "plays-through is of LIVE hands", r"live</strong>"),
+    ("/report", "never-live is unmeasured, not 0",
+     r"unmeasured|never had a legal window"),
+    # ISSUES #50/#52: which board library the summon figures came from.
+    ("/threats", "source library is stated", r"Derived from"),
+    ("/threats", "single-draw understatement noted", r"understate"),
+    # ISSUES #54: section caps come from skills/deck.py.
+    ("/build?name=kewl-tune", "caps are server-rendered JSON",
+     r"const CAP = \{[^}]*\"main\": \[40, 60\]"),
+]
+
+
+@pytest.mark.parametrize(
+    "path,what,pattern", CORRECTED_COPY,
+    ids=[f"{p.split('?')[0]}-{w}" for p, w, _ in CORRECTED_COPY])
+def test_corrected_numbers_still_say_what_they_mean(client, path, what, pattern):
+    import re
+    _logged_in(client)
+    body = client.get(path, follow_redirects=True).get_data(as_text=True)
+    assert re.search(pattern, body), (
+        f"{path} no longer states: {what}. A number shown without what it "
+        "is over is the defect this review spent its time on")

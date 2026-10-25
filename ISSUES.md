@@ -3,12 +3,12 @@
 Found by a comprehensive pass on 2026-10-24. Ordered by **impact on getting a deck
 optimised for a tournament**, not by how interesting they are.
 
-Every guard currently passes — 277 tests, 7 invariants, field audit clean, doc
+Every guard currently passes — 285 tests, 7 invariants, field audit clean, doc
 drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here is
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 59 items, as tagged on each heading:** 50 FIXED · 1 RESOLVED
+**Status of the 60 items, as tagged on each heading:** 51 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -2163,3 +2163,44 @@ this one). That rate is the argument for the mechanical checks rather than
 reading call sites by eye, and all three were caught by a guard rather
 than by me noticing: `test_web.py`'s route walk, the new
 `tests/test_cli.py` walk, and this sweep.
+
+---
+
+## 60. The corrections are now pinned to the screen — FIXED 2026-10-25
+
+`tests/test_web.py`'s route walk proves a page answers **200**. It does not
+prove the page says the right thing — and every correction this review made
+to a user-facing number lives in a template, where a later edit could drop
+it without failing anything.
+
+Verified all seven corrections are live on the pages the user actually
+opens:
+
+| page | correction | state |
+|---|---|---|
+| `/matrix` | survival is per HAND with a window (#38) | live |
+| `/matrix` | the all-windows standard is named (#38) | live |
+| `/report` | plays-through is of LIVE hands, with `live N/M` (#49) | live |
+| `/report` | never-live reads "unmeasured", not 0% (#49) | live |
+| `/threats` | which board library the summon figures came from (#50, #52) | live |
+| `/threats` | that single-draw understates them (#52) | live |
+| `/build` | section caps are the server's constants (#54) | live |
+
+Then pinned each as a parametrised test. Mutation-checked two ways:
+reverting the matrix caption to "Of the windows where the" fails the
+denominator case, and changing `/threats`' "Derived from" fails the
+provenance case — so the guards bite on the specific wording that carries
+the meaning, not on the page merely rendering.
+
+**One false alarm of my own, worth recording because it nearly cost
+time.** My first ad-hoc check reported `/build`'s caps as MISSING. The
+pattern was `const CAP = \{"main"`, and Jinja's `tojson` **sorts keys**, so
+the page renders `{"extra": [0, 15], "main": [40, 60], ...}`. The page was
+correct and my regex was wrong — the unit test that parses that object as
+JSON had been passing all along. I checked the rendered output before
+"fixing" anything, which is the only reason nothing was broken chasing it.
+The committed pattern now matches the key rather than the position.
+
+285 tests. This closes the loop the review has been running on: a number is
+only fixed once the thing the user reads says what it means, and a test
+says so.
