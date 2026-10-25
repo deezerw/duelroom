@@ -4057,3 +4057,58 @@ def test_drill_reports_a_real_error_instead_of_no_lines():
         "a raising source must be recorded, not silently skipped"
     assert "raised rather than being empty" in body, \
         "and reported when no lines were found"
+
+
+def test_vocab_cache_is_keyed_on_content_not_identity():
+    """`compile_vocab` must not key its cache on `id(vocab)`.
+
+    CPython reuses an address once the object at it is collected, so a
+    new and DIFFERENT vocabulary allocated there received a stale cache
+    hit. Demonstrated 2026-10-25: alternating two vocabularies with a
+    gc.collect() between them, `compile_vocab(["Snake-Eye",
+    "Fiendsmith"])` returned the compiled patterns for ["Branded",
+    "Despia"] on the THIRD iteration.
+
+    Live impact was almost certainly nil -- `fetch_archetype_vocab`
+    returns the same ~600 tags every call and each caller holds its list
+    for the whole loop -- but the failure mode is silent
+    misidentification of every deck name, and the fix is one line.
+    """
+    import gc
+    import inspect
+
+    from skills import meta_scrape as ms
+
+    src = inspect.getsource(ms.compile_vocab)
+    assert "id(vocab)" not in src, \
+        "keying on id() gives stale hits after an address is reused"
+
+    for trial in range(400):
+        want = (["Branded", "Despia"] if trial % 2 == 0
+                else ["Snake-Eye", "Fiendsmith"])
+        got = [t for t, _ in ms.compile_vocab(want)]
+        assert got == want, (
+            f"trial {trial}: asked for {want}, cache returned {got}")
+        del want
+        gc.collect()
+
+
+def test_gauntlet_scratch_name_is_reproducible():
+    """Scratch names must not come from `hash()`, which is salted.
+
+    `gauntlet` built its per-candidate scratch directory as
+    `f"{name}_h{h}_{abs(hash(candidate.board_key())) % 10**8}"`, and
+    Python salts hash() of anything containing a str per process. Nothing
+    was computed wrongly -- it is only a directory name -- but it changed
+    every run, so a scratch dir could not be matched back to the
+    candidate that produced it, which is exactly what is wanted when a
+    gauntlet search misbehaves. Verified across three interpreters:
+    hash() gave three different values, crc32 one.
+    """
+    import inspect
+    from skills import gauntlet
+
+    src = inspect.getsource(gauntlet)
+    assert "hash(candidate.board_key())" not in src, \
+        "hash() is per-process salted; use zlib.crc32"
+    assert "crc32" in src

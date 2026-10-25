@@ -119,11 +119,24 @@ def _tag_pattern(tag):
     return re.compile(left + body + right, re.IGNORECASE)
 
 
+# Keyed on CONTENT, not on id(). `key = id(vocab)` was a correctness bug,
+# not a style one: CPython reuses an address after the object at it is
+# collected, so a new and DIFFERENT vocabulary allocated there got a stale
+# cache hit. Demonstrated 2026-10-25 -- it fired on the third iteration of
+# a loop alternating two vocabularies with a gc.collect() between, and
+# `compile_vocab(["Snake-Eye", "Fiendsmith"])` returned the compiled
+# patterns for ["Branded", "Despia"].
+#
+# Live impact was almost certainly nil: `fetch_archetype_vocab` returns
+# the same ~600 tags every call, and each caller holds its list for the
+# whole loop, so the two vocabularies needed to collide never existed. The
+# fix is a one-liner and the failure mode is silent misidentification of
+# every deck name, which is not worth leaving to luck.
 _pattern_cache = {}
 
 
 def compile_vocab(vocab):
-    key = id(vocab)
+    key = tuple(vocab)
     if key not in _pattern_cache:
         _pattern_cache[key] = [(t, _tag_pattern(t)) for t in vocab if t]
     return _pattern_cache[key]

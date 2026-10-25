@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 55 items, as tagged on each heading:** 46 FIXED · 1 RESOLVED
+**Status of the 56 items, as tagged on each heading:** 47 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1951,5 +1951,58 @@ re-verified (missing labels and missing table both still return None).
   internals skipping unparseable files, which is the intent.
 - `web/jobs.py` and `web/views.py` handlers both bind the exception and
   surface it to the user.
+
+Both fixes mutation-checked.
+
+---
+
+## 56. A cache keyed on `id()` returned the wrong vocabulary — FIXED 2026-10-25
+
+Swept a class not previously covered: per-process and identity
+assumptions that break under the 6-worker pool or across runs. Two hits,
+one of them a real correctness bug.
+
+**FIXED — `meta_scrape.compile_vocab` keyed its cache on `id(vocab)`.**
+
+```python
+key = id(vocab)          # the object's MEMORY ADDRESS
+```
+
+CPython reuses an address once the object at it is collected, so a new and
+**different** vocabulary allocated there receives a **stale cache hit**.
+
+**Demonstrated, not reasoned about.** Alternating two vocabularies with a
+`gc.collect()` between them, it fired on the **third iteration**:
+`compile_vocab(["Snake-Eye", "Fiendsmith"])` returned the compiled
+patterns for `["Branded", "Despia"]` — a completely unrelated
+vocabulary. `match_archetypes` would then match every deck name against
+the wrong tag set, and `identify_archetype` feeds `export` and `flex`.
+
+**Live impact was almost certainly nil, and that should be said plainly:**
+`fetch_archetype_vocab` returns the same ~600 tags on every call, and each
+caller (`discover_meta`, `scrape_archetype`) holds its list for the whole
+loop, so the two distinct live vocabularies this needs never existed. But
+the failure mode is the silent misidentification of every deck name, the
+fix is one line, and "it happens not to be reachable today" is not a
+property worth relying on. Keyed on `tuple(vocab)` now. Re-ran the
+demonstration against the fix: **0 stale hits in 4000 iterations**, cache
+still 2 entries.
+
+**FIXED — `gauntlet` built scratch names from `hash()`.**
+`f"{name}_h{h}_{abs(hash(candidate.board_key())) % 10**8}"`, and Python
+salts `hash()` of anything containing a `str` per process. Nothing was
+computed wrongly — it is only a directory name — but it changed every
+run, so a scratch directory could not be matched back to the candidate
+that produced it, which is precisely what is wanted when a gauntlet
+search misbehaves. Verified across three interpreters: `hash()` gave
+**three different values**, `zlib.crc32` one. Now crc32, which is what
+`sweep._draw_seed` already uses — there it affected results, and this is
+the same lesson applied one module over.
+
+**Audited CLEAN:** no `random.*` call anywhere lacks an explicit seed (the
+solver's randomness is its own, passed as `--seed`), and
+`_pattern_cache` is the only module-level mutable container in `skills/`
+— under a `spawn` pool each worker gets its own copy, so there is no
+cross-worker contamination.
 
 Both fixes mutation-checked.

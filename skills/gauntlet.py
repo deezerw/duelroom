@@ -44,6 +44,7 @@ than assumed:
 import json
 import shutil
 import tempfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -502,8 +503,17 @@ def defend(our_deck, our_hand, candidate, their_decks, hands=4,
         # tested N times.
         for h in range(hands):
             their_hand, _ = sample_hand(theirs, seed=2000 + h, size=6)
+            # crc32, not hash(): Python salts hash() of anything
+            # containing a str per process (PYTHONHASHSEED), and
+            # board_key() is a tuple of (code, where, negate) triples. The
+            # value is only a scratch-directory name, so nothing was
+            # computed wrongly -- but it changed every run, so a scratch
+            # dir could not be matched back to the candidate that made
+            # it, which is exactly what you want when a gauntlet search
+            # misbehaves. `sweep._draw_seed` uses crc32 for the same
+            # reason, where it DID affect results.
             sd = (scratch / f"{name}_h{h}_"
-                  f"{abs(hash(candidate.board_key())) % 10**8}")
+                  f"{zlib.crc32(repr(candidate.board_key()).encode()) % 10**8}")
             sd.mkdir(parents=True, exist_ok=True)
             # Same as `floor`: the seed deals their hand now.
             dealt = deck_path
