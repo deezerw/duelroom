@@ -706,8 +706,31 @@ what a goal could be worth (how many targets it demands) first, and only then pr
 solved over near-miss at equal demand — so the earlier rule survives where it was
 right. Budget unchanged.
 
-**The branded and despia records in `boards_multi.jsonl` were produced under the old
-ranking** and should be re-run before promotion.
+**Validated on branded, and the honest result is NEUTRAL.** Re-ran branded under the
+fixed ranking and compared it per hand against the stale-ranking run (same 40 hands,
+confirmed identical):
+
+| | |
+|---|---|
+| hands better | **0** |
+| hands worse | **2** |
+| hands the same | **38** |
+| mean paired delta | **-0.050** |
+| sign test over the 2 differing hands | two-sided **p = 0.50** |
+
+Indistinguishable from noise. The two differing hands moved because a different
+allocation draws different (reproducible) seeds, not because the ranking is worse.
+
+So the fix is **justified by the despia diagnosis, not by an aggregate gain**: hand 10
+had `stack:2` — the only goal that could yield two interrupters — get one 15-second
+attempt while six draws went to a goal already capped at one. That mechanism is wrong
+regardless of how it averages out, and branded simply has few hands with that
+structure. **The real test is despia re-run under the fixed ranking**, which is in
+flight; until then the fix should not be described as an improvement to board
+quality, only as a correction to where the budget goes.
+
+The stale-ranking records are kept as `boards_multi.stale-ranking.jsonl` — they are
+the control that caught the bug, and the paired comparison above needed them.
 
 ### 33. `stats.wilson` audited — CORRECT; one input edge hardened
 
