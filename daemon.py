@@ -10,6 +10,7 @@ import os
 import shlex
 import sys
 import traceback
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -368,6 +369,29 @@ def cmd_hand(conn, args):
         p5 = stats.open_chance(size, copies, 5) * 100
         p6 = stats.open_chance(size, copies, 6) * 100
         print(f"  {copies:>6}  {p5:6.1f}%  {p6:6.1f}%  {name}")
+
+    # Per-card odds cannot answer "do I open interaction at all", because
+    # a handtrap is interchangeable with every other handtrap. The active
+    # deck's best single card is 31.0% while the group of 8 is 65.3%, so
+    # reading the per-card column as the answer understates the deck by
+    # more than two to one. `stats.group_chance` has always been correct
+    # and tested, and nothing in the app could reach it.
+    held = Counter(d.main)
+    group = {cid: n for cid, n in held.items() if cid in scenarios.HANDTRAPS}
+    if group:
+        total = sum(group.values())
+        print(f"\n  interaction: {total} handtrap copies across "
+              f"{len(group)} card(s)\n")
+        names = ", ".join(f"{n}x {scenarios.HANDTRAPS[c]}"
+                          for c, n in sorted(group.items(), key=lambda t: -t[1]))
+        print(f"    {names}")
+        print(f"\n    {'want':>5}  {'first':>7}  {'second':>7}")
+        for want in (1, 2):
+            g5 = stats.group_chance(size, total, 5, want) * 100
+            g6 = stats.group_chance(size, total, 6, want) * 100
+            print(f"    {'>=' + str(want):>5}  {g5:6.1f}%  {g6:6.1f}%")
+        print(f"\n    (the GROUP, not any one card — they are "
+              f"interchangeable for this question)")
 
     print(f"\n  brick floor by starter count (P(zero starters), {size}-card deck)\n")
     print(f"  {'starters':>8}  {'first':>7}  {'second':>7}")
@@ -1096,6 +1120,14 @@ def cmd_optimize(conn, args):
               f"{'-0.05' if only == 'combo length' else 'a tiebreak'} that is "
               f"a tiebreak, not a measurement.")
         print(f"\n     These flex slots are INDISTINGUISHABLE at {hands} hands.")
+        # "Re-run with more hands" without a number is advice the reader
+        # cannot act on. `stats.trials_needed` answers it and was
+        # unreachable from the app.
+        need = stats.trials_needed(0.10)
+        print(f"     To resolve a 10-point difference you need ~{need} hands "
+              f"per arm unpaired; paired")
+        print(f"     seeds (what this uses) need far fewer, but {hands} is "
+              f"well short either way.")
         print(f"     Re-run with more hands before changing the list. Trials")
         print(f"     below are listed by name, NOT ranked:\n")
         for r in sorted(rows, key=lambda r: r["label"])[:12]:

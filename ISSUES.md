@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 46 items, as tagged on each heading:** 37 FIXED · 1 PARTLY FIXED
+**Status of the 47 items, as tagged on each heading:** 38 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1352,3 +1352,77 @@ with an internet-facing port.
   environment or `data/secret_key`, never a literal.
 
 No change made. Recorded so the next pass does not re-derive it.
+
+---
+
+## 47. The exact hand math was unreachable where it mattered most — FIXED 2026-10-25
+
+**Severity: medium.** The numbers were right; three of them could not be
+asked for.
+
+`skills/stats.py` is **correct**. Audited it rather than assumed it:
+
+- `pmf` against `scipy.stats.hypergeom` over **728** `(N, K, n, k)` cases
+  — max absolute difference **2.22e-16**, i.e. floating-point noise.
+- `pmf` sums to 1 over its support; `at_least`/`at_most` complementary.
+- `combo_chance` against **exact brute-force enumeration over labelled
+  cards** on five cases, including three disjoint groups and a six-card
+  hand — identical to 1e-12.
+- Closed forms match: `open_chance(40,3,5)` = `1 - C(37,5)/C(40,5)`.
+- A hand larger than the deck returns `0.0` rather than dividing by zero.
+
+The defect is reachability. Checking every function for callers:
+
+| function | callers in the app |
+|---|---|
+| `open_chance` | 3 |
+| `brick_chance` | 2 |
+| `wilson` | 6 |
+| **`group_chance`** | **0** |
+| **`combo_chance`** | **0** |
+| **`trials_needed`** | **0** |
+
+(`pmf`/`at_least`/`at_most` are internal helpers, reached through the
+others.)
+
+This is precisely the "parameter that exists and cannot be set" that
+CLAUDE.md calls **this project's signature bug** — and it was stranding
+the most useful question in the file. Handtraps are *interchangeable* for
+"do I open any interaction", so per-card odds systematically understate a
+deck. On the active deck:
+
+| question | answer |
+|---|---|
+| best single handtrap (3x Ash) | **31.0%** |
+| the group of 8, ≥1 | **65.3%** |
+| the group of 8, ≥2 | **21.9%** |
+
+`hand` printed only the per-card column. Read as the answer it is wrong by
+**more than two to one**, in the direction that makes a player add
+interaction the deck already has.
+
+**Fixed.** `hand` now prints an interaction block built from
+`HANDTRAPS ∩ deck` — naming every card that formed the group, so the
+number carries its own denominator — at ≥1 and ≥2, going first and
+second. On the active deck: 65.3% / 72.4% for ≥1, and 21.9% / 29.7% for
+≥2, which is the actionable one, because going second you usually want
+two pieces.
+
+`trials_needed` now backs the advice it was missing from. The degeneracy
+refusal said "re-run with more hands" without a number; it now says ~392
+hands per arm unpaired to resolve a 10-point difference, and that paired
+seeds need far fewer but the current count is well short either way.
+
+`combo_chance` stays unreached: it needs a starter list, and there is no
+reliable one. Guessing which cards are starters would be inventing data,
+so it is left for when a list exists.
+
+Two tests: one pins the group/per-card gap and the two wirings, one keeps
+a closed-form check on the hypergeometric in the suite.
+
+**Caught by my own guard:** the first version of this referenced `Counter`
+without importing it. `tools/check_names.py` — added earlier in this
+review after two missing-import incidents — failed with
+`daemon.py:378 undefined name 'Counter'` before the code ever ran. Also
+removed a `for ... break` loop left in my own edit that could only ever
+run once.

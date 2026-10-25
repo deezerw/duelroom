@@ -3627,3 +3627,63 @@ def test_zone_rank_covers_the_solver_vocabulary():
     # A monster zone is a field zone: it must outrank set backrow.
     assert scenarios.ZONE_RANK["mzone"] == scenarios.ZONE_RANK["atk"]
     assert scenarios.ZONE_RANK["mzone"] > scenarios.ZONE_RANK["szone"]
+
+
+def test_hand_answers_the_group_question_not_only_per_card():
+    """`hand` must reach `stats.group_chance`, not just `open_chance`.
+
+    Handtraps are interchangeable for the question "do I open any
+    interaction", so per-card odds systematically understate a deck. On
+    the active deck (44 main, 8 handtrap copies over 4 cards) the best
+    single card is 31.0% and the group is 65.3% -- reading the per-card
+    column as the answer is wrong by more than two to one, and a player
+    could add handtraps the deck does not need.
+
+    `group_chance`, `combo_chance` and `trials_needed` were all correct
+    and tested and NONE of them was reachable from the app -- the
+    "parameter that exists and cannot be set" that CLAUDE.md calls this
+    project's signature bug.
+    """
+    import pathlib
+    from skills import stats
+
+    src = (pathlib.Path(__file__).resolve().parent.parent / "daemon.py").read_text()
+    assert "stats.group_chance" in src, \
+        "`hand` cannot answer the group question"
+    assert "stats.trials_needed" in src, \
+        "the 'raise hands' advice has no number behind it"
+
+    # The gap the feature exists to close, pinned numerically.
+    size, group, best_single = 44, 8, 3
+    assert stats.group_chance(size, group, 5) > \
+        2 * stats.open_chance(size, best_single, 5)
+
+
+def test_opening_hand_math_matches_closed_form():
+    """Guards the exact hypergeometric against an independent formula.
+
+    Audited 2026-10-25 against scipy over 728 (N, K, n, k) cases -- max
+    absolute difference 2.22e-16 -- and `combo_chance` against exact
+    brute-force enumeration over labelled cards on five cases including
+    three disjoint groups and a six-card hand. This keeps a closed-form
+    check in the suite so a future edit cannot quietly change it.
+    """
+    import math
+    from skills import stats
+
+    # P(>=1 of 3 copies in 40, 5 cards) = 1 - C(37,5)/C(40,5)
+    assert abs(stats.open_chance(40, 3, 5)
+               - (1 - math.comb(37, 5) / math.comb(40, 5))) < 1e-12
+    # P(zero of 9 starters in 40, 5 cards) = C(31,5)/C(40,5)
+    assert abs(stats.brick_chance(40, 9, 5)
+               - math.comb(31, 5) / math.comb(40, 5)) < 1e-12
+    # The pmf is a distribution.
+    assert abs(sum(stats.pmf(44, 8, 5, k) for k in range(6)) - 1.0) < 1e-12
+    # at_least and at_most are complementary.
+    assert abs(stats.at_least(44, 8, 5, 2)
+               + stats.at_most(44, 8, 5, 1) - 1.0) < 1e-12
+    # combo_chance over disjoint groups, against the closed form for one.
+    assert abs(stats.combo_chance(13, [(5, 2)], 5)
+               - stats.at_least(13, 5, 5, 2)) < 1e-12
+    # A hand larger than the deck is 0, not a ZeroDivisionError.
+    assert stats.pmf(5, 1, 40, 1) == 0.0
