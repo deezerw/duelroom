@@ -93,6 +93,15 @@ def wilson(successes, trials, z=1.96):
     """
     if trials == 0:
         return (0.0, 0.0, 1.0)
+    if successes > trials:
+        # Swapped arguments reach the sqrt with p > 1 and die on a "math
+        # domain error", which says nothing about the cause. Verified
+        # 2026-10-24 that the interval itself is correct -- 40/40 gives
+        # 0.912-1.000, 15/20 gives 0.531-0.888, 10/12 gives 0.552-0.953 --
+        # so the only soft edge left was unreadable input handling.
+        raise ValueError(
+            f"wilson({successes}, {trials}): more successes than trials "
+            f"— arguments are (successes, trials) in that order")
     p = successes / trials
     denom = 1 + z * z / trials
     centre = (p + z * z / (2 * trials)) / denom

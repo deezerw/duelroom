@@ -3144,3 +3144,32 @@ def test_equal_demand_still_prefers_the_solved_goal():
          "interruptions": 3, "negates": 1},
     ]
     assert allocate(atts, draws=3, n_goals=2)[0][1] == "done"
+
+
+def test_wilson_matches_known_values():
+    """Every confidence interval reported this session rests on this.
+    Checked against the closed form: these are the figures quoted for the
+    active deck (40/40 -> 91-100%, 15/20 -> 53-89%, 20/20 -> 84-100%)."""
+    from skills.stats import wilson
+    for k, n, lo_exp, hi_exp in ((40, 40, 0.912, 1.000),
+                                 (15, 20, 0.531, 0.888),
+                                 (20, 20, 0.839, 1.000),
+                                 (0, 20, 0.000, 0.161),
+                                 (10, 12, 0.552, 0.953)):
+        p, lo, hi = wilson(k, n)
+        assert abs(p - k / n) < 1e-12
+        assert abs(lo - lo_exp) < 5e-4, (k, n, lo, lo_exp)
+        assert abs(hi - hi_exp) < 5e-4, (k, n, hi, hi_exp)
+        assert 0 <= lo <= p <= hi <= 1
+
+
+def test_wilson_says_what_is_wrong_with_swapped_arguments():
+    """k > n reached the sqrt with p > 1 and died on "math domain error",
+    which names nothing. No trials at all is a legitimate "no
+    information" answer and must keep working."""
+    import pytest as _pytest
+    from skills.stats import wilson
+    with _pytest.raises(ValueError, match="more successes than trials"):
+        wilson(20, 15)
+    assert wilson(0, 0) == (0.0, 0.0, 1.0)
+    assert wilson(0, 1)[0] == 0.0

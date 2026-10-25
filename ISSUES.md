@@ -709,6 +709,40 @@ right. Budget unchanged.
 **The branded and despia records in `boards_multi.jsonl` were produced under the old
 ranking** and should be re-run before promotion.
 
+### 33. `stats.wilson` audited — CORRECT; one input edge hardened
+
+Audited because every confidence interval reported this session rests on it. It is
+right. Checked against the closed form, including the exact figures quoted for the
+active deck:
+
+| case | interval | |
+|---|---|---|
+| 40/40 | 0.912 – 1.000 | the "91-100%" reported |
+| 15/20 | 0.531 – 0.888 | the "53-89%" reported |
+| 20/20 | 0.839 – 1.000 | the "84-100%" reported |
+| 0/20 | 0.000 – 0.161 | |
+| 10/12 | 0.552 – 0.953 | |
+
+`trials == 0` returns `(0, 0, 1)` — "no information" — rather than crashing, which is
+correct for the one call site that can reach it (`web/views.py` falls back to 0).
+
+**One edge hardened:** `successes > trials` reached the sqrt with p > 1 and died on
+`math domain error`, which names nothing. It now raises a message that says the
+arguments are `(successes, trials)`. Loud either way; now legible.
+
+The known values are pinned in a test, so a change to the interval maths cannot
+silently move every number in the project.
+
+### 34. Job queue audited — CLEAN, no fix needed
+
+Checked after restarting the worker, since that is exactly when a claimed-but-
+unfinished job becomes stuck forever (CLAUDE.md records a restart killing a job
+mid-flight twice). No stuck jobs — and `web/worker.py` already resets orphaned
+`running` jobs on startup, with the comment "A job left 'running' by a crashed worker
+would block the queue". `jobs.cancel` also refuses to end a running job on purpose,
+because "killing a running solver mid-sweep leaves partial records". Both correct;
+recorded so the area is not re-audited.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
