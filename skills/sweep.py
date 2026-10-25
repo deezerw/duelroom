@@ -287,27 +287,57 @@ def combinations_to_try(attempts, max_new=6):
     """
     from itertools import combinations
 
-    base, solved = None, []
+    base, solved, near = None, [], []
     tried = set()
     for a in attempts:
         tried.add(frozenset(a["targets"]))
-        if a["label"].startswith("piece:") and a["status"] == "solved":
-            # A piece goal is base + the one piece, so the piece is last
-            # and everything before it is the base.
+        if not a["label"].startswith("piece:"):
+            continue
+        # A piece goal is base + the one piece, so the piece is last and
+        # everything before it is the base.
+        if base is None:
+            base = list(a["targets"][:-1])
+        if a["status"] == "solved":
             solved.append(a["targets"][-1])
-            if base is None:
-                base = list(a["targets"][:-1])
-    if base is None or len(solved) < 2:
+        else:
+            # A piece that FAILED at the triage budget is not proof the
+            # piece is unreachable -- conjunction monotonicity only says
+            # an UNSATISFIABLE {base, B} makes {base, A, B} unsatisfiable,
+            # and a 15 s miss is a false negative, not unsatisfiability.
+            #
+            # Building stacks from solved pieces alone therefore never asks
+            # for a pair whose second piece misses triage. Measured on
+            # fiendsmith: 9 of 40 hands came back WORSE than the old
+            # single-draw library, which extra draws cannot cause -- only
+            # a narrower goal set can. Pieces that at least placed a card
+            # are included, ranked behind the all-solved combinations.
+            placed = a.get("best_placed")
+            if isinstance(placed, int) and placed > 0:
+                near.append(a["targets"][-1])
+    if base is None or len(solved) + len(near) < 2:
         return []
-    out = []
-    for size in range(len(solved), 1, -1):
-        for combo in combinations(solved, size):
-            targets = [*base, *combo]
-            if frozenset(targets) in tried:
-                continue
-            out.append((tuple(targets), f"stack:{size}"))
-            if len(out) >= max_new:
-                return out
+    out, seen = [], set()
+
+    def propose(pool, label_pool):
+        for size in range(len(pool), 1, -1):
+            for combo in combinations(pool, size):
+                targets = tuple([*base, *combo])
+                key = frozenset(targets)
+                if key in tried or key in seen:
+                    continue
+                seen.add(key)
+                out.append((targets, f"stack:{size}"))
+                if len(out) >= max_new:
+                    return True
+        return False
+
+    # All-solved combinations first: they are the ones with evidence.
+    if len(solved) >= 2 and propose(solved, "solved"):
+        return out
+    # Then mixtures including a near miss, which is a maybe rather than a
+    # known -- and the only way a pair needing it is ever requested.
+    if near and propose(solved + near, "mixed"):
+        return out
     return out
 
 

@@ -3210,3 +3210,62 @@ def test_matrix_states_weighted_coverage_not_just_deck_count():
     src = inspect.getsource(daemon.cmd_matrix)
     assert "WEIGHTED COVERAGE" in src
     assert "covered_share" in src
+
+
+def test_stacks_include_a_piece_that_only_missed_triage():
+    """Building stacks from solved pieces alone never asks for a pair
+    whose second piece misses the 15s triage budget. Conjunction
+    monotonicity only says an UNSATISFIABLE {base,B} makes {base,A,B}
+    unsatisfiable — a 15s miss is a false negative, not unsatisfiability.
+
+    Measured on fiendsmith: 9 of 40 hands came back WORSE than the old
+    single-draw library, which extra draws cannot cause; only a narrower
+    goal set can."""
+    from skills.sweep import combinations_to_try
+
+    atts = [
+        {"label": "piece:A", "status": "solved", "targets": ["b@hand", "A"]},
+        {"label": "piece:B", "status": "unsolved", "targets": ["b@hand", "B"],
+         "best_placed": 1},
+        {"label": "piece:C", "status": "unsolved", "targets": ["b@hand", "C"],
+         "best_placed": 0},
+    ]
+    out = combinations_to_try(atts)
+    sets = [frozenset(t) for t, _ in out]
+    assert frozenset(["b@hand", "A", "B"]) in sets, (
+        "A+B was never requested; B only missed triage, it is not known "
+        "unreachable")
+    # A piece that placed NOTHING stays excluded -- that is the sound half
+    # of the monotonicity argument.
+    assert all("C" not in t for t, _ in out), out
+
+
+def test_all_solved_combinations_are_offered_before_mixtures():
+    """A combination of pieces that each solved has evidence; one
+    including a near miss is a maybe. Evidence first."""
+    from skills.sweep import combinations_to_try
+    atts = [
+        {"label": "piece:A", "status": "solved", "targets": ["b", "A"]},
+        {"label": "piece:B", "status": "solved", "targets": ["b", "B"]},
+        {"label": "piece:N", "status": "unsolved", "targets": ["b", "N"],
+         "best_placed": 1},
+    ]
+    out = combinations_to_try(atts, max_new=10)
+    first_mixed = next((i for i, (t, _) in enumerate(out) if "N" in t), None)
+    first_solved = next((i for i, (t, _) in enumerate(out)
+                         if "A" in t and "B" in t and "N" not in t), None)
+    assert first_solved is not None and first_mixed is not None
+    assert first_solved < first_mixed, (
+        f"a near-miss mixture came before the all-solved pair: {out}")
+
+
+def test_no_duplicate_stack_is_proposed():
+    from skills.sweep import combinations_to_try
+    atts = [
+        {"label": "piece:A", "status": "solved", "targets": ["b", "A"]},
+        {"label": "piece:B", "status": "unsolved", "targets": ["b", "B"],
+         "best_placed": 2},
+    ]
+    out = combinations_to_try(atts, max_new=10)
+    keys = [frozenset(t) for t, _ in out]
+    assert len(keys) == len(set(keys)), out

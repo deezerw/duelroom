@@ -232,12 +232,22 @@ So the multi-draw library is a large gain on elfnote, a clear one on despia, and
 **indistinguishable on fiendsmith** — the same deck-dependence the `draws` ladder was
 built to report, now confirmed on four decks.
 
-**The 9 worse hands on fiendsmith are a real caveat, not noise to wave away.** More
-draws alone cannot produce a worse board; what can is the goal restructure (#32 and
-the three-wave design) replacing upstream's prefix stacks with stacks built only from
-pieces that solved individually. For a deck whose good pair needs a piece that fails
-alone at the triage budget, that pair is never asked for. Worth measuring per deck
-before promoting the library wholesale.
+**The 9 worse hands on fiendsmith were a real defect, now FIXED.** More draws alone
+cannot produce a worse board; what can is the goal restructure replacing upstream's
+prefix stacks with stacks built only from pieces that solved **individually**.
+
+The monotonicity argument behind that was half right. It says an *unsatisfiable*
+`{base, B}` makes `{base, A, B}` unsatisfiable — but a piece missing the **15 s
+triage** budget is a false negative, not a proof of unsatisfiability. So any pair
+needing a piece that misses triage was never requested at all.
+
+`combinations_to_try` now also builds stacks from pieces that at least **placed a
+card** (`best_placed > 0`), ranked behind the all-solved combinations — evidence
+first, maybes second. A piece that placed **nothing** stays excluded, which is the
+sound half of the argument.
+
+Still worth measuring per deck before promoting the library wholesale: fiendsmith
+needs re-running to confirm the 9 regressions are gone.
 
 (original note) 
 
