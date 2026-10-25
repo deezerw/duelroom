@@ -3472,3 +3472,105 @@ def test_boards_output_names_solver_failures():
     assert "SOLVER FAILURE" in src, (
         "a solver crash is counted in hands and not in solved, so it reads "
         "as a brick unless the display names it")
+
+
+def test_handtrap_and_floodgate_ids_match_their_labels():
+    """Every hardcoded card id must be the card its label names.
+
+    Two FLOODGATES ids were wrong: 97642679 is Dark Master - Zorc, a
+    Ritual Effect Monster, and was labelled "There Can Be Only One"; and
+    23616456 is not a card at all, labelled "Summon Limit". So two of the
+    five floodgate tests ran against a monster that is not a floodgate and
+    a board that could never be built -- silently, because a missing card
+    just fails to assemble.
+
+    This is the same defect class as the ban-list mapping: a hardcoded
+    lookup on external vocabulary, degrading quietly when a member is
+    wrong. A test is the only thing that catches a transposed digit.
+    """
+    from skills import card_db, db, scenarios
+
+    conn = db.connect()
+    if not conn.execute("SELECT 1 FROM cards LIMIT 1").fetchone():
+        import pytest
+        pytest.skip("card mirror is empty; run `daemon.py cards`")
+
+    problems = []
+    for label_map in (scenarios.HANDTRAPS, scenarios.FLOODGATES):
+        for cid, label in label_map.items():
+            row = card_db.resolve(conn, cid)
+            if row is None:
+                problems.append(f"{cid} ({label!r}) is not in the card mirror")
+                continue
+            # Labels are short display forms ("Ghost Ogre & Snow Rabbit"
+            # for a longer printed name), so compare on the first clause.
+            head = str(label).split(" &")[0].split(",")[0].strip().lower()
+            if head not in row["name"].lower():
+                problems.append(
+                    f"{cid} is labelled {label!r} but is {row['name']!r}")
+    assert not problems, "hardcoded card ids do not match their labels: " + \
+        "; ".join(problems)
+
+
+def test_face_down_is_0xA_not_0x4():
+    """0x4 is POS_FACEUP_DEFENSE -- face UP, not set.
+
+    `drill.describe` and `handlab`'s board rows both tested
+    `position in (4, 8, 0xA)`, under a comment claiming 0x4|0x8 were the
+    face-down bits. POS_FACEDOWN is 0xA = 0x2 (face-down attack) | 0x8
+    (face-down defence); 0x4 is face-up defence.
+
+    The test was therefore wrong twice: it called every face-up defence
+    monster "(set)" and would have missed a face-down attack one. Measured
+    over every board in results/*.jsonl, 1480 of 5416 cards are position
+    4 -- 27.3% read as set while face up, which for a monster is the
+    difference between its effect being live and not. `drill._on_field`
+    used `& 0x5` correctly all along, so the ranking and the text
+    disagreed about the same card.
+    """
+    from ygorl.engine import constants as C
+    from skills import drill
+
+    # Pin the engine's own constants, so a vendor bump that moves them
+    # fails here rather than silently changing what "set" means.
+    assert C.POS_FACEUP_DEFENSE == 0x4
+    assert C.POS_FACEDOWN == 0xA
+    assert C.POS_FACEDOWN_ATTACK == 0x2
+    assert C.POS_FACEDOWN_DEFENSE == 0x8
+
+    def described(position):
+        line = {"board": {"players": [{
+            "mzone": [{"code": 1, "position": position}],
+            "szone": [], "hand": []}]}}
+        return drill.describe(_NameStub(), line)[0]
+
+    assert "(set)" not in described(C.POS_FACEUP_ATTACK)
+    assert "(set)" not in described(C.POS_FACEUP_DEFENSE), \
+        "face-up defence is FACE UP; 1480 stored board cards sit here"
+    assert "(set)" in described(C.POS_FACEDOWN_DEFENSE)
+    assert "(set)" in described(C.POS_FACEDOWN_ATTACK), \
+        "face-down attack was missed by the old `in (4, 8, 0xA)` test"
+
+    # handlab keeps its own copy of this test for the web board view, and
+    # it is not reachable without a solved hand, so pin it at the source.
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for rel in ("skills/drill.py", "skills/handlab.py", "skills/sweep.py"):
+        # Comment lines are skipped: each of these files now *documents*
+        # the old pattern, so matching raw text flags the explanation.
+        code = "\n".join(
+            ln for ln in (root / rel).read_text().splitlines()
+            if not ln.lstrip().startswith("#"))
+        assert "in (4, 8, 0xA)" not in code, (
+            f"{rel} still tests face-down with `in (4, 8, 0xA)`, which "
+            "counts face-up defence (0x4) as set")
+
+
+class _NameStub:
+    """Stands in for a card-mirror connection in describe()."""
+
+    def execute(self, *a, **k):
+        return self
+
+    def fetchone(self):
+        return None

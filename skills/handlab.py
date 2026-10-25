@@ -484,7 +484,10 @@ def _board(conn, record, line_index=0):
     me, rows = players[0], []
     for zone, label in (("mzone", "monster"), ("szone", "spell/trap")):
         for c in me.get(zone) or []:
-            facing = " (set)" if c.get("position") in (4, 8, 0xA) else ""
+            # 0x4 is POS_FACEUP_DEFENSE -- face UP. See the note in
+            # drill.describe: the old `in (4, 8, 0xA)` test labelled 27.3%
+            # of stored board cards set when they were face up.
+            facing = " (set)" if (c.get("position", 0) or 0) & 0xA else ""
             rows.append({"zone": label, "name": _name(conn, c["code"]),
                          "code": c["code"], "set": bool(facing)})
     for c in me.get("hand") or []:

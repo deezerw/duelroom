@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 42 items, as tagged on each heading:** 34 FIXED · 1 PARTLY FIXED
+**Status of the 44 items, as tagged on each heading:** 36 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1188,3 +1188,90 @@ a real rank (`Top 8`, `Top 4`, `Top 32`, `Runner-Up`, `Winner`, `Top 64`,
 `Top 16`, `3rd Place`) — 100%, with the `.strip().lower()` normalisation
 doing the work. Its `top N` fallback orders unlisted sizes correctly too.
 No fix needed.
+
+---
+
+## 43. Two of the five floodgates were the wrong card — FIXED 2026-10-25
+
+**Severity: high for the feature.** 40% of `floodgates` tested nothing.
+
+Same defect class as #40 and #42, found by sweeping the rest of it: a
+hardcoded lookup on external vocabulary, degrading in silence. Checked
+every id in `HANDTRAPS`, `FLOODGATES` and `BLIND_SPOTS` against the
+mirror:
+
+| listed as | id | actually is |
+|---|---|---|
+| There Can Be Only One | `97642679` | **Dark Master - Zorc**, a Ritual Effect Monster |
+| Summon Limit | `23616456` | **not a card at all** |
+
+So `floodgates <deck>` spent two of its five checks building a board
+around a Ritual Monster that is not a floodgate, and one around a card
+that cannot exist. A missing card just fails to assemble, so both read as
+"could not build the board" rather than as an error — the feature looked
+partly untestable instead of misconfigured.
+
+Correct ids: There Can Be Only One is **24207889**, Summon Limit is
+**23516703**. All 7 `HANDTRAPS` ids were already right, which is why the
+matrix was unaffected.
+
+Fixed, with a test that resolves **every** hardcoded id against the mirror
+and compares it to its own label — the only thing that catches a
+transposed digit. Mutation-checked.
+
+## 44. Face-up defence was labelled "(set)" — FIXED 2026-10-25
+
+**Severity: high.** 27.3% of every board card the tool has ever printed.
+
+`drill.describe` and `handlab`'s board rows both tested:
+
+```python
+facing = " (set)" if pos in (4, 8, 0xA) else ""
+```
+
+under a comment stating "EDOPro position bits: 0x4|0x8 are the face-down
+ones". That comment is wrong, and it is the whole bug. From
+`ygorl.engine.constants`:
+
+```
+POS_FACEUP_DEFENSE    0x4      <- FACE UP
+POS_FACEDOWN_ATTACK   0x2
+POS_FACEDOWN_DEFENSE  0x8
+POS_FACEDOWN          0xA      = 0x2 | 0x8
+```
+
+So the test was wrong in both directions: it called every **face-up
+defence** monster set, and would have missed a **face-down attack** one.
+
+**Measured over every board in `results/*.jsonl`:**
+
+| zone | position | meaning | n | old label |
+|---|---|---|---|---|
+| mzone | 1 | face-up attack | 1981 | face-up ✓ |
+| mzone | **4** | **face-up defence** | **1480** | **SET ✗** |
+| szone | 0xA | face-down | 1185 | set ✓ |
+| szone | 0x5 | face-up | 683 | face-up ✓ |
+| mzone | 8 | face-down defence | 87 | set ✓ |
+
+**1480 of 5416 — 27.3% — were labelled wrong**, and all of them in the
+same direction: a face-up monster reported as set. For a monster that is
+the difference between its effect being live and not, and `drill`'s whole
+purpose is telling you what your end board actually is. Verified on a
+stored branded line: Mirrorjade the Iceblade Dragon in face-up defence now
+reads as a monster rather than a set card.
+
+`drill._on_field` used `& 0x5` correctly all along, so **the ranking and
+the text disagreed about the same card** — the same shape as #30, in a
+different place. `sweep.summarize` was also already correct.
+
+Fixed in both places with `& 0xA`. The test pins the engine's own four
+constants (so a vendor bump that moves them fails here rather than
+quietly changing what "set" means), checks all four positions through
+`drill.describe`, and guards `handlab`'s copy at the source since it needs
+a solved hand to reach.
+
+**One self-inflicted miss worth recording:** the source guard initially
+failed on `drill.py` because the explanatory comment I had just written
+contains the literal string `in (4, 8, 0xA)`. The guard was matching its
+own documentation. It now strips comment lines, and was re-verified to
+still catch a real reversion in `handlab.py`.

@@ -69,12 +69,18 @@ MAXX_C = 23434538
 
 # Common floodgates for the Stage 4 static check. Locals run these far more
 # than top tables do.
+# Card ids are checked against the mirror by
+# `test_handtrap_and_floodgate_ids_match_their_labels`. Two of these were
+# wrong until 2026-10-25: 97642679 is Dark Master - Zorc, a Ritual Effect
+# Monster, not There Can Be Only One, so `floodgates` spent two of its
+# five tests on a monster that is not a floodgate; and 23616456 is not a
+# card at all, so Summon Limit could never be built.
 FLOODGATES = {
     82732705: "Skill Drain",
     83326048: "Dimensional Barrier",
     90846359: "Rivalry of Warlords",
-    97642679: "There Can Be Only One",
-    23616456: "Summon Limit",
+    24207889: "There Can Be Only One",
+    23516703: "Summon Limit",
 }
 
 

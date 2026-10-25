@@ -133,9 +133,20 @@ def describe(conn, line):
     rows = []
     for zone, label in (("mzone", "monster"), ("szone", "spell/trap")):
         for c in me.get(zone) or []:
-            pos = c.get("position")
-            # EDOPro position bits: 0x4|0x8 are the face-down ones.
-            facing = " (set)" if pos in (4, 8, 0xA) else ""
+            # POS_FACEDOWN is 0xA (0x2 face-down attack | 0x8 face-down
+            # defence). The old test was `pos in (4, 8, 0xA)` under a
+            # comment claiming 0x4|0x8 were the face-down bits -- but 0x4
+            # is POS_FACEUP_DEFENSE, which is FACE UP. It therefore called
+            # every face-up defence monster "(set)" and would have missed
+            # a face-down attack one. 1480 of the 5416 board cards in
+            # results/*.jsonl are position 4: 27.3% of them read as set
+            # when they are face up, which for a monster is the difference
+            # between its effect being live and not.
+            #
+            # `_on_field` below already used `& 0x5` correctly, so the
+            # ranking and this text disagreed on the same card.
+            pos = c.get("position", 0) or 0
+            facing = " (set)" if pos & 0xA else ""
             rows.append(f"{label}: {_name(conn, c['code'])}{facing}")
     for c in (me.get("hand") or []):
         rows.append(f"hand: {_name(conn, c)}")
