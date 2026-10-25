@@ -4112,3 +4112,43 @@ def test_gauntlet_scratch_name_is_reproducible():
     assert "hash(candidate.board_key())" not in src, \
         "hash() is per-process salted; use zlib.crc32"
     assert "crc32" in src
+
+
+def test_extra_target_tie_is_broken_deterministically():
+    """A tie for "most common extra-deck card" must not follow file order.
+
+    `extra_target_from_boards` used `seen.most_common(1)[0]`, which breaks
+    a tie by Counter INSERTION order -- whichever card happened to appear
+    first in the JSONL. Real ties exist: branded's most common extra-deck
+    card has 2 hits with a THREE-WAY tie at the top. That one is latent,
+    because 2/31 = 6.5% fails the min_share gate and today every deck
+    clearing the gate has a unique top card. Reproducibility is the point:
+    the derived target decides what every later solve aims at, and a
+    target that depends on record order is not a measurement.
+
+    Verified across 5 shuffled input orders: stable before/after only
+    after the fix.
+    """
+    import json
+    import random
+    import tempfile
+
+    from skills import scenarios
+
+    recs = [{"status": "solved", "deck": {"name": "d"},
+             "lines": [{"board": {"players": [{"mzone": [{"code": c}]}]}}]}
+            for c in [111, 222, 333] * 2]
+
+    seen = set()
+    for trial in range(5):
+        random.Random(trial).shuffle(recs)
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl",
+                                         delete=False) as f:
+            for r in recs:
+                f.write(json.dumps(r) + "\n")
+            path = f.name
+        target, _share = scenarios.extra_target_from_boards(
+            path, [111, 222, 333], min_share=0.0)
+        seen.add(target)
+    assert len(seen) == 1, (
+        f"a three-way tie resolved differently by input order: {seen}")

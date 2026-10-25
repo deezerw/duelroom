@@ -658,7 +658,15 @@ def extra_target_from_boards(jsonl_path, deck_extra, min_share=0.4):
                         seen[m["code"]] += 1
     if not solved or not seen:
         return None, 0.0
-    code, hits = seen.most_common(1)[0]
+    # `seen.most_common(1)[0]` broke a tie by Counter INSERTION order --
+    # i.e. by whichever card happened to appear first in the file. Real
+    # ties exist: branded's most common extra-deck card has 2 hits with a
+    # THREE-WAY tie at the top. That one is latent, because 2/31 = 6.5%
+    # fails the `min_share` gate below, and today every deck that clears
+    # the gate has a unique top card. Still arbitrary where it fires, so
+    # the tie is broken by passcode: meaningless but deterministic, which
+    # is the difference between a reproducible run and a coin flip.
+    code, hits = max(seen.items(), key=lambda kv: (kv[1], -kv[0]))
     share = hits / solved
     if share < min_share:
         return None, share

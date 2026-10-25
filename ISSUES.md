@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 56 items, as tagged on each heading:** 47 FIXED · 1 RESOLVED
+**Status of the 57 items, as tagged on each heading:** 48 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -2006,3 +2006,55 @@ solver's randomness is its own, passed as `--seed`), and
 cross-worker contamination.
 
 Both fixes mutation-checked.
+
+---
+
+## 57. Rounding and tie-break sweep: one latent fix, three audited clean — FIXED 2026-10-25
+
+Two more classes swept, both chosen because they produce a number that
+reads as something it is not — the theme of this whole review.
+
+**Class A: a rate that rounds to a false 0% or 100%.** Scanned **3528
+stored rate values** across every `results/*.json` and `*.jsonl`, looking
+for any nonzero value that displays as `0%` or any sub-1.0 value that
+displays as `100%` at the `:.0f` precision the CLI uses.
+
+**Zero of 3528.** Sample sizes protect it: at 40 hands the granularity is
+2.5%, so the smallest nonzero rate rounds to 3%, never 0%. Verified rather
+than assumed — the assumption was that it was safe, and it is, but only
+because `hands` is small. **If `hands` ever rises past ~200 this stops
+being true**, and a 1-in-250 rate would print as 0%. Noted here rather
+than guarded, since the guard would be dead code today.
+
+**Class B: rankings whose ties resolve arbitrarily.** A tie broken by file
+or dict order means two runs of the same input can disagree, which the
+paired-comparison method this project rests on cannot tolerate.
+
+**Audited CLEAN:**
+
+- **`optimizer.candidate_pool`** — the highest-stakes one, because it
+  ranks by inclusion `pct` and then truncates to 12, so a tie straddling
+  the cut would change which candidates get tested. Branded genuinely has
+  **3 candidates sharing the pct at the 12th slot**. It is safe anyway:
+  `meta_scrape.classify` orders by `pct_lists DESC, c.name`, a full
+  tie-break, and Python's sort is stable, so the name ordering survives.
+  The determinism lives one layer down in the SQL.
+- **`optimizer.removable`** — its docstring records this exact bug being
+  fixed before ("it used to take whichever card came first out of a dict,
+  which made the single most consequential choice in the search
+  arbitrary").
+- **`Counter.most_common` elsewhere** — insertion order is deterministic
+  for a given input file, so these are reproducible even where arbitrary.
+
+**FIXED — `scenarios.extra_target_from_boards`.** It picked the most
+common extra-deck card with `seen.most_common(1)[0]`, breaking a tie by
+**whichever card appeared first in the JSONL**. Real ties exist: branded's
+top extra-deck card has **2 hits with a three-way tie**.
+
+Latent, and measured as such: 2/31 is 6.5%, which fails the `min_share`
+gate of 0.4, and every deck that does clear the gate today has a unique
+top card (despia 31 hits, fiendsmith 36, kewl-tune 36, sky-striker 34, all
+unique). But the derived target decides what every later solve aims at, so
+a target that depends on record order is not a measurement. Tie now broken
+by passcode — meaningless but deterministic. Verified stable across 5
+shuffled input orders; mutation-checked.
