@@ -156,15 +156,39 @@ So the search carries a baked-in assumption that it is a **first player's turn-1
 combo**, which is exactly what a going-second search is not — and 100% of rollouts
 dying by `turn_cut` is consistent with it.
 
-**Not proven, and not fixed.** `turns` initialises to 0 per rollout and counts
-transitions, so reading alone cannot establish that these sites are what kills it;
-confirming means instrumenting or rebuilding the solver.
+**PROVEN by experiment, and it is a real bug — but it is not the whole blocker.**
 
-**Why I am not rebuilding it:** the solver is pinned (`combo_solver e0c7221802a2`),
+Built a patched solver ALONGSIDE the pinned one (separate object, separate binary,
+source restored, `bin/combosolver` and `obj/solver/search.o` verified byte-identical
+by md5 afterwards), with those four cuts respecting `cfg.max_turns`. The cut profile
+changes completely:
+
+| solver | turn cuts |
+|---|---|
+| pinned | `turn 40334` — **100% of rollouts** |
+| patched | `turn 16` — **0% of rollouts** |
+
+So the hardcoded cuts WERE killing every going-second rollout, and respecting
+`cfg.max_turns` fixes that. The patch is saved, reviewed and **not applied**, at
+`patches/0001-going-second-turn-cuts.patch`.
+
+**A second, independent blocker remains.** With the search now running freely it
+still gets through 0 of 4, and the solver's own report says why it cannot:
+
+    NRPA : 38871 rollouts  165189 states  38332 adaptations   best 0/1
+    hindsight: 0 substitute goal(s) kept  <-- NONE: no extra-deck monster summoned
+
+`best 0/1` means the goal card was never once placed across 38,871 rollouts, and no
+extra-deck monster was summoned at all — in a Synchro deck. Also logged:
+`!! REQUESTED but INERT here (dependency absent in this mode): reenter 0.50`, so at
+least one mechanism is disabled in this mode. That is the next thread, and it is a
+separate investigation from the turn cuts.
+
+**Why the patch is not applied:** the solver is pinned (`combo_solver e0c7221802a2`),
 CLAUDE.md says "treat an update as a migration; otherwise results silently change
-meaning", and a rebuild invalidates every measurement taken this session plus the
-gate. Doing that unsupervised, to test a hypothesis, would trade a broken feature for
-untrustworthy numbers everywhere else. The feature stays UNSUPPORTED.
+meaning", and promoting it re-gates every measurement in this session. It also would
+not make the feature work, because of the second blocker above. The feature stays
+UNSUPPORTED and the patch waits for a session where the re-gate can be watched.
 
 - **For a session with someone watching:** patch those three sites to respect
   `cfg.max_turns` (or the rollout's starting turn), rebuild via

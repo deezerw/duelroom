@@ -1,0 +1,43 @@
+# Four hardcoded `turns >= 2` cuts in the vendored solver assume the search
+# is a FIRST player turn-1 combo. For a going-second search they kill every
+# rollout: measured 100% turn_cuts (40334 of 40334) before, 0% (16) after.
+#
+# PROVEN to fix the turn cuts; does NOT make the feature work -- a second
+# blocker remains (best 0/1 over 38871 rollouts, "no extra-deck monster
+# summoned"). NOT APPLIED: the solver is pinned at e0c7221802a2 and a rebuild
+# re-gates every measurement. Apply to solver-patched/search.cpp, rebuild with
+# tools/build_combo_solver.sh, then re-run `daemon.py gate snake_eye`.
+
+--- /tmp/a.cpp	2026-10-24 23:37:43.636901663 -0400
++++ /tmp/b.cpp	2026-10-24 23:37:43.652901879 -0400
+@@ -2747,7 +2747,7 @@
+ 		}
+ 		// Past the end of turn 1 the board is frozen: continuing the rollout into
+ 		// the opponent's turn can no longer reach anything.
+-		if(turns >= 2) {
++		if(turns >= cfg.max_turns + 1) {
+ 			++stats.turn_cuts;
+ 			return hit;
+ 		}
+@@ -3265,7 +3265,7 @@
+ 			// count (real recoveries), and every re-reaching of the board is
+ 			// re-recorded when it is cheaper.
+ 		}
+-		if(turns >= 2) {
++		if(turns >= cfg.max_turns + 1) {
+ 			++stats.turn_cuts;
+ 			break;
+ 		}
+@@ -4723,10 +4723,10 @@
+ 					if(!(cfg.anytime && cfg.finisher_post_goal))
+ 						return Adv::Goal;
+ 				}
+-				if(turns >= 2) { ++stats.turn_cuts; return Adv::Dead; }
++				if(turns >= cfg.max_turns + 1) { ++stats.turn_cuts; return Adv::Dead; }
+ 				if(GuardCut(board_scratch, summons))
+ 					return Adv::Dead;
+-			} else if(turns >= 2) {
++			} else if(turns >= cfg.max_turns + 1) {
+ 				return Adv::Dead;
+ 			}
+ 			if(!FillChoices(ro_choices)) {
