@@ -8,9 +8,9 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 44 items, as tagged on each heading:** 36 FIXED · 1 PARTLY FIXED
+**Status of the 46 items, as tagged on each heading:** 37 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
-(#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
+(#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
 causes sit in the pinned C++ solver), #11 (the documented blind spots, which are
 limits rather than defects).
@@ -1275,3 +1275,80 @@ failed on `drill.py` because the explanatory comment I had just written
 contains the literal string `in (4, 8, 0xA)`. The guard was matching its
 own documentation. It now strips comment lines, and was re-verified to
 still catch a real reversion in `handlab.py`.
+
+---
+
+## 45. `ZONE_RANK` had no rank for `mzone` — FIXED 2026-10-25 (latent)
+
+**Severity: low-latent.** Nothing emits the zone today; the fix is one
+line and a guard.
+
+The last unswept instance of #40's class. `_zone_rank` is
+`ZONE_RANK.get(_zone_of(spec), 1)` and `derive_targets` ranks candidate
+targets by it to choose the most **substantive** one — the mechanism that
+stops ygorl's planner proposing "Droll in hand" as a deck's payoff.
+
+The solver's own `--help` states its vocabulary:
+
+```
+zone = atk def (monster zone, face up), mzone, szone,
+       hand, grave, banished. Add :fd for a card SET face down
+```
+
+`ZONE_RANK` covered `atk def "" grave banished removed szone szone:fd
+hand` — **`mzone` and `mzone:fd` were absent.** A monster sitting in a
+monster zone therefore fell to the default rank 1, level with a card set
+from hand, two ranks under `grave` and three under the `atk` spelling of
+the same board.
+
+**Measured, and it is latent:** 0 of the stored target specs mention
+`mzone`, and duelroom never constructs one — real specs are only `atk`
+(1185), `hand` (1173) and `szone:fd` (467). So **no derived target was
+ever mis-ranked.** It stays reachable, because `--target card@mzone` is
+documented and `--target` is repeatable through
+`SolveRequest.extra_args`.
+
+Fixed: `mzone` ranks 3 (a field zone, same as `atk`), `mzone:fd` ranks 1
+explicitly (a set monster is no more built than a set backrow card, which
+is what the default happened to give — relying on a default that was
+wrong one key over is the pattern itself). `removed` is kept and labelled:
+it is not a solver zone, just an older alias.
+
+The guard is the point:
+`test_zone_rank_covers_the_solver_vocabulary` parses the solver's **own
+`--help`** and fails if a zone appears there without an explicit rank, so
+this cannot drift the way the ban-list map did. Mutation-checked.
+
+**That closes the defect class** opened by #40 — a hardcoded lookup on
+external vocabulary with a silent fallback. Six maps swept:
+
+| map | verdict |
+|---|---|
+| `card_db` ban-list statuses | **#40, critical** — every forbidden card legal at 3 |
+| solver record statuses | **#42** — a crash counted as a brick |
+| `FLOODGATES` card ids | **#43** — 2 of 5 were the wrong card |
+| `drill`/`handlab` position bits | **#44** — 27.3% of board cards mislabelled |
+| `ZONE_RANK` zones | **#45** — `mzone` unranked, latent |
+| `meta_scrape.PLACEMENT_RANK` | clean, 505/505 rows resolve |
+
+Each of the five defects was invisible for the same reason: the map
+answered every lookup, so nothing ever looked broken.
+
+## 46. Web session and TLS configuration audited — CLEAN, no fix needed
+
+Checked because memory records a real `session` cookie clash between
+stockroom and flipper, and duelroom is a third Flask app on the same host
+with an internet-facing port.
+
+- `web/__init__.py` already sets `SESSION_COOKIE_NAME="duelroom_session"`,
+  with a comment naming the stockroom/flipper collision as the reason. The
+  lesson was already applied here.
+- `SESSION_COOKIE_SECURE` is gated on `DUELROOM_TLS`, which looked like a
+  way to ship a non-Secure cookie over HTTPS — so it was checked against
+  the live process rather than the code: `/proc/<master>/environ` has
+  `DUELROOM_TLS=1`, and `tmux-start.sh` passes `--certfile/--keyfile`. The
+  flag is on in the deployment that matters.
+- `HTTPONLY` and `SAMESITE=Lax` set; `SECRET_KEY` comes from the
+  environment or `data/secret_key`, never a literal.
+
+No change made. Recorded so the next pass does not re-derive it.

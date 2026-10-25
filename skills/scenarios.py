@@ -87,10 +87,25 @@ FLOODGATES = {
 # How much a target's zone implies you actually BUILT something.
 # Higher is more substantive. A monster you assembled on the field is a
 # payoff; a card you set from your hand is a draw plus one action.
+# This must cover EVERY zone the solver accepts, because `_zone_rank`
+# falls back to 1 -- the "set backrow" rank -- for anything it does not
+# know. `mzone` was missing: a monster sitting in a monster zone ranked
+# the same as a card set from hand, three ranks below the `atk` spelling
+# of the same thing. Nothing emits `@mzone` today (0 of the stored target
+# specs use it, and duelroom never builds one), so no derived target was
+# actually mis-ranked -- but `--target card@mzone` is a documented flag
+# that reaches the solver through `SolveRequest.extra_args`.
+#
+# `test_zone_rank_covers_the_solver_vocabulary` parses the solver's own
+# --help and fails if a zone appears there without a rank here, so this
+# cannot drift the way the ban-list map did.
 ZONE_RANK = {
-    "atk": 3, "def": 3, "": 3,          # on the field, summoned
-    "grave": 2, "banished": 2, "removed": 2,
+    "atk": 3, "def": 3, "": 3,          # on the field, summoned, face up
+    "mzone": 3,                          # a monster in a monster zone
+    "grave": 2, "banished": 2,
+    "removed": 2,                        # not a solver zone; older alias
     "szone": 1, "szone:fd": 1,          # set backrow
+    "mzone:fd": 1,                       # a monster SET: not built either
     "hand": 0,                           # not built at all
 }
 

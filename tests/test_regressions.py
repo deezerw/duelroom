@@ -3574,3 +3574,56 @@ class _NameStub:
 
     def fetchone(self):
         return None
+
+
+def test_zone_rank_covers_the_solver_vocabulary():
+    """Every zone the solver accepts must have an explicit rank.
+
+    `_zone_rank` falls back to 1 -- the "set backrow" rank -- for an
+    unknown zone, and `derive_targets` ranks candidate targets by it to
+    pick the most SUBSTANTIVE one. `mzone` was missing, so a monster in a
+    monster zone would have ranked level with a card set from hand and
+    two ranks below `grave`, three below the `atk` spelling of the same
+    board.
+
+    Nothing emits `@mzone` today -- 0 of the stored target specs use it
+    and duelroom never constructs one -- so this was latent. It is still
+    reachable: `--target card@mzone` is documented, and `--target` is
+    repeatable and passed through `SolveRequest.extra_args`.
+
+    This parses the solver's OWN --help rather than restating a list, so
+    a vendor bump that adds a zone fails here instead of silently
+    ranking it as backrow. Same guard shape as the card-id test, for the
+    same reason.
+    """
+    import re
+    import subprocess
+
+    import pytest
+
+    from skills import engine, scenarios
+
+    if not engine.SOLVER_BIN.exists():
+        pytest.skip("solver binary not built")
+    help_text = subprocess.run(
+        [str(engine.SOLVER_BIN), "--help"],
+        capture_output=True, text=True, timeout=60).stdout
+
+    m = re.search(r"zone = (.+?)\. Add :fd", help_text, re.S)
+    assert m, "the solver's --help no longer states its zone vocabulary"
+    # "atk def (monster zone, face up), mzone, szone, hand, grave, banished"
+    listed = {z for z in re.findall(r"\b([a-z]+)\b", m.group(1))
+              if z not in {"monster", "zone", "face", "up", "and", "or", "a"}}
+
+    missing = sorted(listed - set(scenarios.ZONE_RANK))
+    assert not missing, (
+        f"the solver accepts {missing} but ZONE_RANK has no rank for them, "
+        "so _zone_rank silently calls them set-backrow (1)")
+
+    # The :fd forms the help describes explicitly.
+    for z in ("mzone:fd", "szone:fd"):
+        assert z in scenarios.ZONE_RANK, f"{z} has no explicit rank"
+
+    # A monster zone is a field zone: it must outrank set backrow.
+    assert scenarios.ZONE_RANK["mzone"] == scenarios.ZONE_RANK["atk"]
+    assert scenarios.ZONE_RANK["mzone"] > scenarios.ZONE_RANK["szone"]
