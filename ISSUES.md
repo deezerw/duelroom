@@ -140,10 +140,36 @@ What was PROVEN and fixed along the way (each real, none the cause):
 (`target_scratch` builds the goal from `--target` and discards the captured
 reference), or the repair-mode no-op (`searched` is true throughout).
 
-- **Next step, for someone with a session to spend:** read the solver's `--player 1`
-  search from `main.cpp` directly. Every observable input is now correct, so the
-  remaining question is what that mode does with them. `_attack` keeps a `solver.log`
-  per search, which is the evidence to start from.
+**Localised to the vendored C++ (2026-10-24), and deliberately NOT changed.**
+`turn_cuts` does not mean "budget exhausted" — the solver's own comment says it
+separates "decision budget too short" from **"the line overflows turn 1"**. Three
+sites in `solver-patched/search.cpp` cut on a **hardcoded** `turns >= 2`:
+
+| line | comment |
+|---|---|
+| 2751 | "Past the end of turn 1 the board is frozen: continuing the rollout into the opponent's turn can no longer reach anything." |
+| 3269 | same shape |
+| 4726 | `if(turns >= 2) { ++stats.turn_cuts; return Adv::Dead; }` |
+
+Every *other* cut site uses the configurable `total_turns >= cfg.max_turns + 1`.
+So the search carries a baked-in assumption that it is a **first player's turn-1
+combo**, which is exactly what a going-second search is not — and 100% of rollouts
+dying by `turn_cut` is consistent with it.
+
+**Not proven, and not fixed.** `turns` initialises to 0 per rollout and counts
+transitions, so reading alone cannot establish that these sites are what kills it;
+confirming means instrumenting or rebuilding the solver.
+
+**Why I am not rebuilding it:** the solver is pinned (`combo_solver e0c7221802a2`),
+CLAUDE.md says "treat an update as a migration; otherwise results silently change
+meaning", and a rebuild invalidates every measurement taken this session plus the
+gate. Doing that unsupervised, to test a hypothesis, would trade a broken feature for
+untrustworthy numbers everywhere else. The feature stays UNSUPPORTED.
+
+- **For a session with someone watching:** patch those three sites to respect
+  `cfg.max_turns` (or the rollout's starting turn), rebuild via
+  `tools/build_combo_solver.sh`, re-run `daemon.py gate snake_eye`, and re-measure.
+  `_attack` keeps a `solver.log` per search as the evidence.
 - **Until then treat `gauntlet`'s board ranking and `second` as UNSUPPORTED.** `rank`
   refuses to print an ordering when nothing beats the floor, so no false answer
   escapes — believe that refusal.
