@@ -922,18 +922,70 @@ def cmd_drift(conn, args):
 
 
 def cmd_targets(conn, args):
-    src = ROOT / "results" / "boards.jsonl"
+    # The source was hardcoded to results/boards.jsonl -- the SINGLE-DRAW
+    # library, which CLAUDE.md documents as understating every deck
+    # ("one attempt is one draw"). Targets decide what every later solve
+    # aims at, so that choice propagates into every number downstream,
+    # and it could not be changed or even compared against.
+    #
+    # It matters: deriving from the 4-deck multi-draw arm changes the
+    # target for 2 of 5 decks -- branded goes Rindbrumm -> Stardust
+    # Dragon - Victim Sanctuary, fiendsmith goes Fiendsmith's Desirae ->
+    # F.A. Dawn Dragster.
+    #
+    # The default stays boards.jsonl, deliberately: silently re-pointing
+    # the whole measurement chain at a newer file would change every
+    # downstream number with no one asking for it, and a newer library is
+    # not automatically a better one (the multi-draw arm above came from
+    # a run abandoned mid-way). So: the source is nameable, it is always
+    # printed with its date, and a newer candidate is reported rather
+    # than used.
+    src = Path(args[0]) if args else ROOT / "results" / "boards.jsonl"
+    if not src.is_absolute():
+        src = src if src.exists() else ROOT / "results" / src.name
     if not src.exists():
-        print(f"no {src} — build the board library first")
+        print(f"no {src} — build the board library first, or name a "
+              f"library: targets [boards_multi.jsonl]")
         return
+    stamp = datetime.fromtimestamp(src.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    print(f"deriving from {src.name} ({stamp})")
+    # Candidates, newest LAST by mtime -- not alphabetically, which
+    # recommended `boards_multi.stale-ranking.jsonl`, a control arm
+    # deliberately preserved BECAUSE it was built by defective code.
+    # A stem containing a dot is such a variant (boards_multi vs
+    # boards_multi.narrow-stacks), so those are listed, never suggested.
+    cands = [q for q in (ROOT / "results").glob("boards*.jsonl")
+             if q != src and q.stat().st_mtime > src.stat().st_mtime]
+    cands.sort(key=lambda q: q.stat().st_mtime)
+    variants = [q for q in cands if "." in q.stem]
+    primary = [q for q in cands if "." not in q.stem]
+    if cands:
+        print("  ! newer libraries exist; none is used automatically, because")
+        print("    targets decide what every later solve aims at:")
+        for q in reversed(cands):
+            when = datetime.fromtimestamp(q.stat().st_mtime).strftime("%m-%d %H:%M")
+            tag = "  (preserved variant)" if "." in q.stem else ""
+            # sweep._checkpoint writes <out>.partial during a run, so its
+            # presence means that library is still being appended to and
+            # covers only the decks finished so far.
+            if Path(str(q) + ".partial").exists():
+                tag += "  (RUN IN PROGRESS — incomplete)"
+            print(f"      {q.name:<40} {when}{tag}")
+        pick = next((q for q in reversed(primary)
+                     if not Path(str(q) + ".partial").exists()), None)
+        if pick:
+            print(f"    Re-run as `targets {pick.name}` to switch.")
+        else:
+            print("    Nothing complete to switch to yet.")
     out = ROOT / "assets" / "derived_targets.json"
     t = scenarios.write_targets(src, out)
-    print(f"derived targets for {len(t)} decks -> {out}\n")
+    print(f"\nderived targets for {len(t)} decks -> {out}\n")
     for deck, named in scenarios.describe_targets(conn, t):
         print(f"  {deck:28} {', '.join(named)}")
     weak = scenarios.trivial_targets(scenarios.derive_targets(src))
     if weak:
-        print("\n  weak targets — these decks build little, so their solve rate")
+        print(f"\n  weak targets (from {src.name}) — these decks build little,")
+        print("  so their solve rate")
         print("  and handtrap survival mean less than the numbers suggest:")
         for deck, reason in weak:
             print(f"    {deck}: {reason}")

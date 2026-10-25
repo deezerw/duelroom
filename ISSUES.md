@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 50 items, as tagged on each heading:** 41 FIXED · 1 PARTLY FIXED
+**Status of the 51 items, as tagged on each heading:** 42 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1622,3 +1622,62 @@ and matches, and a fresh one is reused without rebuilding.
 - Swept for other instances of #49's shape — a module warning against a
   field that other call sites still read. `survival_given_line` was the
   only one.
+
+---
+
+## 51. `targets` was hardcoded to the single-draw library — FIXED 2026-10-25
+
+**Severity: high**, because of where it sits. Targets decide what every
+later solve aims at, so this choice propagates into the solve rate, the
+brick rate, the handtrap matrix and the optimiser objective.
+
+`cmd_targets` read `results/boards.jsonl` unconditionally — the
+**single-draw** library, which CLAUDE.md's own key finding describes as
+understating every deck: *"the solver is a RANDOMIZED search, and one
+attempt is one draw ... the best board a hand can reach is usually NOT the
+one a single draw returns."* A multi-draw library existed and could not be
+used, or even compared against.
+
+**It changes the answer.** Deriving from the 4-deck multi-draw arm picks a
+different target for **2 of 5** decks:
+
+| deck | from single-draw | from multi-draw |
+|---|---|---|
+| branded | Rindbrumm the Striking Dragon | Stardust Dragon - Victim Sanctuary |
+| fiendsmith | Fiendsmith's Desirae | F.A. Dawn Dragster |
+| despia, elfnote, kewl-tune | *same* | *same* |
+
+**The default deliberately stays `boards.jsonl`.** Silently re-pointing the
+measurement chain at whatever file is newest would change every downstream
+number with nobody asking, and newer is **not** better here — the
+multi-draw arm above is `boards_multi.narrow-stacks.jsonl`, a control
+preserved precisely because it was built by defective code. So instead:
+the source is nameable (`targets [library]`), it is always printed with
+its date, and newer candidates are **reported, never used**.
+
+Found and fixed two bugs in my own first version of that reporting:
+
+1. It recommended `newer[-1]` from a name-sorted list, which is
+   `boards_multi.stale-ranking.jsonl` — a deliberately-kept defective arm.
+   Candidates are now ranked by mtime, and any library whose stem
+   contains a dot (`boards_multi.narrow-stacks` vs `boards_multi`) is
+   listed as a preserved variant and never suggested.
+2. It would have recommended `boards_multi.jsonl` while tonight's run is
+   still appending to it — that library currently holds 2 of 8 decks.
+   `sweep._checkpoint` writes `<out>.partial` for the duration of a run,
+   so that file's presence is a reliable in-progress signal; such a
+   library is now flagged `RUN IN PROGRESS — incomplete` and excluded from
+   the suggestion. With nothing complete to offer it says so rather than
+   naming something wrong.
+
+Verified both paths and restored `assets/derived_targets.json` to its
+original content afterwards (branded back to `51409648`).
+
+**Audited in the same pass:**
+
+- `scenarios.merged_targets_file` regenerates `targets_merged.json` on
+  every call, so the file every funnel run is handed cannot go stale.
+  Clean.
+- `assets/derived_targets.json` (2026-10-24) is newer than the library it
+  came from (2026-10-18), so that chain was consistent — the defect was
+  the inability to choose, not a stale file.

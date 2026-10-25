@@ -3812,3 +3812,42 @@ def test_special_summon_cache_has_a_producer():
     }
     out = scenarios.special_summons([rec])
     assert isinstance(out, dict)
+
+
+def test_targets_source_is_nameable_and_stated():
+    """`targets` must not be hardcoded to one board library.
+
+    It read `results/boards.jsonl` unconditionally -- the SINGLE-DRAW
+    library, which CLAUDE.md documents as understating every deck ("one
+    attempt is one draw"). Targets decide what every later solve aims
+    at, so that choice propagates into the solve rate, the brick rate,
+    the handtrap matrix and the optimiser objective, and it could not be
+    changed or even compared against.
+
+    It changes the answer: deriving from the 4-deck multi-draw arm picks
+    a different target for 2 of 5 decks -- branded Rindbrumm the Striking
+    Dragon -> Stardust Dragon - Victim Sanctuary, fiendsmith Fiendsmith's
+    Desirae -> F.A. Dawn Dragster.
+
+    The default deliberately stays `boards.jsonl`: silently re-pointing
+    the chain at whatever file is newest would change every downstream
+    number unasked, and newer is not better -- the arm above came from a
+    run abandoned mid-way and kept on purpose. So the source is nameable,
+    always printed with its date, and newer candidates are reported.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "daemon.py").read_text()
+    i = src.index("def cmd_targets")
+    body = src[i:i + 3000]
+
+    assert "args[0]" in body, "the board library must be nameable"
+    assert "strftime" in body, "the source must be printed with its date"
+    # A preserved control arm (a dot in the stem, e.g.
+    # boards_multi.narrow-stacks) must never be the suggested switch: it
+    # exists BECAUSE it was built by defective code. Sorting the
+    # candidates by name recommended exactly that.
+    assert 'q.stem' in body and 'st_mtime' in body, \
+        "candidates must be ranked by mtime, not by name"
+    assert ".partial" in body, \
+        "a library still being written is incomplete and must be flagged"

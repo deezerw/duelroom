@@ -45,7 +45,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   threats                   interruption counts + common pieces per archetype
   snapshot [label]          freeze today's inclusion rates for later comparison
   drift <archetype> [a] [b] what's rising or falling between two snapshots
-  targets                   derive solver targets from the board library
+  targets [library]         derive solver targets from the board library
   matrix                    handtrap matrix: which handtraps to main deck
   locals [auto [rogue%]]    your locals.toml weights; `auto` fills from the scrape
   optimize <deck> <arch>    hill-climb the flex slots (slow: hours)
