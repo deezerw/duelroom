@@ -769,6 +769,42 @@ the weighted one is the one that decides. The note also states the consequence t
 normalisation cannot fix: a handtrap that only answers an unmeasured deck cannot
 appear in the ranking at all.
 
+### 36. The deployment goes stale with every commit — recurring, now a procedure
+
+Issue #22 was "the deployment is 5 days stale"; it was restarted. **It went stale
+again within 90 minutes**, because commits kept landing: the worker restarted at
+23:03 and the next commit was 00:36. Of the `skills/` files changed after the
+restart, the web app imports **`skills/drill.py`** — so the live drill page was still
+showing the flat count bug (`0` for hands outside the companion summary) that had
+already been fixed in the repo.
+
+So this is not a one-off to tick off; it recurs on every commit that touches a module
+the web app imports (`carddb`, `db`, `engine`, `handlab`, `skills.deck`, plus
+`skills/drill.py` via the drill view).
+
+**Resolved for now with the documented SIGHUP**, which reloads the gunicorn workers
+without touching the job worker: checked `jobs.active` was None, sent SIGHUP to the
+master, confirmed 3 gunicorn procs, the job worker untouched, `/login` answering 200,
+and a fresh worker start time.
+
+- Note on the documented command: the master is the process whose **ppid is not 1**
+  (it sits under the tmux session). My first attempt filtered `$2 == 1` and found
+  nothing. CLAUDE.md has it right; I read it backwards.
+- **Standing rule:** after any commit touching those modules, SIGHUP. A full
+  `systemctl restart` is only needed for `web/worker.py` or `skills/` the WORKER
+  uses, and it kills the job in flight.
+
+### 37. `gate.py` audited — CLEAN, no fix needed
+
+Audited because "the gate passed" appears throughout CLAUDE.md and a defect there
+would make every pass claim suspect. There is no automated verdict: `gate_report`
+summarises and `inspect_bricks` lists brick hands with card names so a human can
+judge — "a brick hand holding an obvious starter means the solver failed, whatever
+the rate says". `solve_rate` is the honest unconditional rate over all hands, and the
+comment about discounting genuine bricks describes the human step, attached to the
+`brick_hands` field it explains. Correct as written; recorded so it is not
+re-audited.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint
