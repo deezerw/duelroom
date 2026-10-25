@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 52 items, as tagged on each heading:** 43 FIXED · 1 RESOLVED
+**Status of the 53 items, as tagged on each heading:** 44 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1790,3 +1790,64 @@ the `_source` mismatch despite the cache file being newer.
    is exactly why that walk was added (#29). Both readers now skip
    underscore keys, mutation-checked, and the web panel states its
    provenance like the CLI.
+
+---
+
+## 53. The ban-list bug had a SECOND copy, in the deckbuilder — FIXED 2026-10-25
+
+**Severity: critical, and I missed it in #40.**
+
+#40 fixed `card_db.banlist_limit`, which read `"Banned"` while the mirror
+stores `"Forbidden"` and so returned 3 copies for all 121 TCG-forbidden
+cards. **`skills/builder.py:148` held a second, independent copy of the
+same dict with the same defect** — and `builder.py` is the deckbuilder's
+card search, the thing a list actually gets built in.
+
+Found by applying the review's established defect-class checklist to the
+modules not yet audited (`handlab`, `builder`, `importer`, `images`,
+`carddb`) instead of waiting to stumble on it. The grep was one line:
+`.get(` with a literal default on an external value.
+
+**In the deckbuilder it was visible.** `web/templates/build.html` gates
+the restriction badge on `c.limit < 3`:
+
+```js
+const lim = c.limit < 3
+  ? `<span class="lim l${c.limit}">${['forbidden','limited','semi'][c.limit]}</span>` : '';
+```
+
+A forbidden card got `limit: 3`, so it showed **no badge at all**, `full =
+n >= c.limit` never triggered, and the "Already at N copies — the list
+allows N" warning never fired. **121 of 121** TCG-forbidden cards appeared
+unrestricted, Apollousa and Maxx "C" included.
+
+`Deck.validate` still refused to save such a list (#40 fixed the
+authoritative check), so this was a **lying display rather than a saveable
+illegal deck** — but it is the display a tournament list gets built in,
+and the user would only learn at save time.
+
+**Fixed with one implementation of the mapping, properly this time.**
+`card_db.limit_for_status(status)` is now the single place the dict is
+read; `banlist_limit(conn, id)` delegates to it for callers that only have
+an id, and `builder` calls it with the row it already holds, so no N+1
+query was introduced. Verified after: Apollousa and Maxx "C" report
+`limit=0, badge=forbidden`; Triple Tactics Talent `limit=1, badge=limited`;
+Ash Blossom `limit=3, no badge`.
+
+The new test **fails on any module that re-spells the map** — it greps
+every `skills/*.py`, `daemon.py` and `web/*.py` for a `"Semi-Limited":`
+key outside `card_db` — and separately asserts the deckbuilder reports 0
+copies for a forbidden card. Mutation-checked by restoring builder's
+copy.
+
+The lesson is the one CLAUDE.md already states and I under-applied: when a
+number has two implementations, **fixing one is not fixing the bug.** #49
+made the same point about `survival_given_line`; this is the same mistake
+committed by me, one issue later.
+
+**Audited CLEAN in the same sweep:** `handlab`'s follow-up labels use
+`K.get(f"CATEGORY_{key}", 0)`, the same risky shape — all **13** keys
+resolve to real constants, so no label is unreachable. Pinned with a test
+anyway, because a vendor rename would drop a label from the pilot view
+with nothing failing. No other silent-default lookups on external values
+remain in those five modules.

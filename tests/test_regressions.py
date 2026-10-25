@@ -3919,3 +3919,79 @@ def test_locals_coverage_claim_matches_the_measurement():
         f"uncovered archetypes are {sorted(missing)}")
     # And it must not still carry the superseded figure as the claim.
     assert "covering 55% of a stated meta" not in doc
+
+
+def test_the_banlist_map_has_exactly_one_implementation():
+    """No module may re-spell the ban-list status map.
+
+    ISSUES #40 fixed `card_db.banlist_limit`, which read "Banned" while
+    the mirror stores "Forbidden" and so returned 3 for all 121
+    TCG-forbidden cards. `skills/builder.py` held a SECOND, independent
+    copy of the same dict with the same defect, and it was missed --
+    found 2026-10-25 by applying the defect-class checklist to the
+    modules not yet audited.
+
+    In the deckbuilder it was visible: `build.html` gates the restriction
+    badge on `c.limit < 3`, so every forbidden card showed **no badge at
+    all** and the "already at the limit" warning never fired. All 121 of
+    them. `Deck.validate` still refused to save such a list, so this was
+    a lying display rather than a saveable illegal deck -- but it is the
+    display a tournament list gets built in.
+
+    The mapping now lives only in `card_db.BANLIST_LIMITS`, read through
+    `limit_for_status` (when the row is in hand) or `banlist_limit` (when
+    only an id is). This test fails on any other copy of it.
+    """
+    import pathlib
+    from skills import builder, card_db, db
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for path in sorted((root / "skills").glob("*.py")) + \
+            [root / "daemon.py"] + sorted((root / "web").glob("*.py")):
+        text = path.read_text()
+        if path.name == "card_db.py":
+            continue
+        for spelling in ('"Semi-Limited":', "'Semi-Limited':"):
+            assert spelling not in text, (
+                f"{path.name} re-spells the ban-list map; use "
+                "card_db.limit_for_status or card_db.banlist_limit")
+
+    # And the deckbuilder actually reports a forbidden card as 0 copies.
+    conn = db.connect()
+    row = conn.execute(
+        "SELECT id, name FROM cards WHERE banlist_tcg='Forbidden' LIMIT 1"
+    ).fetchone()
+    if row is None:
+        import pytest
+        pytest.skip("card mirror has no forbidden cards; run `daemon.py cards`")
+    rows = builder.search(conn, row["name"], limit=1)[0]
+    assert rows, f"deckbuilder search found nothing for {row['name']}"
+    assert rows[0]["limit"] == 0, (
+        f"{row['name']} is Forbidden but the deckbuilder offers "
+        f"{rows[0]['limit']} copies")
+    assert card_db.limit_for_status("Forbidden") == 0
+
+
+def test_follow_up_categories_all_resolve():
+    """Every FOLLOW_UP key must name a real CATEGORY_ constant.
+
+    `handlab` builds its follow-up labels with
+    `eff.categories & K.get(f"CATEGORY_{key}", 0)` -- a silent default of
+    0, which makes the label unreachable rather than wrong. All 13 keys
+    resolve today (checked 2026-10-25), so this is a guard, not a fix: a
+    vendor rename would otherwise drop a label from the pilot view with
+    nothing failing. That shape produced two real defects tonight, the
+    ban-list map twice (#40, #53).
+    """
+    import pytest
+    try:
+        from ygorl.build.scripts import load_constants
+    except ImportError:
+        pytest.skip("ygorl not importable")
+    from skills.handlab import FOLLOW_UP
+
+    K = load_constants()
+    missing = [k for k in FOLLOW_UP if f"CATEGORY_{k}" not in K]
+    assert not missing, (
+        f"FOLLOW_UP names categories that do not exist: {missing}. The "
+        "`.get(..., 0)` default makes those labels silently unreachable")

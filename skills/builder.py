@@ -145,7 +145,17 @@ def _card(r, p):
         "def": r["def"],
         "link": r["linkval"],
         "extra": is_extra(r["frame"]),
-        "limit": {"Banned": 0, "Limited": 1, "Semi-Limited": 2}.get(status, 3),
+        # ONE implementation: card_db.banlist_limit. This held a second,
+        # independent copy of that map with the same defect ISSUES #40
+        # fixed there -- it read "Banned" while the mirror stores
+        # "Forbidden", so `.get(status, 3)` returned 3 for all 121
+        # TCG-forbidden cards. In the deckbuilder that is visible: the
+        # badge in build.html is gated on `c.limit < 3`, so a banned card
+        # showed NO restriction badge and the "already at the limit"
+        # warning never fired. `Deck.validate` still refused to save such
+        # a list, so this was a lying display rather than an illegal
+        # deck -- but it is the display you build a tournament list in.
+        "limit": card_db.limit_for_status(status, card_id=r["id"]),
         "status": status,
         "play": p,
     }

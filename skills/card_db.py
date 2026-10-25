@@ -195,6 +195,26 @@ BANLIST_LIMITS = {
 }
 
 
+def limit_for_status(status, region="tcg", card_id=None):
+    """Copy limit for a ban-list status string: 0, 1, 2, or 3.
+
+    The one place the mapping lives. `skills/builder.py` held a second,
+    independent copy with the original defect -- keyed on "Banned" while
+    the mirror stores "Forbidden" -- so take this when you already have
+    the row, and `banlist_limit` when you only have an id. A caller that
+    re-spells the dict is the bug this exists to prevent.
+    """
+    if status is None:
+        return 3
+    try:
+        return BANLIST_LIMITS[status]
+    except KeyError:
+        where = f" for card {card_id}" if card_id is not None else ""
+        raise ValueError(
+            f"unknown {region} ban-list status {status!r}{where}; "
+            f"refusing to guess a copy limit") from None
+
+
 def banlist_limit(conn, card_id, region="tcg"):
     """Max legal copies of a card: 0, 1, 2, or 3.
 
@@ -205,11 +225,4 @@ def banlist_limit(conn, card_id, region="tcg"):
     if row is None:
         return 3
     status = row["banlist_tcg"] if region == "tcg" else row["banlist_ocg"]
-    if status is None:
-        return 3
-    try:
-        return BANLIST_LIMITS[status]
-    except KeyError:
-        raise ValueError(
-            f"unknown {region} ban-list status {status!r} for card "
-            f"{card_id}; refusing to guess a copy limit") from None
+    return limit_for_status(status, region, card_id)
