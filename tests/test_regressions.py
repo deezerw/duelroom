@@ -2956,3 +2956,42 @@ def test_drill_reports_the_number_it_ranks_by(tmp_path):
     tpl = (Path(__file__).resolve().parent.parent / "web" / "templates"
            / "drill.html").read_text()
     assert "on field" in tpl, "the web drill page still shows only the flat count"
+
+
+def test_drill_never_reports_a_silent_zero(tmp_path):
+    """`counts.get(..., 0)` returned 0 for any hand the companion summary
+    did not cover, which is indistinguishable from "this board has no
+    interruptions". results/sweep_active.jsonl has 40 hands and a summary
+    for 0-19, so hands 20-39 all read 0 while their records held 4, 5
+    and 3. The record's own count is now read first."""
+    import json as _json
+    from skills import drill
+
+    # A record with its own count and NO companion summary file at all.
+    path = tmp_path / "s.jsonl"
+    path.write_text(_json.dumps({
+        "status": "solved", "deck": {"name": "d"}, "hand_index": 7,
+        "lines": [{"board": {"players": [
+            {"mzone": [{"code": 59822133, "position": 0x1}], "szone": [],
+             "hand": [14558127], "grave": []}]}}],
+        "solver": {"blocking": {"interruptions": 4}},
+    }) + "\n")
+    found = drill.lines_from(path, "d")
+    assert len(found) == 1
+    assert found[0][2] == 4, (
+        f"flat count came back {found[0][2]}; the record said 4 and there is "
+        f"no summary to fall back on")
+
+
+def test_the_dead_yield_agent_is_gone_but_its_warning_is_not():
+    """`ScriptedThenYield` and `action_kinds_seen` were superseded by
+    `convert_line(close_turn=True)` and referenced by nothing. The trap
+    they documented still bites: the solver's own replays stop when the
+    combo stops, so `--start` rejects them."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "skills"
+           / "breaking.py").read_text()
+    assert "class ScriptedThenYield" not in src
+    assert "def action_kinds_seen" not in src
+    assert "END OF THE RECORDING" in src, (
+        "the reason close_turn=True is needed was deleted with the code")

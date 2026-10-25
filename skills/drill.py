@@ -27,6 +27,11 @@ def _name(conn, code):
 def interruption_counts(jsonl_path):
     """hand index -> interruption count, read from the run's summary.
 
+    FALLBACK ONLY as of 2026-10-24: `lines_from` reads the record's own
+    `solver.blocking.interruptions` first. This map is keyed by hand and
+    silently yields nothing for hands the summary does not cover, which a
+    `.get(..., 0)` turned into a real-looking zero.
+
     The per-line `interruptions` field in the JSONL is always None; the
     counts live in the companion `*_summary.json` under each deck's
     `boards`, keyed by hand. Ranking on the line field silently scored
@@ -63,7 +68,19 @@ def lines_from(jsonl_path, deck_name=None):
         name = d.get("name") if isinstance(d, dict) else str(d)
         if deck_name and name != deck_name:
             continue
-        n = counts.get((name, rec.get("hand_index")), 0)
+        # The record's OWN count first; the companion summary only as a
+        # fallback. `counts.get(..., 0)` returned 0 for any hand the
+        # summary did not cover, which is indistinguishable from "this
+        # board has no interruptions" -- and the summary covers only the
+        # hands the `sweep()` wrapper wrote. results/sweep_active.jsonl
+        # has 40 hands and a summary for 0-19, so hands 20-39 all read 0
+        # while their records held 4, 5 and 3.
+        blocking = (rec.get("solver") or {}).get("blocking") or {}
+        n = blocking.get("interruptions")
+        if n is None:
+            n = counts.get((name, rec.get("hand_index")))
+        if n is None:
+            n = _on_field(rec.get("lines", [{}])[0] if rec.get("lines") else {})
         for ln in rec.get("lines") or []:
             out.append((rec, ln, n))
     # Rank by what is ON THE FIELD first, then by the flat count.

@@ -419,13 +419,14 @@ changed since the worker started, only **two** are on that list:
 **none of them is imported by the web app**, so none of tonight's measurement fixes —
 and none of the defects they fixed — reaches the web UI either way.
 
-**Conclusion: the stale deployment does not serve wrong numbers.** Worth restarting
-to pick up the diagnostic fix, but not urgent, and deliberately NOT done while the
-user is asleep: it is an internet-facing service (TLS :8446), a failed restart leaves
-it down with nobody to fix it, and the gain is a field nothing reads. The worker is
-idle (`jobs.active` is None), so when awake:
+**The stale deployment was not serving wrong numbers**, which is why the restart was
+held back while the user slept — an internet-facing TLS service, a failed restart
+leaves it down with nobody to recover it, and the gain was a field nothing reads.
 
-    sudo systemctl restart duelroom.service      # full restart: skills/ changed
+**RESTARTED 2026-10-24** once explicitly authorised. Worker confirmed idle first
+(`jobs.active` was None), then `systemctl restart duelroom.service`: service active,
+3 gunicorn procs, worker age reset, and `https://127.0.0.1:8446/login` serves 200. The
+deployment now runs the current `skills/`.
 
 ### 23. `drill` told you to practise passing — FIXED
 
@@ -571,9 +572,7 @@ apart from the sort key again, and a test asserts all three places carry it.
 Found by checking whether the iteration-23 fix had reached the web UI at all. It had
 — `lines_from` is shared — which is exactly why the display went out of step with it.
 
-### 31. OPEN: `drill`'s flat count silently reads 0 for hands outside the summary
-
-Confirmed, not yet fixed — the loop was stopped here.
+### 31. `drill`'s flat count silently read 0 outside the summary — FIXED
 
 `drill.interruption_counts` reads a companion `*_summary.json` keyed by hand, and
 returns **0** for any hand it does not find. That is indistinguishable from "this
@@ -589,9 +588,10 @@ Masked by the iteration-30 fix: ranking is now on `_on_field`, computed from the
 itself, so the ORDER is unaffected. Only the displayed "counting cards held in hand"
 figure is wrong, and only for hands missing from the summary.
 
-- **Fix:** read `solver.blocking.interruptions` from the record, which the sweep
-  populates, and fall back to the summary only when absent — returning None rather
-  than 0 for genuinely unknown, so it cannot be mistaken for zero.
+- **FIXED:** `lines_from` reads `solver.blocking.interruptions` from the record
+  first, falls back to the summary, and finally to `_on_field` — never to a bare 0.
+  Verified on the 40-hand file: zero lines report 0 now, and hands 20-39 show their
+  real values. A test covers a record with no companion summary at all.
 
 ## P3 — correctness and housekeeping
 
@@ -606,10 +606,14 @@ Also, the ledger stores `brick_rate`, `survival`, `solved`, `hands`, `score` but
 `best_line_rate` or `combo_actions.mean`, so `degenerate_terms` cannot be computed
 from a stored run — only live, in memory.
 
-### 10. Dead code: `breaking.ScriptedThenYield`
+### 10. Dead code: `breaking.ScriptedThenYield` — FIXED
 
-Nothing references it. `convert_line(close_turn=True)` superseded it. It documents a
-real trap, so the comment is worth keeping somewhere, but the class is not live code.
+Nothing referenced it or `action_kinds_seen`; `convert_line(close_turn=True)`
+superseded both. Removed, and the trap they documented is kept as a comment because it
+still bites: the solver's own replays stop when the combo stops, so `--start` rejects
+them ("END OF THE RECORDING: the line does not get through the turn"), which is why
+`build_start` and `inert_start` re-emit with `close_turn=True`. A test asserts the
+code is gone and the warning is not.
 
 ### 11. Known blind spots, already documented, still open
 

@@ -219,45 +219,17 @@ def searched(stdout):
 
 
 # --- extending a solved line to the end of its turn ----------------------
-
-# Kinds that give up priority / end the phase, best first. The solver's
-# own replays stop when the combo stops, so `--start` rejects them with
-# "END OF THE RECORDING: the line does not get through the turn" -- it
-# needs a replay where the turn has actually passed to us.
-_YIELD_KINDS = ("end", "finish", "pass", "cancel", "no", "to_bp", "to_ep")
-
-
-class ScriptedThenYield:
-    """Replay recorded action indices, then end the turn as soon as possible.
-
-    ygorl's own ScriptedAgent raises IndexError once its log runs out,
-    which is right for verification and useless here: after the combo we
-    still need the turn to pass so the opponent (us) becomes the turn
-    player.
-    """
-
-    def __init__(self, actions):
-        self._actions = list(actions)
-        self._next = 0
-        self.exhausted_at = None
-
-    def act(self, point):
-        if self._next < len(self._actions):
-            idx = self._actions[self._next]
-            self._next += 1
-            return idx
-        if self.exhausted_at is None:
-            self.exhausted_at = point.index
-        for kind in _YIELD_KINDS:
-            for a in point.actions:
-                if a.kind == kind:
-                    return a.index
-        return point.actions[0].index if point.actions else 0
-
-
-def action_kinds_seen(point):
-    """Debug helper: the distinct action kinds offered at a decision."""
-    return sorted({a.kind for a in point.actions})
+#
+# `ScriptedThenYield` and `action_kinds_seen` lived here and were dead:
+# `convert_line(close_turn=True)` superseded them and nothing referenced
+# either. Removed 2026-10-24. The fact they existed to document is kept,
+# because it will bite the next person the same way:
+#
+#   The solver's own replays STOP when the combo stops, so `--start`
+#   rejects them -- "END OF THE RECORDING: the line does not get through
+#   the turn". It needs a replay where the turn has actually passed, which
+#   is why `build_start` and `inert_start` both re-emit their line with
+#   close_turn=True before handing it over.
 
 
 # --- driver ---------------------------------------------------------------
