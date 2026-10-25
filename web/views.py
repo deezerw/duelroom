@@ -173,13 +173,23 @@ def report(name=None):
         return redirect(url_for("views.index"))
     r = report_mod.deck_report(c, path)
 
+    # The HONEST survival, from `scenarios.survival_from_hands` via the
+    # report builder -- NOT `summary.survival_given_line`, which counts a
+    # hand where the card had no legal window as a survival and so never
+    # reads lower. kewl-tune vs Nibiru is 91% there and 0% here, live in
+    # 3 of 33 hands. One implementation, shared with `matrix` and the CLI.
+    cells = r.get("survival_tested") or {}
     surv = []
-    for code, s_ in (r["funnel"] or {}).get("survival_given_line", {}).items():
+    for code in (r["funnel"] or {}).get("survival_given_line", {}):
         row = card_db.resolve(c, int(code))
+        cell = cells.get(int(code)) or {}
+        tested = cell.get("tested") or 0
         surv.append({
             "code": int(code),
             "name": row["name"] if row else code,
-            "value": s_,
+            "value": cell.get("survival") if tested else None,
+            "tested": tested,
+            "offered": cell.get("offered") or 0,
             "blind": int(code) in scenarios.BLIND_SPOTS,
             "reason": scenarios.BLIND_SPOTS.get(int(code)),
         })

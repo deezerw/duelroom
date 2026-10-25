@@ -705,13 +705,29 @@ def cmd_gate(conn, args):
     if ca and ca.get("min") is not None:
         print(f"  line length min {ca.get('min')}, median {ca.get('median')}, "
               f"max {ca.get('max')}")
+    # The honest per-hand number, not `summary.survival_given_line`:
+    # that field counts a hand where the handtrap had NO legal window as
+    # a survival, so it is never lower and is badly wrong for a card that
+    # is rarely live. Measured over 47 cells, mean gap 10.3 points, max
+    # 91 -- kewl-tune vs Nibiru reads 91% there and 0% here.
+    cells = scenarios.survival_from_hands(rec)
     for code, surv in (rep["survival_given_line"] or {}).items():
         row = card_db.resolve(conn, int(code))
         name = row["name"] if row else code
+        cell = cells.get(int(code)) or {}
+        tested, offered = cell.get("tested") or 0, cell.get("offered") or 0
+        honest = cell.get("survival")
         # None when no hand solved: there is no "survival given a line"
         # if there were no lines. Saying so beats crashing or printing 0%.
-        shown = "n/a (no hand solved)" if surv is None else f"{surv*100:.0f}% of solved hands"
-        print(f"  survives {name}: {shown}")
+        if surv is None:
+            print(f"  survives {name}: n/a (no hand solved)")
+        elif not tested:
+            print(f"  survives {name}: never had a legal window in "
+                  f"{offered} solved hand(s) — UNMEASURED, not harmless")
+        else:
+            print(f"  survives {name}: {honest*100:.0f}% of the "
+                  f"{tested} hand(s) where it was live "
+                  f"(live in {tested}/{offered})")
 
     print(f"\n  hand classes: {dict(gate.classify_hands(rec))}")
 
@@ -1648,29 +1664,48 @@ def cmd_report(conn, args):
         # deck is YOURS, so a low survival means you fold to that card.
         # The same number printed without a direction invites the reader
         # to carry over the wrong reading.
-        surv_rows = [
-            (card_db.resolve(conn, int(code)), code, s)
-            for code, s in (f.get("survival_given_line") or {}).items()
-        ]
-        live = [(r, c, s) for r, c, s in surv_rows if s is not None]
+        # The HONEST survival, from the per-hand records, not
+        # `summary.survival_given_line` -- that field counts a hand where
+        # the card had no legal window as a survival, so it never reads
+        # lower. This block was the costly place: the verdict and "your
+        # worst matchup card" were both computed from the inflated
+        # number, so Nibiru at a summary 91% was labelled "fine" while
+        # the deck beat it in 0 of the 3 hands where it was live.
+        cells = r.get("survival_tested") or {}
+        surv_rows = []
+        for code in (f.get("survival_given_line") or {}):
+            cell = cells.get(int(code)) or {}
+            surv_rows.append((card_db.resolve(conn, int(code)), code,
+                              cell.get("survival"),
+                              cell.get("tested") or 0,
+                              cell.get("offered") or 0))
+        live = [t for t in surv_rows if t[2] is not None and t[3]]
+        unmeasured = [t for t in surv_rows if t[2] is None or not t[3]]
         if live:
             print("\n  PLAYS THROUGH (higher is better — this is YOUR deck)")
+            print("    % is of the hands where the card was LIVE, not of all hands")
             blind = []
-            for row, code, s in sorted(live, key=lambda t: t[2]):
+            for row, code, sv, tested, offered in sorted(live,
+                                                         key=lambda t: t[2]):
                 name = row["name"] if row else code
                 if int(code) in scenarios.BLIND_SPOTS:
                     blind.append((name, int(code)))
                     verdict = "NOT MEASURABLE"
                 else:
-                    verdict = ("folds to it" if s <= 0.15 else
-                               "struggles" if s <= 0.5 else "fine")
-                print(f"    {s*100:4.0f}%  {name:<34} {verdict}")
+                    verdict = ("folds to it" if sv <= 0.15 else
+                               "struggles" if sv <= 0.5 else "fine")
+                print(f"    {sv*100:4.0f}%  {name:<30} "
+                      f"live {tested:>2}/{offered:<3} {verdict}")
             judged = [t for t in live
                       if int(t[1]) not in scenarios.BLIND_SPOTS]
             if judged:
                 worst = min(judged, key=lambda t: t[2])
                 wname = worst[0]["name"] if worst[0] else worst[1]
                 print(f"    -> {wname} is your worst matchup card")
+        for row, code, _sv, tested, offered in unmeasured:
+            name = (row["name"] if row else code)
+            print(f"    n/a   {name:<30} never had a legal window in "
+                  f"{offered} solved hand(s) — UNMEASURED")
             for name, code in blind:
                 print(f"    ! {name}: {scenarios.BLIND_SPOTS[code]}.")
                 if code == 23434538:

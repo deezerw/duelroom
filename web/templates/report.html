@@ -61,6 +61,10 @@
 <h2>Plays through <span class="muted" style="text-transform:none">— higher is
   better, this is your deck</span></h2>
 <div class="panel">
+  <p class="muted" style="margin-top:0">Of the hands where the card was
+    <strong>live</strong> (it had a legal window), how often the line still
+    completed — not of all hands. A card that was never live is unmeasured,
+    not harmless.</p>
   <table><tbody>
   {% for s in surv %}
     <tr>
@@ -68,16 +72,19 @@
       <td style="width:60px" class="num">
         {% if s.value is none %}<span class="muted">n/a</span>
         {% else %}{{ (s.value*100)|round|int }}%{% endif %}</td>
+      <td style="width:88px" class="num muted">
+        {% if s.tested %}live {{ s.tested }}/{{ s.offered }}{% endif %}</td>
       <td>
         {% if s.blind %}<span class="pill">not measurable</span>
-        {% elif s.value is none %}<span class="muted">never had a window</span>
+        {% elif s.value is none %}<span class="muted">never had a legal window
+          in {{ s.offered }} solved hand(s) — unmeasured</span>
         {% elif s.value <= 0.15 %}<span class="pill bad">folds to it</span>
         {% elif s.value <= 0.5 %}<span class="pill">struggles</span>
         {% else %}<span class="pill ok">fine</span>{% endif %}
       </td>
     </tr>
     {% if s.blind %}
-      <tr><td colspan="3" class="muted" style="padding-top:0;font-size:12px">
+      <tr><td colspan="4" class="muted" style="padding-top:0;font-size:12px">
         {{ s.reason }}.
         {% if cost and s.code == 23434538 %}
           Measured separately: comboing through it hands them

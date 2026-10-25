@@ -3719,3 +3719,58 @@ def test_side_plan_is_not_quietly_wired_up():
     doc = (root / "CLAUDE.md").read_text()
     assert "NO WAY IN" in doc, \
         "CLAUDE.md must say the side plan has no route, not just that it is slow"
+
+
+def test_survival_has_one_implementation_and_it_is_the_honest_one():
+    """`summary.survival_given_line` must not reach any display.
+
+    It counts a hand where the handtrap had NO legal window as a
+    survival, so it is never lower than the per-hand number and is badly
+    wrong for a card that is rarely live. Measured over the 47 comparable
+    cells of results/handtrap_matrix_40h.jsonl: 19 cells higher, 28
+    equal, **0 lower** -- it systematically flatters the deck. Mean gap
+    10.3 points, max 91, 7 of 47 on opposite sides of 50%.
+
+        kewl-tune   vs Nibiru: 91% summary,  0% honest, live  3/33
+        sky-striker vs Nibiru: 89%        ,  0%       , live  4/35
+        despia      vs Nibiru: 83%        ,  0%       , live  5/29
+
+    `report` printed those under "PLAYS THROUGH (higher is better -- this
+    is YOUR deck)" and derived both the verdict ("fine" at 91%) and "your
+    worst matchup card" from them, so a card the deck never beats was
+    labelled fine and never named as the worst.
+
+    CLAUDE.md: "two implementations of a number is how this project's
+    worst bugs got in". This was two that disagree.
+    """
+    import json
+    import pathlib
+
+    from skills import scenarios
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    # One implementation, and handtrap_matrix uses it.
+    assert hasattr(scenarios, "survival_from_hands")
+
+    path = root / "results" / "handtrap_matrix_40h.jsonl"
+    if path.exists():
+        recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+        m = scenarios.handtrap_matrix(recs)
+        for deck, nib_tested in (("kewl-tune", 3), ("sky-striker", 4),
+                                 ("despia", 5)):
+            cell = m[deck]["cells"][27204311]
+            assert cell["survival"] == 0.0, (
+                f"{deck} vs Nibiru must read 0%, not the summary's ~90%")
+            assert cell["tested"] == nib_tested
+
+    # No display may read the inflated field as a value.
+    for rel in ("daemon.py", "web/views.py"):
+        for line in (root / rel).read_text().splitlines():
+            bare = line.strip()
+            if bare.startswith("#") or "survival_given_line" not in bare:
+                continue
+            # Iterating its KEYS is fine -- that is the list of cards
+            # fired. Reading its values as the number is not.
+            assert ("for code in" in bare or "or {})" in bare), (
+                f"{rel} reads survival_given_line as a value: {bare}")

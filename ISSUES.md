@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 48 items, as tagged on each heading:** 39 FIXED · 1 PARTLY FIXED
+**Status of the 49 items, as tagged on each heading:** 40 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1498,3 +1498,75 @@ populated by the funnel path instead), one needs data that does not exist,
 and one is duplicated by `builder.py`'s own search. None of them is a
 wrong number; they are unused capability, and that is now written down
 instead of rediscovered.
+
+---
+
+## 49. The report showed the inflated survival and called it "fine" — FIXED 2026-10-25
+
+**Severity: high.** It told you your deck beats a card it never beats.
+
+`handtrap_matrix` carries a docstring warning that
+`summary.survival_given_line` "counts a `no_window` outcome as a survival,
+which conflates two opposite facts and inverts the answer" — and computes
+its own number from the per-hand records. **Four other display paths read
+the inflated field anyway:** `daemon.py` `gate` and `report`,
+`skills/report.py`, and `web/views.py` → `report.html`.
+
+CLAUDE.md states the principle this breaks: *"two implementations of a
+number is how this project's worst bugs got in."* This was two
+implementations that **disagree**.
+
+**Measured over the 47 comparable cells of
+`results/handtrap_matrix_40h.jsonl`:** 19 cells higher, 28 equal, **0
+lower** — the summary field never reads lower, so it systematically
+flatters the deck. Mean gap 10.3 points, max **91**, and **7 of 47 land on
+opposite sides of 50%**.
+
+| deck | card | summary | honest | live in |
+|---|---|---|---|---|
+| kewl-tune | Nibiru | **91%** | **0%** | 3 of 33 hands |
+| sky-striker | Nibiru | **89%** | **0%** | 4 of 35 |
+| despia | Nibiru | **83%** | **0%** | 5 of 29 |
+| light-and-darkness | Nibiru | 83% | 25% | 8 of 36 |
+| sky-striker | Ghost Ogre | 91% | 50% | 6 of 35 |
+
+The mechanism is Nibiru's rarity: it is live in 3 of 33 hands, and the
+other 30 `no_window` outcomes are each counted as a survival.
+
+**Where it cost the most.** `report` printed these under *"PLAYS THROUGH
+(higher is better — this is YOUR deck)"* and derived **both** the verdict
+and the summary line from them:
+
+- the verdict thresholds (`<=0.15` folds / `<=0.5` struggles / else fine)
+  labelled Nibiru at 91% **"fine"**;
+- `worst = min(judged, ...)` picked "your worst matchup card" from the
+  inflated numbers, so a card the deck beats 0% of the time could never
+  be named.
+
+**Fixed with one implementation, not five.** `survival_from_hands(rec)` is
+factored out of `handtrap_matrix` and is now the only place this is
+computed. `report.deck_report` carries its output as `survival_tested`,
+and all four display paths use it:
+
+- `gate` prints `X% of the N hand(s) where it was live (live in N/M)`, or
+  `never had a legal window in M solved hand(s) — UNMEASURED, not
+  harmless`.
+- `report` leads with `% is of the hands where the card was LIVE, not of
+  all hands`, shows `live N/M` per row, judges on the honest number, and
+  lists never-live cards separately as unmeasured rather than scoring
+  them.
+- The web panel gained the same caption and a `live N/M` column.
+
+**On the active deck nothing changed**, and that is worth stating plainly:
+Imperm and Ash are live in all 15 solved hands, so both methods agree at
+0%. The gap only opens for rarely-live cards, and the active deck's funnel
+never fired Nibiru. The fix matters for kewl-tune, sky-striker and despia
+today, and for any future run of yours that does fire it.
+
+Mutation-checked: making `survival_from_hands` count `no_window` as a
+survival fails the test.
+
+**Caught by my own guard, again:** the refactor left an unreachable
+`return matrix` after `return row`, and `tools/check_names.py` failed with
+`skills/scenarios.py:400 undefined name 'matrix'` before anything ran.
+That is twice in two passes it has caught my own edit.

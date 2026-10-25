@@ -335,8 +335,41 @@ def handtrap_matrix(records):
         deck = s.get("deck")
         if not deck:
             continue
-        tested, survived, offered = Counter(), Counter(), Counter()
-        for h in rec.get("hands") or []:
+        row = survival_from_hands(rec)
+        matrix[deck] = {
+            "cells": row,
+            "solved": s.get("solved"),
+            "hands": s.get("hands"),
+            "brick_rate": s.get("brick_rate"),
+        }
+    return matrix
+
+
+def survival_from_hands(rec):
+    """{card id: {survival, tested, offered, window_rate}} for ONE record.
+
+    The single implementation of handtrap survival. Factored out of
+    `handtrap_matrix` on 2026-10-25 so that `report`, `gate` and the web
+    stop reading `summary.survival_given_line` instead -- "two
+    implementations of a number is how this project's worst bugs got in"
+    (CLAUDE.md), and this was two implementations that DISAGREE.
+
+    Measured over the 47 comparable cells of
+    results/handtrap_matrix_40h.jsonl, the summary field is never lower
+    than this one: 19 cells higher, 28 equal, 0 lower -- it systematically
+    flatters the deck. Mean gap 10.3 points, max 91, and 7 of 47 cells
+    land on opposite sides of 50%. The worst are Nibiru, which is rarely
+    live and so collects `no_window` outcomes as survivals:
+
+        kewl-tune    91% summary vs   0% here, live in  3 of 33 hands
+        sky-striker  89%          vs   0%,        live in  4 of 35
+        despia       83%          vs   0%,        live in  5 of 29
+
+    `report` printed those under "PLAYS THROUGH (higher is better -- this
+    is YOUR deck)", which told you your deck beats a card it never beats.
+    """
+    tested, survived, offered = Counter(), Counter(), Counter()
+    for h in rec.get("hands") or []:
             if h.get("status") != "solved":
                 continue
             for code, f in (h.get("fire") or {}).items():
@@ -354,22 +387,16 @@ def handtrap_matrix(records):
                 # flipped Infinite Impermanence from a correct 0% to 100%.
                 if f.get("survives"):
                     survived[code] += 1
-        row = {}
-        for code in offered:
-            n = tested[code]
-            row[code] = {
-                "survival": (survived[code] / n) if n else None,
-                "tested": n,
-                "offered": offered[code],
-                "window_rate": n / offered[code] if offered[code] else 0.0,
-            }
-        matrix[deck] = {
-            "cells": row,
-            "solved": s.get("solved"),
-            "hands": s.get("hands"),
-            "brick_rate": s.get("brick_rate"),
+    row = {}
+    for code in offered:
+        n = tested[code]
+        row[code] = {
+            "survival": (survived[code] / n) if n else None,
+            "tested": n,
+            "offered": offered[code],
+            "window_rate": n / offered[code] if offered[code] else 0.0,
         }
-    return matrix
+    return row
 
 
 def weighted_handtrap_ranking(matrix, weights, exclude=None):

@@ -111,6 +111,12 @@ def deck_report(conn, path, archetype=None):
     rec, src = latest_funnel(deck.name)
     if rec:
         out["funnel"] = rec["summary"]
+        # The HONEST survival, computed from the per-hand records by the
+        # one implementation. `summary.survival_given_line` counts a
+        # `no_window` outcome as a survival, so it is never lower and is
+        # badly wrong where a handtrap is rarely live: kewl-tune vs
+        # Nibiru reads 91% there and 0% here, live in 3 of 33 hands.
+        out["survival_tested"] = scenarios.survival_from_hands(rec)
         cfg = rec.get("config") or {}
         out["provenance"] = {
             "file": src.name if src else "?",
