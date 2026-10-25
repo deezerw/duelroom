@@ -402,8 +402,24 @@ def floor(their_decks, hands=4, draws=DEFENCE_DRAWS, solve_ms=None,
                      "searched": acc["searched"]})
     tested = [r for r in rows if r.get("hand") is not None]
     through = sum(1 for r in tested if r["through"])
+    # A floor that stops EVERYTHING is the known solver defect, not a
+    # result. Established 2026-10-24: the going-second mode never summons
+    # from the extra deck. kewl-tune reaches its target in 10 of 12 hands
+    # going FIRST and 0 of 3 going second against one vanilla monster --
+    # and 0 of 3 for the CHEAPEST extra-deck monster in its deck too (a
+    # level 4 Synchro), with the turn-cut patch applied so the rollouts
+    # run freely. The solver says it itself: "no extra-deck monster
+    # summoned" over 38,871 rollouts.
+    if tested and through == 0:
+        say("  ! a board that does NOTHING stopped every hand. That is the")
+        say("    known going-second defect, not a measurement: the mode never")
+        say("    summons from the extra deck (see ISSUES.md #4). Treat every")
+        say("    stop rate from this run as meaningless.")
     return {"rows": rows, "tested": len(tested), "through": through,
             "stopped": len(tested) - through,
+            # True when the floor stopped everything -- the signature of
+            # the defect, so callers can refuse rather than report.
+            "floor_is_broken": bool(tested) and through == 0,
             "stop_rate": (len(tested) - through) / len(tested)
             if tested else None}
 
@@ -589,6 +605,11 @@ def rank(our_deck, our_hand, their_decks, keep=3, hands=4, draws=DRAWS,
                solve_ms=solve_ms, log=say)
     say(f"  -> the floor stops {fl['stopped']}/{fl['tested']}")
 
+    if fl.get("floor_is_broken"):
+        say("\n  !! NO RANKING POSSIBLE. The floor -- a board of vanilla")
+        say("     monsters -- stopped every hand, which is the known")
+        say("     going-second defect (ISSUES.md #4: the mode never summons")
+        say("     from the extra deck). Nothing below measures board strength.")
     rates = {r["stop_rate"] for r in out if r["stop_rate"] is not None}
     best = max((r["stop_rate"] for r in out
                 if r["stop_rate"] is not None), default=None)

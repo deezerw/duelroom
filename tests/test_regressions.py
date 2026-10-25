@@ -3046,3 +3046,53 @@ def test_draws_curve_ignores_records_without_attempts(tmp_path):
                      "solver": {}}),
     ]) + "\n")
     assert sweep.draws_curve(path) == {}
+
+
+def test_a_floor_that_stops_everything_is_flagged_not_reported(monkeypatch,
+                                                               tmp_path):
+    """A board of vanilla monsters stopping every hand is the known
+    going-second defect, not a measurement. Established 2026-10-24: the
+    mode never summons from the extra deck — kewl-tune reaches its target
+    10 of 12 hands going FIRST, and 0 of 3 going second even for the
+    CHEAPEST extra-deck monster in its deck (a level 4 Synchro), with the
+    turn-cut patch applied so rollouts run freely."""
+    from skills import breaking, gauntlet
+
+    monkeypatch.setattr(gauntlet, "inert_start",
+                        lambda *a, **k: tmp_path / "start.yrpX")
+    monkeypatch.setattr(breaking, "to_ydeck",
+                        lambda p: type("D", (), {"main": list(range(40)),
+                                                 "extra": [], "side": []})())
+    monkeypatch.setattr("ygorl.solver.batch.sample_hand",
+                        lambda deck, seed, size=5: (list(range(size)), None))
+
+    # `floor` maps `_attack` over its own pool; stubbing `_attack` is
+    # enough and needs no pool at all.
+    monkeypatch.setattr(gauntlet, "_attack",
+                        lambda args: {"searched": True, "through": False,
+                                      "returncode": 0, "log": None,
+                                      "target_mode": None})
+
+    class Serial:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def map(self, fn, it):
+            return (fn(x) for x in it)
+
+    # `floor` imports ProcessPoolExecutor inside the function, so the
+    # module attribute cannot be patched -- patch it at its source.
+    import concurrent.futures
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Serial)
+
+    said = []
+    r = gauntlet.floor([(tmp_path / "them.ydk", "1@atk")], hands=2, draws=1,
+                       scratch=tmp_path, log=said.append)
+    assert r["floor_is_broken"] is True, r
+    assert any("does NOTHING stopped every hand" in m for m in said), said

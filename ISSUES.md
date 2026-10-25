@@ -172,17 +172,35 @@ So the hardcoded cuts WERE killing every going-second rollout, and respecting
 `cfg.max_turns` fixes that. The patch is saved, reviewed and **not applied**, at
 `patches/0001-going-second-turn-cuts.patch`.
 
-**A second, independent blocker remains.** With the search now running freely it
-still gets through 0 of 4, and the solver's own report says why it cannot:
+**A second, independent blocker — now identified: the going-second mode never summons
+from the extra deck.** With the turn cuts patched and the search running freely:
 
     NRPA : 38871 rollouts  165189 states  38332 adaptations   best 0/1
     hindsight: 0 substitute goal(s) kept  <-- NONE: no extra-deck monster summoned
 
-`best 0/1` means the goal card was never once placed across 38,871 rollouts, and no
-extra-deck monster was summoned at all — in a Synchro deck. Also logged:
-`!! REQUESTED but INERT here (dependency absent in this mode): reenter 0.50`, so at
-least one mechanism is disabled in this mode. That is the next thread, and it is a
-separate investigation from the turn cuts.
+Established by asking for the CHEAPEST extra-deck monster kewl-tune owns — Kewl Tune
+Track Maker, a **level 4** Synchro — instead of the derived level-5 target:
+
+| target | through |
+|---|---|
+| level 4 Synchro (cheapest in the deck) | **0 of 3** |
+| level 5, the derived target | **0 of 3** |
+
+So it is not a hard-target problem. The deck reaches its target in 10 of 12 hands
+going FIRST and cannot summon **any** extra-deck monster going second, with 15 cards
+sitting in its extra deck (`EXTRA=15` in the starting position). Consistent with the
+solver's own `!! REQUESTED but INERT here (dependency absent in this mode)`.
+
+**Conclusion: the going-second formulation is not viable on this pinned solver.** Two
+independent defects, both solver-side — the turn cuts (patched, proven) and no
+extra-deck summoning (identified, not patchable from this codebase). `gauntlet`'s
+board ranking and `second` stay UNSUPPORTED, and this is no longer an open question
+about where the problem is.
+
+**The code now says so instead of reporting a number.** `floor` returns
+`floor_is_broken` when a vanilla board stops every hand, and both `floor` and `rank`
+print the cause and refuse — so a 100% stop rate can never again be read as a strong
+board.
 
 **Why the patch is not applied:** the solver is pinned (`combo_solver e0c7221802a2`),
 CLAUDE.md says "treat an update as a migration; otherwise results silently change
