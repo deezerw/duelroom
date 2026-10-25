@@ -985,3 +985,59 @@ rather than taken.
 This is the **eighth** instance of the defect class that has dominated
 this review: a number printed without the thing it is over. The other
 seven are #6, #9, #13, #18, #22, #27 and #31.
+
+---
+
+## 39. CLAUDE.md's architecture map sent you to two files that never existed — FIXED 2026-10-25
+
+**Severity: high**, because of *which* two files and *who* it misdirects.
+
+The architecture diagram listed `skills/solver.py` ("Action-tree search over
+own legal moves") and `skills/scoring.py` ("End-board evaluation"). The
+configuration table gave them tunable knobs: `MAX_DEPTH`, `MAX_NODES`,
+`BEAM_WIDTH`, and "Board weights: negates, card advantage, ATK, GY
+resources".
+
+**Neither file has ever existed.** There is no Python search and no weighted
+board score. The search is the C++ `combosolver` driven by a wall-clock
+budget, so the only real lever is `engine.SOLVE_MS` calibrated with `ladder`;
+board quality is whether the line satisfied the planned `--target`
+conjunction plus `solver.blocking.interruptions` counted by ygorl.
+
+This is the costly part: the original request that opened this whole review
+was *"it isn't getting to the best end boards"*. Anyone acting on that —
+the user, me, a future session — reads the config table, goes looking for
+the board weights it promises, and finds nothing. The table hides the one
+lever that works behind two that do not exist.
+
+**Audited every row and every diagram entry.** Also wrong:
+
+- **10 real modules were undocumented**, including `gate.py` (an entire
+  implementation stage) and `config.py` (which reads `locals.toml`, the
+  weights every weighted ranking inherits — the file the "placeholder
+  weights" limitation is about, with no entry in the map).
+- **8 of the table's constants do not exist.** `card_db` has no
+  `YGOPRODECK_API`, no `RATE_LIMIT_RPS` and **no `CACHE_DAYS`** — it has no
+  day-based TTL at all; `needs_refresh` compares the stored `checkDBVer`
+  against the remote one, so the mirror turns over when YGOPRODeck's database
+  actually changes. The rate limit is `meta_scrape.MIN_INTERVAL` (0.4 s).
+  `meta_scrape.FORMAT` is really `DEFAULT_FORMAT`, `LOCALS_WEIGHTS` does not
+  exist, `engine`'s `CORE_PATH`/`SCRIPTS_PATH`/`CDB_PATH` do not exist, and
+  neither does `scenarios.TRIALS_PER_SCENARIO`.
+- **`card_db.py` and `carddb.py` both exist**, one underscore apart, and do
+  different jobs — the YGOPRODeck mirror versus the merged BabelCDB the rules
+  engine loads. Importing the wrong one fails silently because both answer
+  about cards. Documented rather than renamed: renaming is a design change.
+
+Fixed: the diagram now lists all 20 modules grouped by what they are for, the
+table lists only constants that exist, and both carry a note saying what is
+absent and what the real lever is.
+
+`tools/check_docs.py` had passed throughout, because it only ever checked CLI
+commands — a guard that validated the one section that had not drifted. It
+now also fails on a named module that does not exist, a real module that is
+not documented, a table constant not defined at module level, and a table row
+naming a missing file. Mutation-checked on all four.
+
+One redundancy noted, not fixed: `scenarios.NIBIRU = 27204311` is defined
+twice (lines 632 and 683), same value, so it is harmless shadowing.

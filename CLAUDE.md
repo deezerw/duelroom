@@ -139,20 +139,53 @@ it when the cheap questions are answered, not before.
 ## Architecture & Data Flow
 
 ```
-daemon.py (CLI loop + report formatting)
+daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQLite)
   │
-  ├─→ skills/card_db.py      YGOPRODeck cardinfo.php cache + banlist
-  ├─→ skills/meta_scrape.py  Decklist scraping, inclusion-rate analysis
-  ├─→ skills/deck.py         .ydk parse/write, deck model, legality
-  ├─→ skills/engine.py       ygopro-core binding (duel create/step/query)
-  ├─→ skills/solver.py       Action-tree search over own legal moves
-  ├─→ skills/scoring.py      End-board evaluation
-  ├─→ skills/scenarios.py    Handtrap injection, board breaking, floodgates
-  ├─→ skills/sweep.py        The board library: multi-draw ladder, triaged budget
-  ├─→ skills/gauntlet.py     Candidate end boards, ranked by what they stop
-  ├─→ skills/optimizer.py    Flex-slot hill climb with paired seeds
-  └─→ skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
+  ├─ data in ───────────────────────────────────────────────────────────────
+  │  skills/card_db.py      YGOPRODeck card mirror + banlist (`cards`)
+  │  skills/meta_scrape.py  Decklist scraping, inclusion rates, placements
+  │  skills/importer.py     Bring a deck in: .ydk, ydke://, ygoprodeck URL
+  │  skills/images.py       Local card-art cache (data/cardimg)
+  │  skills/db.py           SQLite schema + connections
+  │  skills/config.py       locals.toml -- the weights every ranking inherits
+  │
+  ├─ the deck ──────────────────────────────────────────────────────────────
+  │  skills/deck.py         .ydk parse/write, deck model, `Deck.validate`
+  │  skills/builder.py      Deckbuilder card search and list editing
+  │  skills/carddb.py       Merged engine card DB  (NOT card_db.py -- see below)
+  │
+  ├─ running the engine ────────────────────────────────────────────────────
+  │  skills/engine.py       ygorl + the C++ combo solver; workers, budgets
+  │  skills/gate.py         Validation gate, budget ladder, result loading
+  │  skills/handlab.py      Solve ONE chosen hand, in full detail
+  │
+  ├─ asking questions ──────────────────────────────────────────────────────
+  │  skills/sweep.py        The board library: multi-draw ladder, triaged budget
+  │  skills/scenarios.py    Handtrap injection, targets, floodgates, the matrix
+  │  skills/breaking.py     Going-second board breaking
+  │  skills/gauntlet.py     Candidate end boards ranked by what they STOP
+  │  skills/optimizer.py    Flex-slot hill climb with paired seeds
+  │  skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
+  │
+  └─ output ────────────────────────────────────────────────────────────────
+     skills/report.py       One view of everything known about a deck
+     skills/drill.py        Best lines out as EDOPro .yrpX replays
 ```
+
+**There is no `skills/solver.py` and no `skills/scoring.py`.** Both were in this
+diagram until 2026-10-25 and neither has ever existed. The search is the **C++
+`combosolver`** (`engine.SOLVER_BIN`), driven by wall-clock budget, so there is no
+Python `MAX_DEPTH`/`MAX_NODES`/`BEAM_WIDTH` to tune — the lever is `engine.SOLVE_MS`,
+calibrated per deck with `ladder`. Board quality likewise is **not** a weighted score:
+it is (a) whether the line satisfied the `--target` conjunction the sweep planned and
+(b) `solver.blocking.interruptions` counted by ygorl. Nothing multiplies negates by a
+weight. Anyone sent looking for board weights by the old table found nothing, which is
+the honest outcome; the misleading part was being sent.
+
+**`card_db.py` and `carddb.py` are different modules one underscore apart.**
+`card_db` is the YGOPRODeck mirror (names, banlist, art metadata — what the reports
+read); `carddb` is the merged BabelCDB the rules engine loads. Importing the wrong one
+is silent, because both answer about cards.
 
 **Key flow:** scrape meta → inclusion rates identify flex slots → solver goldfishes each
 meta deck to build an end-board library → scenarios test your deck against that library
@@ -160,14 +193,25 @@ meta deck to build an end-board library → scenarios test your deck against tha
 
 ## Key Configuration (hardcoded at module level)
 
+Checked against the source by `tools/check_docs.py`; every name below exists.
+
 | File | Constants |
 |------|-----------|
-| `card_db.py` | `YGOPRODECK_API`, `RATE_LIMIT_RPS` (20), `CACHE_DAYS` |
-| `meta_scrape.py` | `LISTS_PER_ARCHETYPE` (50), `FORMAT`, `LOCALS_WEIGHTS` |
-| `engine.py` | `CORE_PATH`, `SCRIPTS_PATH`, `CDB_PATH`, pinned versions |
-| `solver.py` | `MAX_DEPTH`, `MAX_NODES`, `BEAM_WIDTH` |
-| `scoring.py` | Board weights: negates, card advantage, ATK, GY resources |
-| `scenarios.py` | `HANDTRAPS`, `FLOODGATES`, `TRIALS_PER_SCENARIO` |
+| `card_db.py` | `API_BASE`, `CARDINFO`, `CHECK_VER`, `TIMEOUT`, `USER_AGENT` |
+| `meta_scrape.py` | `LISTS_PER_ARCHETYPE` (50), `PAGE_SIZE`, `MIN_INTERVAL` (0.4 s), `DEFAULT_FORMAT`, `CORE_THRESHOLD`, `STAPLE_LOW`, `MIN_LISTS_FOR_DRIFT`, `PLACEMENT_RANK` |
+| `engine.py` | `SOLVER_BIN`, `VENDOR`, `THIRD_PARTY`, `SOLVE_MS` (60 s), `DEFAULT_WORKERS` |
+| `scenarios.py` | `HANDTRAPS`, `FLOODGATES`, `BLIND_SPOTS`, `MAXX_C`, `ZONE_RANK`, `TRIVIAL_ACTIONS` |
+| `sweep.py` | `TRIAGE_MS` (15 s), `DRAWS` |
+| `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `INERT` |
+| `config.py` | `LOCALS` — the path to `locals.toml` |
+
+Three of the old table's rows named constants that do not exist, and two named
+**files** that do not exist (see the architecture note above). In particular the card
+mirror has **no `CACHE_DAYS`**: `card_db.needs_refresh` compares the stored
+`checkDBVer` against the remote one, so the cache turns over when YGOPRODeck's
+database actually changes rather than on a timer. The rate limit is
+`meta_scrape.MIN_INTERVAL`, not a `card_db.RATE_LIMIT_RPS`, and the locals weights
+live in `locals.toml` read by `config.py`, not in a `meta_scrape.LOCALS_WEIGHTS`.
 
 ## SQLite Schema (`data/duelroom.db`)
 
