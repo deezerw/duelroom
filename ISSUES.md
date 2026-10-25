@@ -3,15 +3,23 @@
 Found by a comprehensive pass on 2026-10-24. Ordered by **impact on getting a deck
 optimised for a tournament**, not by how interesting they are.
 
-Every guard currently passes — 171 tests, 7 invariants, field audit clean, doc drift
-clean, 31/31 mutations killed. So nothing here is a test failure. These are gaps
-between what the program reports and what it can actually support.
+Every guard currently passes — 235 tests, 7 invariants, field audit clean, doc
+drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here is
+a test failure. These are gaps between what the program reports and what it can
+actually support.
+
+**Status of the 38 items, as tagged on each heading:** 30 FIXED · 1 PARTLY FIXED
+(#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
+(#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
+winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
+causes sit in the pinned C++ solver), #11 (the documented blind spots, which are
+limits rather than defects).
 
 ---
 
 ## P0 — blocks deck optimisation outright
 
-### 1. The optimiser's ranking can be empty and still prints an order
+### 1. The optimiser's ranking can be empty and still prints an order — FIXED (refusal before any table)
 
 Measured on the stored kewl-tune run (`results/optimize_kewl-tune.jsonl`, 10 trials,
 12 hands): `brick_rate` has **one** distinct value across every trial (0.1667), so
@@ -30,7 +38,7 @@ that is worse than no answer, because it looks like one.
   blue_eyes_oct_2026, so the metric is live — kewl-tune really did score 0.0 twelve
   times, which is a sample-size problem.
 
-### 2. The optimiser scores a consistency proxy, not winrate
+### 2. The optimiser scores a consistency proxy, not winrate — OPEN — inherent to the solitaire design
 
 `Objective` weights brick rate (-2.0), solve rate (+1.0), handtrap survival (+1.5)
 and combo length (-0.05). None of those is a win. The program measures how reliably
@@ -39,7 +47,7 @@ measure games won. That is the honest ceiling of the solitaire design (CLAUDE.md
 "Why No Duel AI"), and it should be stated wherever a "best list" is printed rather
 than implied away.
 
-### 3. The optimiser's inputs come from the single-draw solver
+### 3. The optimiser's inputs come from the single-draw solver — PARTLY FIXED — bricks re-checked; full fix rides on #5
 
 `optimizer.evaluate` → `gate.run_funnel` → funnel_eval, which takes **one** draw per
 hand. The solver is a randomized search (CLAUDE.md), so a single draw reports bricks
@@ -87,7 +95,7 @@ properly for the board library.
 
 ## P1 — a whole feature reports numbers that mean nothing
 
-### 4. `gauntlet` board ranking: the floor is not a floor
+### 4. `gauntlet` board ranking: the floor is not a floor — OPEN — UNSUPPORTED, both causes in pinned C++
 
 A board holding **one vanilla Alexandrite Dragon** "stopped" 18/18 meta going-second
 hands (they searched on 6/6, so this is not the repair-mode no-op). A single vanilla
@@ -259,7 +267,7 @@ out at 5 int / 4 neg.
 
 - **Fix:** re-run with `skills/sweep.py` and promote.
 
-### 6. `export` keeps whichever list was scraped first
+### 6. `export` keeps whichever list was scraped first — FIXED (best_list)
 
 `daemon.py cmd_export` selects with `ORDER BY d.id LIMIT 1` — not best-placing, not
 most representative. That is how `branded.ydk` became a Branded/Blitzclique hybrid
@@ -303,7 +311,7 @@ draw 10 — **this deck earns its draw budget**, unlike despia where almost noth
 moved. That is the per-deck answer the single `DRAWS` constant could not express, and
 the command says which case it is looking at.
 
-### 8. Coverage gaps the reports do not refuse over
+### 8. Coverage gaps the reports do not refuse over — FIXED
 
 - `locals.toml` covers **58%** of the stated meta; no deck exists for azamina, doomz,
   invoked, mitsurugi or rogue. Every weighted ranking inherits that.
@@ -329,7 +337,7 @@ per solve. 914 of them under /tmp over two days, 126 MB, growing by one per
 (hand, goal, draw). Fixed in af67334 with a `finally` in both paths plus a test; 856
 stale dirs cleared (126M -> 16M).
 
-### 13. Long background jobs do not survive a turn boundary
+### 13. Long background jobs do not survive a turn boundary — FIXED by procedure (setsid + age check)
 
 The 20-hand sweep launched with `nohup … &` at the end of the previous pass had
 written **zero** records and its parent process was 90 seconds old at the next pass —
@@ -379,7 +387,7 @@ rather than a core card.
   over different cuts shared a scratch path — `evaluate` overwrote one with the other
   and `rescore` only ever saw the last. Harmless at slots=1, immediate at slots>1.
 
-### 16. Orphaned pool workers survive for days
+### 16. Orphaned pool workers survive for days — FIXED at the source
 
 Found 2026-10-24: six `multiprocessing.spawn` workers from a duelroom run, parent
 PID 1, **age 6 days 01:31**, 41 MB resident between them. When a pool's parent dies
@@ -401,7 +409,7 @@ PID.
   caught by anything in Python, so `kill -9` will still orphan workers — which is
   why the `doctor` check stays as the backstop rather than being replaced.
 
-### 17. `pkill -f` on a job pattern kills the caller — again
+### 17. `pkill -f` on a job pattern kills the caller — FIXED by rule (kill by PID or pkill -x)
 
 CLAUDE.md documents this as the exit-144 footgun for the gunicorn pattern. It applies
 to ANY `-f` pattern typed into a shell whose own command line contains it: `pkill -f
@@ -457,7 +465,21 @@ by line number read from the file, never by a guessed text anchor.
   with the solver stubbed. Verified by deleting the import again: both tests fail,
   then pass when restored.
 
-### 19. Nothing can compare the sweep and the funnel on the same hands
+**New symptom of the same root cause, 2026-10-25.** The footgun also has a
+*silent* form that destroys work rather than shells. Two background pollers
+armed as `until ! pgrep -f run_floor.py; do sleep 20; done; <launch next step>`
+**never terminated**, because `pgrep -f` matched the polling shell's own command
+line — the poller saw itself as the job it was waiting for. Nothing died and no
+exit code showed it; the chained next step simply never fired, and the floor
+diagnostic had to be launched by hand. Both pollers were still spinning hours
+later and were stopped today.
+
+So `-f` in a *wait* loop is as wrong as `-f` in a kill: use `pgrep -x <exe>`,
+match a PID captured at launch, or hide the pattern from itself with a character
+class (`'[r]un_floor.py'`, which does work — the third poller used it). The rule
+is unchanged and now has two failure modes behind it.
+
+### 19. Nothing can compare the sweep and the funnel on the same hands — FIXED (paired_check)
 
 The two measurement paths seed their deals independently — `sweep` via
 `hand_seed(seed, name, i)`, funnel_eval via its own scheme — so there is no way to
@@ -516,7 +538,7 @@ materially different claims: branded is 1.6 and 1.2 respectively. All three now 
 their denominator, and a test asserts both that the field really is solved-only and
 that every view saying it says so.
 
-### 22. The deployed web service is 5 days stale — checked, LOW impact
+### 22. The deployed web service is 5 days stale — FIXED via the #36 procedure — was LOW impact
 
 `web/worker.py` and the gunicorn masters have been up **5 days 7 hours** (since
 ~2026-10-19 01:00). The first change in this work landed 2026-10-20 and tonight's
@@ -649,7 +671,7 @@ the label parser read only the last segment. So two trials adding the same card 
 like a bug in the data rather than in the display. Now shows `-cut  +add`, and still
 renders the older add-only names from the single-slot run.
 
-### 28. `import` silently repoints every bare command — notice improved
+### 28. `import` silently repoints every bare command — FIXED (notice names what it replaced)
 
 Exercising `import` moved the active deck from the tournament list to the imported
 one. That is deliberate and right for the common case, but `solve`, `report`,
@@ -776,7 +798,7 @@ worse (p = 0.016)** — where before the fix it was *worse* than the old library
 The stale-ranking records are kept as `boards_multi.stale-ranking.jsonl` — they are
 the control that caught the bug, and the paired comparison above needed them.
 
-### 33. `stats.wilson` audited — CORRECT; one input edge hardened
+### 33. `stats.wilson` audited — AUDITED — CORRECT; one input edge hardened
 
 Audited because every confidence interval reported this session rests on it. It is
 right. Checked against the closed form, including the exact figures quoted for the
@@ -800,7 +822,7 @@ arguments are `(successes, trials)`. Loud either way; now legible.
 The known values are pinned in a test, so a change to the interval maths cannot
 silently move every number in the project.
 
-### 34. Job queue audited — CLEAN, no fix needed
+### 34. Job queue audited — AUDITED — CLEAN, no fix needed
 
 Checked after restarting the worker, since that is exactly when a claimed-but-
 unfinished job becomes stuck forever (CLAUDE.md records a restart killing a job
@@ -836,7 +858,7 @@ the weighted one is the one that decides. The note also states the consequence t
 normalisation cannot fix: a handtrap that only answers an unmeasured deck cannot
 appear in the ranking at all.
 
-### 36. The deployment goes stale with every commit — recurring, now a procedure
+### 36. The deployment goes stale with every commit — FIXED — now a standing procedure
 
 Issue #22 was "the deployment is 5 days stale"; it was restarted. **It went stale
 again within 90 minutes**, because commits kept landing: the worker restarted at
@@ -861,7 +883,7 @@ and a fresh worker start time.
   `systemctl restart` is only needed for `web/worker.py` or `skills/` the WORKER
   uses, and it kills the job in flight.
 
-### 37. `gate.py` audited — CLEAN, no fix needed
+### 37. `gate.py` audited — AUDITED — CLEAN, no fix needed
 
 Audited because "the gate passed" appears throughout CLAUDE.md and a defect there
 would make every pass claim suspect. There is no automated verdict: `gate_report`
@@ -874,7 +896,7 @@ re-audited.
 
 ## P3 — correctness and housekeeping
 
-### 9. The optimiser ledger is truncated, so it is not a checkpoint
+### 9. The optimiser ledger is truncated, so it is not a checkpoint — FIXED (ledger archived, not truncated)
 
 `hill_climb` calls `ledger.write_text("")` at the start of every run. Within a run it
 logs each finished trial, but a restart **erases** the previous attempt's work —
@@ -894,7 +916,7 @@ them ("END OF THE RECORDING: the line does not get through the turn"), which is 
 `build_start` and `inert_start` re-emit with `close_turn=True`. A test asserts the
 code is gone and the warning is not.
 
-### 11. Known blind spots, already documented, still open
+### 11. Known blind spots, already documented, still open — OPEN — documented limits, not defects
 
 - **Handtrap pairs** (Ash + Imperm together): the limitation STANDS, now with the
   mechanism pinned and a negative result rather than an assumption.
