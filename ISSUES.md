@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 38 items, as tagged on each heading:** 30 FIXED · 1 PARTLY FIXED
+**Status of the 39 items, as tagged on each heading:** 31 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
