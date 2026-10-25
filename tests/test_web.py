@@ -799,3 +799,36 @@ def test_a_missing_deck_redirects_rather_than_erroring(client):
         code = client.get(url).status_code
         assert code < 500, f"{url} returned {code}"
         assert code in (302, 303, 404), f"{url} returned {code}"
+
+
+def test_build_page_takes_its_section_caps_from_deck_py(client):
+    """build.html must not hardcode the deck size limits.
+
+    It had `const CAP = {main:[40,60], extra:[0,15], side:[0,15]}` --
+    display only (legality is /api/validate, "from the server and only
+    from the server", and that holds), but a second copy of the numbers
+    in skills/deck.py. The values matched, so nothing was wrong; the risk
+    is drift, where the browser keeps colouring 60 green while the server
+    rejects it. Found by sweeping for duplicated computations after the
+    ban-list map turned up twice (ISSUES #40, #53).
+    """
+    import json
+    import re
+
+    from skills import deck as deck_mod
+
+    _logged_in(client)
+    body = client.get("/build?name=kewl-tune", follow_redirects=True).get_data(as_text=True)
+    m = re.search(r"const CAP = (\{.*?\});", body)
+    assert m, "build.html no longer renders a CAP object"
+    caps = json.loads(m.group(1))
+    assert caps == {
+        "main": [deck_mod.MAIN_MIN, deck_mod.MAIN_MAX],
+        "extra": [0, deck_mod.EXTRA_MAX],
+        "side": [0, deck_mod.SIDE_MAX],
+    }, f"the page's caps must come from skills/deck.py, got {caps}"
+    # And the literals must be gone from the template source.
+    import pathlib
+    tpl = (pathlib.Path(__file__).resolve().parent.parent
+           / "web" / "templates" / "build.html").read_text()
+    assert "main:[40,60]" not in tpl

@@ -107,7 +107,11 @@
 <script>
 const seed = JSON.parse(document.getElementById('seed').textContent);
 const SECTIONS = ['main','extra','side'];
-const CAP = {main:[40,60], extra:[0,15], side:[0,15]};
+// From skills/deck.py via the view -- NOT literals. These are only for
+// the counter display; legality is /api/validate, from the server and
+// only from the server. But a second copy of the numbers drifts: change
+// MAIN_MAX and the browser would keep colouring 60 green.
+const CAP = {{ caps|tojson }};
 const info = {};                       // id -> card record
 const deck = {main:[],extra:[],side:[]};
 for (const s of SECTIONS) for (const c of seed.sections[s]) {

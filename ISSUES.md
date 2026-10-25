@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 53 items, as tagged on each heading:** 44 FIXED · 1 RESOLVED
+**Status of the 54 items, as tagged on each heading:** 45 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1851,3 +1851,46 @@ resolve to real constants, so no label is unreachable. Pinned with a test
 anyway, because a vendor rename would drop a label from the pilot view
 with nothing failing. No other silent-default lookups on external values
 remain in those five modules.
+
+---
+
+## 54. Duplicated-computation sweep — one real instance, two audited clean — FIXED 2026-10-25
+
+After the ban-list map turned up **twice** (#40, then #53 in the
+deckbuilder) and `survival_given_line` turned up in five places (#49), I
+swept for the class itself rather than waiting for a third: the same
+quantity computed in more than one place.
+
+**Audited CLEAN — correct by construction:**
+
+- **"Is this an extra-deck card"** looked like a second implementation:
+  `builder.is_extra(frame)` alongside `deck.EXTRA_FRAMES`. It is not —
+  `builder.py:24` *imports* `EXTRA_FRAMES` from `.deck` and `is_extra` is
+  a three-line wrapper over it. So the #41 pendulum fix propagated into
+  the deckbuilder automatically, which is what that design buys.
+- **Browser-side legality.** CLAUDE.md's load-bearing rule is that
+  "legality is only ever `Deck.validate`, asked over HTTP on every edit —
+  never reimplemented in the browser". It holds: `build.html` posts to
+  `/api/validate` on a debounce, under a comment reading "legality, from
+  the server and only from the server". No legality rule is evaluated
+  client-side.
+
+**FIXED — one real instance.** `build.html` carried
+`const CAP = {main:[40,60], extra:[0,15], side:[0,15]}` — the deck size
+limits as literals, duplicating `deck.MAIN_MIN`/`MAIN_MAX`/`EXTRA_MAX`/
+`SIDE_MAX`.
+
+Scoped honestly: **this is display only** and the values **matched**, so
+nothing was being shown wrongly. `CAP` drives the section counter
+(`47 / 40–60`) and whether that number is coloured red. The defect is
+drift, not error: change `MAIN_MAX` and the browser would keep colouring
+60 green while the server rejected the list — the user's two sources of
+truth disagreeing with no warning, which is exactly how this project
+describes its worst bugs arriving.
+
+Fixed by passing `caps` from `skills/deck.py` through the view, so the
+page renders the server's own constants. The test asserts the rendered
+`CAP` equals those constants **and** that the literals are gone from the
+template; mutation-checked by restoring the hardcoded version.
+
+No other duplicated computation found in the sweep.

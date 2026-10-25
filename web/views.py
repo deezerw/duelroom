@@ -14,6 +14,7 @@ import json
 from skills import (builder, card_db, carddb, config, db, drill, gate,
                     handlab, images, importer, meta_scrape as ms,
                     report as report_mod, scenarios, stats)
+from skills import deck as deck_mod
 from skills.deck import Deck
 
 from . import jobs
@@ -455,7 +456,16 @@ def build(name=None):
         archetype=arch, archetypes=sorted(
             {r["archetype"] for r in c.execute(
                 "SELECT DISTINCT archetype FROM inclusion")}),
-        n_meta=n_meta, n_pool=n_pool, running=jobs.active(c))
+        n_meta=n_meta, n_pool=n_pool, running=jobs.active(c),
+        # The section caps come from skills/deck.py, not from literals in
+        # the template. build.html had `CAP = {main:[40,60], ...}`
+        # hardcoded -- display only (legality is `/api/validate`, from
+        # the server and only from the server), but a second copy of the
+        # numbers all the same: change MAIN_MAX and the browser would
+        # keep colouring 60 green while the server rejected it.
+        caps={"main": [deck_mod.MAIN_MIN, deck_mod.MAIN_MAX],
+              "extra": [0, deck_mod.EXTRA_MAX],
+              "side": [0, deck_mod.SIDE_MAX]})
 
 
 @bp.route("/api/cards")
