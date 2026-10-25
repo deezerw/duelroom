@@ -230,19 +230,37 @@ def allocate(attempts, draws, n_goals):
     budget = max(0, (draws - 1) * n_goals)
     if budget == 0:
         return []
-    solved, near = [], []
+    # Rank by what a goal could still BE WORTH, not by whether it solved.
+    #
+    # Ranking solved goals ahead of near misses is backwards whenever the
+    # near miss asks for more. Measured on despia (boards_multi vs the
+    # stored library, same 40 hands): 5 hands came back WORSE than the
+    # old single-draw run, and hand 10 shows why --
+    #
+    #   draw 0  stack:2         unsolved  best_placed=1   (15s, triage)
+    #   draw 2  piece:51409648  solved
+    #   draws 3-7               piece goals, five more times
+    #
+    # `stack:2` is the only goal that could yield TWO interrupters. It got
+    # one 15-second attempt, was ranked behind two solved single-piece
+    # goals, and never saw the full budget -- while six draws went to a
+    # goal already at its ceiling of one. A solved goal can only pick up
+    # incidental extras; an unsolved goal asking for more has the real
+    # upside.
+    scored = []
     for a in attempts:
         goal = (tuple(a["targets"]), a["label"])
+        asks = len(a["targets"])          # how much the goal demands
         if a["status"] == "solved":
-            # Best board first: the goal already proving the most is the
-            # one most likely to prove more.
-            solved.append((-(a.get("interruptions") or 0),
-                           -(a.get("negates") or 0), goal))
+            got = a.get("interruptions") or 0
+            scored.append((-asks, 0, -got, -(a.get("negates") or 0), goal))
         else:
             placed = a.get("best_placed")
             if isinstance(placed, int) and placed > 0:
-                near.append((-placed / max(1, len(a["targets"])), goal))
-    ranked = [g for _, _, g in sorted(solved)] + [g for _, g in sorted(near)]
+                # Unsolved but reaching: ahead of a solved goal that asks
+                # for less, behind one that asks for the same or more.
+                scored.append((-asks, 1, -placed, 0, goal))
+    ranked = [t[-1] for t in sorted(scored)]
     if not ranked:
         return []
     # Round-robin so the budget spreads over the worthwhile goals instead

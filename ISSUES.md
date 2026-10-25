@@ -678,6 +678,37 @@ figure is wrong, and only for hands missing from the summary.
   Verified on the 40-hand file: zero lines report 0 now, and hands 20-39 show their
   real values. A test covers a record with no companion summary at all.
 
+### 32. The depth rounds spent their budget on goals already at their ceiling — FIXED
+
+My regression, caught by validating the new board library against the old one before
+promoting it. Same 40 hands, same goals, same deck:
+
+| deck | old 1-draw | new multi-draw |
+|---|---|---|
+| branded | 1.58 | **1.84** (better, as expected) |
+| despia | 2.38 | **2.27** (WORSE) |
+
+More draws should never produce a worse board. Five despia hands regressed, and hand
+10 shows the mechanism:
+
+    draw 0  stack:2         unsolved  best_placed=1   (15 s, triage)
+    draw 2  piece:51409648  solved
+    draws 3-7               piece goals, five more times
+
+`stack:2` is the only goal on that hand that could yield TWO interrupters. It got one
+15-second attempt, was ranked behind two solved single-piece goals, and **never saw
+the full budget** — while six draws went to a goal already capped at one.
+
+`allocate` ranked "solved" ahead of "near miss", which is backwards whenever the near
+miss asks for more: a solved goal can only pick up incidental extras, while an
+unsolved goal demanding more interrupters carries the real upside. It now ranks by
+what a goal could be worth (how many targets it demands) first, and only then prefers
+solved over near-miss at equal demand — so the earlier rule survives where it was
+right. Budget unchanged.
+
+**The branded and despia records in `boards_multi.jsonl` were produced under the old
+ranking** and should be re-run before promotion.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

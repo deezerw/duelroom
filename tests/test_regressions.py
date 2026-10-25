@@ -3096,3 +3096,51 @@ def test_a_floor_that_stops_everything_is_flagged_not_reported(monkeypatch,
                        scratch=tmp_path, log=said.append)
     assert r["floor_is_broken"] is True, r
     assert any("does NOTHING stopped every hand" in m for m in said), said
+
+
+def test_a_near_miss_asking_for_more_outranks_a_capped_solved_goal():
+    """Ranking solved goals ahead of near misses is backwards when the
+    near miss asks for more. Measured on despia, boards_multi vs the
+    stored library over the same 40 hands: 5 hands came back WORSE than
+    the old single-draw run. Hand 10 shows why —
+
+        draw 0  stack:2         unsolved  best_placed=1   (15s triage)
+        draw 2  piece:51409648  solved
+        draws 3-7               piece goals, five more times
+
+    `stack:2` was the only goal that could yield two interrupters. It got
+    one 15-second attempt, ranked behind two solved single-piece goals,
+    and never saw the full budget — while six draws went to a goal
+    already at its ceiling of one."""
+    from skills.sweep import allocate
+
+    atts = [
+        {"label": "piece:A", "status": "solved", "targets": ["b@hand", "A"],
+         "interruptions": 1, "negates": 0},
+        {"label": "piece:B", "status": "solved", "targets": ["b@hand", "B"],
+         "interruptions": 1, "negates": 0},
+        {"label": "stack:2", "status": "unsolved",
+         "targets": ["b@hand", "A", "B"], "best_placed": 1},
+    ]
+    spend = allocate(atts, draws=4, n_goals=3)
+    labels = [l for _, l in spend]
+    assert labels[0] == "stack:2", (
+        f"first re-draw went to {labels[0]}; the 2-piece near miss has the "
+        f"only upside and must lead")
+    assert labels.count("stack:2") >= 2, (
+        f"stack:2 got {labels.count('stack:2')} of {len(labels)} draws")
+    # Budget unchanged.
+    assert len(spend) == 9
+
+
+def test_equal_demand_still_prefers_the_solved_goal():
+    """The earlier rule survives where it was right: when two goals ask
+    for the same amount, the one already proving something leads."""
+    from skills.sweep import allocate
+    atts = [
+        {"label": "near", "status": "unsolved", "targets": ["a", "1"],
+         "best_placed": 1},
+        {"label": "done", "status": "solved", "targets": ["a", "2"],
+         "interruptions": 3, "negates": 1},
+    ]
+    assert allocate(atts, draws=3, n_goals=2)[0][1] == "done"
