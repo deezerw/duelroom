@@ -955,10 +955,37 @@ code is gone and the warning is not.
     effect, not a small one.
   - The matrix's understatement is real and needs a repeatable `--fire`, not a flag
     combination — so nobody re-runs this hoping the flags are enough.
-- **Maxx "C"**: 94% of its windows convert, so lines continue through it, but what it
-  *costs* — the cards handed over — is invisible to the metric.
-- **`special_summons`** is never populated in `trials`; real counts need each line
-  replayed through ygorl.
+- **Maxx "C": CORRECTED 2026-10-25 — the cost is measured, and this entry used to
+  say it was not.** The old wording ("what it *costs* — the cards handed over — is
+  invisible to the metric") is true only of the **survival** metric, which is the
+  narrow claim. A separate measurement answers the real question and has for some
+  time: Maxx "C" draws on every special summon, so the replayed summon count *is*
+  the cost, and `threats` prints it as "cards surrendered to Maxx 'C' if they combo
+  through":
+
+  | deck | cards handed over | worst |
+  |---|---|---|
+  | fiendsmith | **8.4** | 15 |
+  | elfnote | **6.1** | 13 |
+  | light-and-darkness-ritual | 4.2 | 14 |
+  | despia | 3.0 | 7 |
+  | kewl-tune | 2.5 | 6 |
+  | sky-striker | 2.0 | 5 |
+  | branded | 0.6 | 6 |
+
+  So the correct statement is: **survival reads "fine" at 94% conversion while
+  fiendsmith hands over 8.4 cards**, and the two numbers must be read together.
+  Calling it a blind spot invited the opposite error — ignoring a table that
+  exists. The figures above are now also stated on the web `threats` page with
+  their source library (#50, #52).
+- **`special_summons` in `trials`: storage gap only, not a measurement gap.** The
+  column really is never populated — verified 2026-10-25, **0 non-null of 316
+  rows**. But the old wording, "real counts need each line replayed through
+  ygorl", describes work that is **done**: `scenarios.special_summons` replays each
+  line and counts `MSG_SPSUMMONED`, and as of #50 `threats` regenerates those
+  counts whenever its cache is missing, older than the library, or built from a
+  different one. What is missing is only writing them into `trials`, which nothing
+  currently reads from.
 
 ---
 

@@ -420,13 +420,24 @@ Honest gaps, so nobody mistakes a limit for a result:
   verdict counts windows of the fired card only. One hand and 2 windows rules out a
   large effect, not a small one. The matrix still understates how stoppable a deck is,
   and fixing it needs a repeatable `--fire`, not a flag combination.
-- **Maxx "C" is a measurement blind spot.** The metric asks only whether a line
-  reached its target, and 94% of Maxx "C" windows convert, so lines do continue through
-  it -- what it actually costs you, the cards it hands over, is invisible here. Droll
-  was listed alongside it until the `survives` fix; it is not a blind spot (45/85
-  windows convert, 19 hands died to it) and the earlier 0% was a reading bug.
-- **`locals.toml` holds placeholder weights** covering 55% of a stated meta that is not
-  yours. Every weighted ranking inherits whatever is in that file.
+- **Maxx "C" is a blind spot of the SURVIVAL metric only — the cost is measured.**
+  Corrected 2026-10-25; this used to say the cost "is invisible here", which invited
+  the opposite error of ignoring a table that exists. Survival asks only whether a
+  line reached its target, and 94% of Maxx "C" windows convert, so it reads "fine".
+  But Maxx "C" draws on every special summon, so the REPLAYED summon count is the
+  cost, and `threats` prints it as "cards surrendered to Maxx 'C' if they combo
+  through": fiendsmith **8.4** cards (worst 15), elfnote **6.1** (13),
+  light-and-darkness-ritual 4.2 (14), despia 3.0 (7), kewl-tune 2.5 (6),
+  sky-striker 2.0 (5), branded 0.6 (6). Read the two together: a deck that combos
+  through while handing over eight cards has not beaten it. Droll was listed
+  alongside it until the `survives` fix; it is not a blind spot (45/85 windows
+  convert, 19 hands died to it) and the earlier 0% was a reading bug.
+- **`locals.toml` holds placeholder weights** covering **58.2%** of a stated meta
+  that is not yours (measured 2026-10-25 via `config.coverage`; this file said 55%).
+  The uncovered 41.8% is rogue 25.0%, mitsurugi 5.8%, azamina 4.4%, invoked 3.6% and
+  doomz 3.1% — archetypes with no measured deck in `assets/decks/`. Every weighted
+  ranking inherits whatever is in that file, and `matrix` now prints the covered
+  share beside its ranking rather than leaving it implicit.
 - **The side plan has NO WAY IN, and its metric is the broken one.** Corrected
   2026-10-25; this entry used to read "implemented but not run at scale", which
   invited exactly the reliance it should have warned against. Two things are true:

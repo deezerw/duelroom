@@ -3894,3 +3894,28 @@ def test_special_summon_cache_metadata_does_not_break_consumers():
             assert isinstance(v, dict), f"{name} should be a mapping"
             assert "nibiru_rate" in v, \
                 "a replayed entry carries nibiru_rate; a window-count one does not"
+
+
+def test_locals_coverage_claim_matches_the_measurement():
+    """The documented coverage figure must be the real one.
+
+    CLAUDE.md said `locals.toml` covers 55% of the stated meta while
+    `config.coverage` reports 58.21% -- a stale number in the file every
+    session loads, and the same defect class as every other number this
+    review corrected. Pinning it to the measurement so the two cannot
+    drift again.
+    """
+    import pathlib
+    from skills import config
+
+    share, missing = config.coverage([
+        "branded", "despia", "elfnote", "fiendsmith", "kewl-tune",
+        "light-and-darkness-ritual", "sky-striker",
+    ])
+    doc = (pathlib.Path(__file__).resolve().parent.parent / "CLAUDE.md").read_text()
+    claimed = f"{share * 100:.1f}%"
+    assert claimed in doc, (
+        f"CLAUDE.md must state the measured coverage {claimed}; "
+        f"uncovered archetypes are {sorted(missing)}")
+    # And it must not still carry the superseded figure as the claim.
+    assert "covering 55% of a stated meta" not in doc
