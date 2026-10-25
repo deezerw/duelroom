@@ -216,7 +216,30 @@ UNSUPPORTED and the patch waits for a session where the re-gate can be watched.
   refuses to print an ordering when nothing beats the floor, so no false answer
   escapes — believe that refusal.
 
-### 5. The board library was built single-draw and pair-capped
+### 5. The board library was built single-draw and pair-capped — RE-RUN IN PROGRESS
+
+**Per-deck results so far, paired against the old single-draw library (40 hands each,
+identical hands):**
+
+| deck | better | worse | same | sign test |
+|---|---|---|---|---|
+| elfnote | **33** | 1 | 6 | p < 0.0001 |
+| despia | **7** | 0 | 33 | p = 0.016 |
+| fiendsmith | 12 | **9** | 19 | p = 0.66 |
+| branded | — | — | — | noise (see #32) |
+
+So the multi-draw library is a large gain on elfnote, a clear one on despia, and
+**indistinguishable on fiendsmith** — the same deck-dependence the `draws` ladder was
+built to report, now confirmed on four decks.
+
+**The 9 worse hands on fiendsmith are a real caveat, not noise to wave away.** More
+draws alone cannot produce a worse board; what can is the goal restructure (#32 and
+the three-wave design) replacing upstream's prefix stacks with stacks built only from
+pieces that solved individually. For a deck whose good pair needs a piece that fails
+alone at the triage budget, that pair is never asked for. Worth measuring per deck
+before promoting the library wholesale.
+
+(original note) 
 
 `results/boards.jsonl` (280 records) predates both the climb and the multi-draw
 sweep, so every stored board is a floor. `targets`, `threats`, `matrix`, `second` and
@@ -725,9 +748,20 @@ So the fix is **justified by the despia diagnosis, not by an aggregate gain**: h
 had `stack:2` — the only goal that could yield two interrupters — get one 15-second
 attempt while six draws went to a goal already capped at one. That mechanism is wrong
 regardless of how it averages out, and branded simply has few hands with that
-structure. **The real test is despia re-run under the fixed ranking**, which is in
-flight; until then the fix should not be described as an improvement to board
-quality, only as a correction to where the budget goes.
+structure. **VALIDATED on despia — the fix is real.** Re-ran despia under the fixed ranking and
+compared it per hand against the stale-ranking run:
+
+| | |
+|---|---|
+| hands better | **11** |
+| hands worse | **0** |
+| hands the same | 29 |
+| sign test | **p = 0.001** |
+
+Eleven hands improved and none regressed, on exactly the deck where the mechanism was
+diagnosed. And against the old single-draw library despia now goes **7 better, 0
+worse (p = 0.016)** — where before the fix it was *worse* than the old library
+(2.38 → 2.27). So the fix turned a regression into a measured gain.
 
 The stale-ranking records are kept as `boards_multi.stale-ranking.jsonl` — they are
 the control that caught the bug, and the paired comparison above needed them.
