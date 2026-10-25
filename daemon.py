@@ -811,9 +811,28 @@ def cmd_threats(conn, args):
     bpath = ROOT / "results" / "boards.jsonl"
     if bpath.exists():
         cache = ROOT / "results" / "special_summons.json"
+        # Nothing used to WRITE this cache. `scenarios.special_summons`
+        # is the producer and no command called it, so the three tables
+        # below were rendered from a file created out of band -- stale the
+        # moment the board library is rebuilt, and gone for good if it
+        # were ever deleted. Replaying is cheap (6.6 s for all 280
+        # records, no search involved), so regenerate it whenever it is
+        # missing or older than the library it describes, and say which.
+        stale = (not cache.exists()
+                 or cache.stat().st_mtime < bpath.stat().st_mtime)
+        if stale:
+            print(f"\n  (rebuilding special-summon counts from "
+                  f"{bpath.name} — replaying lines, no search)")
+            recs_b = [json.loads(l) for l in
+                      bpath.read_text().splitlines() if l.strip()]
+            fresh = scenarios.special_summons(recs_b, limit=20)
+            if fresh:
+                cache.write_text(json.dumps(fresh, indent=1))
         if cache.exists():
             ss = json.loads(cache.read_text())
-            print("\n  special summons per line (replayed, not inferred)\n")
+            age = "rebuilt just now" if stale else "cached"
+            print(f"\n  special summons per line (replayed, not inferred; "
+                  f"{age} from {bpath.name})\n")
             print("  " + "archetype".ljust(28) + "  SS/line   max   Nibiru live")
             for deck, v in sorted(ss.items(), key=lambda kv: -kv[1]["mean"]):
                 print(f"  {deck.ljust(28)}{v['mean']:8.1f}{v['max']:6}"

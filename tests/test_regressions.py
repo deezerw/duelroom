@@ -3774,3 +3774,41 @@ def test_survival_has_one_implementation_and_it_is_the_honest_one():
             # fired. Reading its values as the number is not.
             assert ("for code in" in bare or "or {})" in bare), (
                 f"{rel} reads survival_given_line as a value: {bare}")
+
+
+def test_special_summon_cache_has_a_producer():
+    """`threats` must be able to rebuild the cache it renders.
+
+    `results/special_summons.json` backs three of `threats`' tables --
+    special summons per line, "Nibiru live", and the cards surrendered to
+    Maxx "C" -- and **nothing in the app wrote it**.
+    `scenarios.special_summons` is the producer and no command called it,
+    so the file had been created out of band on 2026-10-18. Two
+    consequences: it went stale the moment the board library was rebuilt
+    (which was happening while this was found), and deleting it removed
+    those tables with no way to get them back.
+
+    Replaying is cheap because no search is involved -- 6.6 s for all 280
+    records of results/boards.jsonl -- and it is deterministic:
+    regenerating reproduced all 7 decks byte-identical to the 2026-10-18
+    file. So `threats` now rebuilds whenever the cache is missing or older
+    than the library, and labels the table "rebuilt just now" or "cached".
+    """
+    import pathlib
+    from skills import scenarios
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "daemon.py").read_text()
+    assert "scenarios.special_summons(" in src, (
+        "nothing calls the producer, so special_summons.json cannot be "
+        "rebuilt and the threats tables render a file of unknown age")
+    assert "st_mtime" in src and "special_summons.json" in src, \
+        "the cache must be compared against the library it describes"
+
+    # The producer's own contract: it replays, so it reports nibiru_rate.
+    rec = {
+        "status": "solved", "deck": {"name": "d"},
+        "start": {"decks": {"a": []}}, "lines": [],
+    }
+    out = scenarios.special_summons([rec])
+    assert isinstance(out, dict)

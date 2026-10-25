@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 49 items, as tagged on each heading:** 40 FIXED · 1 PARTLY FIXED
+**Status of the 50 items, as tagged on each heading:** 41 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1570,3 +1570,55 @@ survival fails the test.
 `return matrix` after `return row`, and `tools/check_names.py` failed with
 `skills/scenarios.py:400 undefined name 'matrix'` before anything ran.
 That is twice in two passes it has caught my own edit.
+
+---
+
+## 50. Three `threats` tables rendered a file nothing could write — FIXED 2026-10-25
+
+**Severity: medium**, and it was about to bite tonight.
+
+`results/special_summons.json` backs three of `threats`' tables — special
+summons per line, "Nibiru live", and the cards surrendered to Maxx "C" —
+and **nothing in the app wrote it**. `scenarios.special_summons` is the
+producer; no command called it. The file was created out of band on
+**2026-10-18** and had been rendered as current ever since.
+
+Two consequences, the first immediate:
+
+- It goes stale the instant the board library is rebuilt — which is
+  **happening right now**. Tonight's re-run would have left these tables
+  describing the old `boards.jsonl` with nothing saying so.
+- Deleting it removed three tables permanently, with no way to get them
+  back.
+
+This is the reachability class again (#47, #48), with the twist that a
+*stale artifact* of the unreachable function was already on screen.
+
+**Checked, and the numbers themselves were right.** Regenerating from
+`results/boards.jsonl` reproduced **all 7 decks byte-identical** to the
+2026-10-18 file, so nothing displayed was wrong — the replay is
+deterministic and the cache was honest, just unmaintainable. Cost: **6.6
+seconds** for all 280 records, because replaying a known line involves no
+search.
+
+Fixed: `threats` now rebuilds the cache whenever it is missing or older
+than the library it describes, and the table says which —
+`(replayed, not inferred; rebuilt just now from boards.jsonl)` or
+`cached from boards.jsonl`. Verified both paths: a deleted cache rebuilds
+and matches, and a fresh one is reused without rebuilding.
+
+**Audited and CLEAN in the same pass**, recorded so it is not re-derived:
+
+- `trials.special_summons` really is never populated — **0 non-null of 316
+  rows**, exactly as CLAUDE.md says.
+- The discredited shortcut is **not** being shown as summons.
+  `scenarios.response_windows` still computes Maxx "C" window counts, but
+  `threats` prints it as *"interruption surface: times the opponent gets
+  to respond"* with an explicit note: *"Not special summons — Maxx 'C'
+  has no activation condition, so its window count tracks line length,
+  r=0.94."* The correct replayed figure is separately labelled
+  *"(replayed, not inferred)"*. Both numbers carry their meaning, which is
+  the discipline this review has been enforcing — already applied here.
+- Swept for other instances of #49's shape — a module warning against a
+  field that other call sites still read. `survival_given_line` was the
+  only one.
