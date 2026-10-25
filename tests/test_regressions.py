@@ -3687,3 +3687,35 @@ def test_opening_hand_math_matches_closed_form():
                - stats.at_least(13, 5, 5, 2)) < 1e-12
     # A hand larger than the deck is 0, not a ZeroDivisionError.
     assert stats.pmf(5, 1, 40, 1) == 0.0
+
+
+def test_side_plan_is_not_quietly_wired_up():
+    """The side planner must stay unreachable while its metric is broken.
+
+    `optimizer.side_plan` rates every candidate through
+    `breaking.going_second` -- the same function behind the `second`
+    command, which CLAUDE.md marks UNSUPPORTED on a decisive measurement
+    (kewl-tune reaches its target in 10 of 12 hands going first and 0 of 4
+    going second into one vanilla Alexandrite Dragon).
+
+    So this is a guard against a well-meant future edit: exposing the side
+    planner before ISSUES.md #4 is fixed would hand over a tool whose
+    objective is known not to measure what it claims, for the 15 cards
+    that decide games two and three. If you are deliberately wiring it up
+    because #4 is fixed, delete this test in the same commit and say so.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    callers = [root / "daemon.py"]
+    callers += list((root / "web").glob("*.py"))
+    callers += list((root / "tools").glob("*.py"))
+    for f in callers:
+        text = f.read_text()
+        assert "side_plan(" not in text, (
+            f"{f.name} calls side_plan, but it is rated by the unsupported "
+            "going-second path (ISSUES.md #4)")
+
+    # And the docs must not describe it as merely slow.
+    doc = (root / "CLAUDE.md").read_text()
+    assert "NO WAY IN" in doc, \
+        "CLAUDE.md must say the side plan has no route, not just that it is slow"

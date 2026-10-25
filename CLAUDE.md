@@ -387,8 +387,22 @@ Honest gaps, so nobody mistakes a limit for a result:
   windows convert, 19 hands died to it) and the earlier 0% was a reading bug.
 - **`locals.toml` holds placeholder weights** covering 55% of a stated meta that is not
   yours. Every weighted ranking inherits whatever is in that file.
-- **The side plan and floodgate check are implemented but not run at scale.** Each side
-  candidate is `hands` full going-second runs, roughly ten minutes apiece.
+- **The side plan has NO WAY IN, and its metric is the broken one.** Corrected
+  2026-10-25; this entry used to read "implemented but not run at scale", which
+  invited exactly the reliance it should have warned against. Two things are true:
+  `optimizer.side_plan` and its companion `optimizer.propose_side` have **no CLI
+  command and no web route** — nothing in `daemon.py`, `web/` or `tools/` calls
+  either, so the feature cannot be run at all, at any scale. And it rates every
+  candidate through `breaking.going_second`, the *same* function behind the `second`
+  command, which the next entry marks UNSUPPORTED on a decisive measurement. So
+  wiring up a command would hand over a side-deck planner whose objective returns
+  0 of 4 against one vanilla Alexandrite Dragon. **It is deliberately left
+  unreachable until that is fixed** — a side deck is 15 cards and games two and
+  three, and a confident wrong answer there is worse than no answer. The cost note
+  stands for whenever it becomes trustworthy: each candidate is `hands` full
+  going-second runs, roughly ten minutes apiece.
+- **The floodgate check is implemented but not run at scale**, and two of its five
+  floodgates were the wrong card until 2026-10-25 (see ISSUES.md #43).
 - **`gauntlet`'s board ranking and `second` are UNSUPPORTED.** The going-second metric
   does not measure board strength. Decisive measurement 2026-10-24: kewl-tune reaches
   its target `15665977@atk` in 10 of 12 hands going FIRST (stored optimiser ledger),

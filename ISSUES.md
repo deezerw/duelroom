@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 47 items, as tagged on each heading:** 38 FIXED · 1 PARTLY FIXED
+**Status of the 48 items, as tagged on each heading:** 39 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1426,3 +1426,75 @@ review after two missing-import incidents — failed with
 `daemon.py:378 undefined name 'Counter'` before the code ever ran. Also
 removed a `for ... break` loop left in my own edit that could only ever
 run once.
+
+---
+
+## 48. Reachability swept: the side planner has no way in — FIXED 2026-10-25 (docs)
+
+Followed #47 by sweeping the whole codebase for its defect, rather than
+one module at a time: a function that exists, is documented, and cannot be
+invoked. CLAUDE.md calls this the project's signature bug.
+
+Method: parse every `skills/*.py` for public top-level defs, then AST-walk
+`daemon.py`, `web/*`, `tools/*` and the other skills modules collecting
+every call, **resolving import aliases** (`meta_scrape as ms`,
+`from . import card_db`). My first two passes reported false positives
+because they missed aliases and relative imports; the numbers below are
+from the corrected pass, verified by grep.
+
+**8 public functions are genuinely unreachable from app code:**
+
+| function | verdict |
+|---|---|
+| `optimizer.side_plan` | **the finding** — see below |
+| `optimizer.propose_side` | its companion, same gap |
+| `stats.combo_chance` | needs a starter list (#47) |
+| `stats.at_most` | helper, reached via `at_least`'s complement |
+| `gate.load_blocking` | the DB-backed board-library store |
+| `gate.liveliness_from_db` | reads per-card solve rates back out |
+| `meta_scrape.discover_meta` | alternative scrape strategy |
+| `meta_scrape.scrape_archetype` | alternative scrape strategy |
+| `card_db.by_name` | name lookup; `builder.py` has its own search |
+
+**The finding: the side deck planner cannot be run at all.** Nothing in
+`daemon.py`, `web/` or `tools/` calls `side_plan`. CLAUDE.md said *"the
+side plan and floodgate check are implemented but not run at scale — each
+side candidate is `hands` full going-second runs, roughly ten minutes
+apiece"*, which reads as runnable-but-slow and invites a user to try it
+before an event. It is not slow. There is no route.
+
+**And it must stay that way for now.** `side_plan` rates every candidate
+through `breaking.going_second` — verified to be the *same* function
+`daemon.py:1421` uses for the `second` command, which this file and
+CLAUDE.md both mark **UNSUPPORTED** on a decisive measurement: kewl-tune
+reaches its target in 10 of 12 hands going first and **0 of 4** going
+second into one vanilla Alexandrite Dragon (#4).
+
+So wiring up a `side` command would have handed over a planner whose
+objective is known not to measure what it claims — for the 15 cards that
+decide games two and three of every match. **Deliberately left
+unreachable.** A confident wrong answer about a side deck before a
+tournament is worse than no answer, which is the judgment this whole
+review has been applying.
+
+Fixed in the only honest way available: CLAUDE.md now says the side plan
+has **no way in** and that its metric is the broken one, with a pointer to
+#4 and the cost note preserved for whenever it becomes trustworthy. A
+guard test asserts no app file calls `side_plan` and tells a future editor
+to delete that test in the same commit if they are wiring it up because #4
+is fixed.
+
+**One inference of mine was wrong and is corrected here.** I first read
+`propose_side` as dead code superseded by `side_in`, because `side_plan`
+uses `side_in`. It is not: `side_in`'s own docstring says *"to test a card
+that is not yet in the side, use `propose_side` to put it there first"*.
+They are complementary — `side_in` moves a side card into the main deck,
+`propose_side` changes what is in the side. Nothing was removed.
+
+The remaining six are recorded rather than wired: two are alternative
+scrape strategies superseded in practice by `scrape_recent`, two are the
+DB-backed persistence path for board-library records (`runs`/`trials` are
+populated by the funnel path instead), one needs data that does not exist,
+and one is duplicated by `builder.py`'s own search. None of them is a
+wrong number; they are unused capability, and that is now written down
+instead of rediscovered.
