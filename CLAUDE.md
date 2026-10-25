@@ -289,6 +289,34 @@ response windows). Real counts need each line replayed through ygorl.
   budget, do not assume `DRAWS`. The free part is the wave restructure: 61.9 → 38.4
   solver-minutes at identical 2.60. Early stopping (`patience`) takes it to 25.3 and
   gives the gain back, so it is opt-in.
+- **The multi-draw library, measured per deck against the single-draw one**
+  (2026-10-25, 40 identical hand seeds per deck, paired, sign test). Five of the
+  eight decks were complete at the time of writing:
+
+  | deck | better | worse | sign p | verdict |
+  |---|---|---|---|---|
+  | elfnote | 33 | 1 | <0.0001 | **better** |
+  | kewl-tune | 10 | 2 | 0.039 | **better** |
+  | despia | 7 | 0 | 0.016 | **better** |
+  | branded | 7 | 2 | 0.18 | no difference |
+  | fiendsmith | 8 | 12 | 0.50 | no difference |
+
+  So extra draws pay for three of five decks and buy nothing measurable for two,
+  which is the per-deck `draws` ladder this file already prescribes, now with
+  numbers. Mean interruptions per hand: elfnote 3.73 → 4.80, kewl-tune 3.88 →
+  4.08, despia 2.38 → 2.55, branded 1.23 → 1.38, fiendsmith 3.17 → 3.05.
+
+  **Extra draws did NOT change the solve rate for any deck** — 31/31 for branded
+  and 40/40 for the other four, identical in both arms. Multi-draw improves the
+  BOARD on hands that already solved; it does not rescue hands that do not. Any
+  claim that it lowers the brick rate needs its own evidence.
+
+  **Retracted:** I previously called fiendsmith's single-draw comparison "9
+  regressions ... wants re-running to confirm they are gone". They are not gone
+  (now 12 worse, 8 better) and they were never an effect: p=0.50 then and now.
+  The honest statement is that fiendsmith shows no measurable difference between
+  arms while costing four times the solver time, not that it regressed.
+
 - **Where solver time goes** (all 952 attempts of the stored sweep, 2026-10-22):
   attempts that SOLVED (632) take a median 12.5 s and a mean 16.8 s, and 64% of them
   finish within 15 s; attempts that FAIL (320) burn the WHOLE budget by construction
