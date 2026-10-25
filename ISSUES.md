@@ -3,12 +3,12 @@
 Found by a comprehensive pass on 2026-10-24. Ordered by **impact on getting a deck
 optimised for a tournament**, not by how interesting they are.
 
-Every guard currently passes — 235 tests, 7 invariants, field audit clean, doc
+Every guard currently passes — 277 tests, 7 invariants, field audit clean, doc
 drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here is
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 57 items, as tagged on each heading:** 48 FIXED · 1 RESOLVED
+**Status of the 58 items, as tagged on each heading:** 49 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -2058,3 +2058,54 @@ unique). But the derived target decides what every later solve aims at, so
 a target that depends on record order is not a measurement. Tie now broken
 by passcode — meaningless but deterministic. Verified stable across 5
 shuffled input orders; mutation-checked.
+
+---
+
+## 58. I broke `report` and no guard caught it — FIXED 2026-10-25
+
+**Severity: high, and it was my own regression, live for several commits.**
+
+The survival fix (#49) widened `surv_rows` from a 3-tuple to a 5-tuple
+`(row, code, survival, tested, offered)`. A **second, stale unpack site**
+further down `cmd_report` still read three values:
+
+```python
+for row, code, s in surv_rows:        # ValueError: too many values to unpack
+```
+
+So `daemon.py report` — the project's headline command, "everything known
+about a deck, in one view" — **raised on every invocation** from the #49
+commit until now. The loop was also redundant: #49 already added an
+`unmeasured` block that prints never-live cards *with* the count of solved
+hands they were absent from. Removed rather than repaired.
+
+**Why nothing caught it, which is the real finding.** `daemon.run` wraps
+every command in `except Exception: traceback.print_exc()` — correct for a
+REPL, which must survive a bad command — so a broken command prints a
+traceback and **the process still exits 0**. The web has
+`tests/test_web.py`'s walk over every GET route, which caught two real
+500s this week (including one of mine, #52). The CLI had no equivalent, so
+a command could be broken by a commit and stay broken silently.
+
+**Fixed, plus the missing guard.** `tests/test_cli.py` walks 17 read-only
+commands, calling the `cmd_*` functions **directly** rather than through
+the dispatcher — because the dispatcher is precisely what hides the
+failure. It runs in 3 seconds. Mutation-checked: re-introducing the stale
+unpack fails `test_read_only_command_does_not_raise[report]`.
+
+A second test asserts **every registered command is either walked or
+named in the exclusion list**, so a new command cannot quietly arrive with
+no smoke coverage. The 17 exclusions each carry a reason: network calls
+(`cards`, `meta`, `images`), minutes-to-hours of solver (`solve`,
+`ladder`, `gate`, `boards`, `optimize`, `second`, `gauntlet`,
+`floodgates`), interactive (`pilot`), or file writes (`import`, `export`,
+`snapshot`, `setup`, `threats`).
+
+Walking the other 16 found no further breakage, so #49 and the ~20 other
+`daemon.py` edits this session did not damage anything else.
+
+**The lesson about my own work:** I widened a tuple and searched for its
+consumers by eye. Two unpack sites existed and I changed one — the same
+shape of mistake as #53, where I fixed one copy of the ban-list map and
+left the other. Both times a cheap mechanical check would have found it
+immediately, and now one exists.

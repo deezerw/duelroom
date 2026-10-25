@@ -1847,10 +1847,14 @@ def cmd_report(conn, args):
                               f"is not beating it.")
                     else:
                         print(f"      Run `threats` for the cards it actually costs you.")
-        for row, code, s in surv_rows:
-            if s is None:
-                name = row["name"] if row else code
-                print(f"    n/a   {name:<34} never had a window")
+        # The "never had a window" rows are printed by the `unmeasured`
+        # loop above, which names how many solved hands the card was
+        # absent from. This was a second, stale copy left behind by the
+        # survival fix (#49) and it still unpacked the OLD 3-tuple, so
+        # `report` raised ValueError. The dispatcher catches and prints
+        # the traceback, so the suite stayed green while the project's
+        # headline command was broken -- which is why there is now a CLI
+        # smoke walk (#58) to match the web's route walk.
         if hands and hands < 20:
             print(f"    ! only {hands} hands — the interval above is wide enough")
             print("      that most comparisons against it are noise")
