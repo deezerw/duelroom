@@ -3416,3 +3416,59 @@ def test_pendulum_extra_deck_frames_route_to_the_extra_deck():
     assert any("extra-deck card in the main deck" in p
                for p in bad.validate(conn)), \
         "a fusion_pendulum card in the MAIN deck must be flagged"
+
+
+def test_a_solver_crash_is_not_counted_as_a_deck_brick():
+    """`status: "error"` is the SOLVER failing, not the deck bricking.
+
+    `summarize` (copied verbatim from the vendored
+    tools/solve_blocking.py, so this is inherited rather than drifted)
+    increments `hands` for every record and `solved` only for solved
+    ones. An errored hand therefore depresses `solve_rate` exactly like a
+    brick, and nothing in the summary or any display said a crash had
+    happened.
+
+    results/boards_stale_prefix.jsonl holds 12 such hands, all
+    "solver exited with -11" -- the documented BabelCDB segfault, which
+    CLAUDE.md warns follows any submodule bump without `setup`. No live
+    record carries one today, so this is a latent defect rather than a
+    wrong stored number; it matters because `brick_rate` carries weight
+    -2.0 in the optimiser objective, so a handful of segfaults would make
+    it prefer whichever list happened not to crash.
+
+    `solve_rate` keeps its definition -- `load_boards` and every stored
+    record depend on solved/hands -- so the fix is that the count exists
+    and is shown.
+    """
+    from skills import sweep
+
+    def rec(status, name="d"):
+        r = {"deck": {"name": name}, "status": status, "hand_index": 0,
+             "targets": [], "solver": {"wall_s": 1.0}}
+        if status == "solved":
+            r["solver"]["blocking"] = {"interruptions": 2, "negates": 1,
+                                       "pieces": []}
+            r["lines"] = [{"board": {"players": [
+                {"mzone": [], "szone": [], "hand": []}]}}]
+        return r
+
+    table = sweep.summarize(
+        [rec("solved"), rec("solved"), rec("brick"), rec("error")],
+        cards={})
+    row = table["d"]
+    assert row["hands"] == 4
+    assert row["solved"] == 2
+    assert row["errors"] == 1, (
+        "a crashed hand must be counted as a solver failure, not folded "
+        "silently into the 2 non-solves")
+    # The rate keeps its contract, which is exactly why the count is needed.
+    assert row["solve_rate"] == 0.5
+
+
+def test_boards_output_names_solver_failures():
+    """The `boards` display must say a crash happened, not just lower the rate."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "daemon.py").read_text()
+    assert "SOLVER FAILURE" in src, (
+        "a solver crash is counted in hands and not in solved, so it reads "
+        "as a brick unless the display names it")

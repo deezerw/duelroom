@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 41 items, as tagged on each heading:** 33 FIXED · 1 PARTLY FIXED
+**Status of the 42 items, as tagged on each heading:** 34 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1122,3 +1122,69 @@ Fixed with a mutation-checked test covering both directions and pinning
 **Related note, not a defect:** the `cards` table has a `frame` column that
 CLAUDE.md's schema section does not list, and `frame` is what every
 section-routing decision reads. Added to the schema docs.
+
+---
+
+## 42. A solver crash was counted as a deck brick — FIXED 2026-10-25
+
+**Severity: medium**, latent today but high the moment it fires — and
+CLAUDE.md documents the thing that makes it fire.
+
+Found by hunting siblings of #40's defect class: a lookup on external
+vocabulary where an unhandled member degrades silently. The solver's
+records carry **four** status values — `solved` (1236 across all stored
+results), `brick` (103), `unsolved` (41) and `error` (12) — while the code
+branches on only `solved`, `brick` and `no_window`. `error` is named
+nowhere.
+
+`sweep.summarize` does:
+
+```python
+row["hands"] += 1
+if r["status"] != "solved":
+    continue
+row["solved"] += 1
+```
+
+So an errored hand lands in the denominator and not the numerator: it
+depresses `solve_rate` **exactly like a brick**, and no summary field or
+display said a crash had happened. The 12 stored `error` hands are all
+`solver exited with -11` — SIGSEGV, the BabelCDB segfault CLAUDE.md warns
+follows any submodule bump without `daemon.py setup`.
+
+**Checked rather than assumed, in both directions:**
+
+- The 12 errored hands are confined to `results/boards_stale_prefix.jsonl`,
+  an archived arm. **No live record carries one**, so no number I have
+  reported is wrong. This is a latent defect, not a stored error.
+- `sweep.summarize` is **byte-identical to the vendored
+  `tools/solve_blocking.py:summarize`** it says it copies, so this is
+  inherited upstream behaviour, not drift in duelroom's copy. The
+  docstring's contract warning was doing its job.
+- No `summary` anywhere carries a nonzero `errors` count, so the existing
+  `check_counts` invariant (`solved + bricks + errors == hands`) has never
+  had anything to check.
+
+It matters because `brick_rate` carries weight **-2.0** in the optimiser
+objective, the heaviest term after nothing. A handful of segfaults during
+an `optimize` run — a submodule bump away — would make it prefer whichever
+candidate list happened not to crash, and present that as a deck
+improvement.
+
+**Fixed:** `summarize` now counts `errors` per deck, and `boards` prints
+`(N SOLVER FAILURE(S), not deck bricks)` beside the solve rate — the same
+treatment `floodgates` already gave them at `daemon.py:1429`, which is
+where the precedent came from. `solve_rate` **keeps** its definition
+(`solved / hands`), because `gate.load_boards` and every stored record
+depend on it; the fix is that the count exists and is shown, not that the
+rate changes meaning.
+
+Two tests, mutation-checked.
+
+**Also checked and CLEAN:** `meta_scrape.PLACEMENT_RANK`, the other
+vocabulary map that became load-bearing when `best_list` started choosing
+which scraped list `export` writes. All **505** stored deck rows resolve to
+a real rank (`Top 8`, `Top 4`, `Top 32`, `Runner-Up`, `Winner`, `Top 64`,
+`Top 16`, `3rd Place`) — 100%, with the `.strip().lower()` normalisation
+doing the work. Its `top N` fallback orders unlisted sizes correctly too.
+No fix needed.

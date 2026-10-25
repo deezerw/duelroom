@@ -602,8 +602,12 @@ def cmd_solve(conn, args):
                         log=print)
     for name, row in sorted((table.get("decks") or {}).items()):
         print(f"\n  {name}")
+        # A solver crash is counted in `hands` and not in `solved`, so it
+        # reads as a brick. Name it, the way `floodgates` already does.
+        errs = row.get("errors") or 0
+        err = f"  ({errs} SOLVER FAILURE(S), not deck bricks)" if errs else ""
         print(f"    solve rate        {row['solved']}/{row['hands']} "
-              f"({row['solve_rate']*100:.0f}%)")
+              f"({row['solve_rate']*100:.0f}%){err}")
         # Solved-only: `summarize` appends to `interruptions` after its
         # `if r["status"] != "solved": continue`. Printed bare it reads as
         # per-hand, which for a deck that bricks a quarter of the time is

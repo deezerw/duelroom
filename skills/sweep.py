@@ -669,11 +669,22 @@ def summarize(records, cards=None):
     decks = {}
     for r in records:
         row = decks.setdefault(r["deck"]["name"],
-                               {"hands": 0, "solved": 0, "wall_s": 0.0,
+                               {"hands": 0, "solved": 0, "errors": 0,
+                                "wall_s": 0.0,
                                 "interruptions": [], "negates": [],
                                 "boards": []})
         row["hands"] += 1
         row["wall_s"] += r.get("solver", {}).get("wall_s", 0.0)
+        # An `error` hand is the SOLVER having failed -- "solver exited
+        # with -11" is the documented BabelCDB segfault -- not the deck
+        # failing to reach a board. Upstream counts it in `hands` and not
+        # in `solved`, so it depresses `solve_rate` exactly like a brick
+        # and nothing anywhere says it happened. Counted separately here
+        # so a reader can tell a crash from a deck property; `solve_rate`
+        # keeps its definition (solved/hands) because `load_boards` and
+        # every stored record depend on it.
+        if r["status"] == "error":
+            row["errors"] += 1
         if r["status"] != "solved":
             continue
         row["solved"] += 1
