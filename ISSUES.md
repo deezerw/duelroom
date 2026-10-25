@@ -743,6 +743,32 @@ would block the queue". `jobs.cancel` also refuses to end a running job on purpo
 because "killing a running solver mid-sweep leaves partial records". Both correct;
 recorded so the area is not re-audited.
 
+### 35. The handtrap ranking never said how much of your room it saw — FIXED
+
+Audited `config.weights` and `weighted_handtrap_ranking` because they underpin every
+weighted ranking, the same foundational role as `stats.wilson`.
+
+**The maths is correct.** Each card's score is divided by `card_weight[code]` — the
+weight of the decks it was actually measured on — so it does not assume full coverage
+and is not understated by the missing share. The weights file also already sums to
+1.0, so normalisation is a no-op and there is no silent rescaling.
+
+**What it could not say is how much of the room it covered**, and that matters because
+`threat_handtraps` turns this ranking into the handtraps the OPTIMISER fires. So the
+share is a decision input, not a footnote. Measured:
+
+| | |
+|---|---|
+| weighted coverage of the stated meta | **58%** |
+| `rogue` — the single largest slice — | **0.250, no deck file** |
+| also unmeasured | mitsurugi 6%, azamina 4%, invoked 4%, doomz 3% |
+
+`scenarios.covered_share` reports it and `matrix` now prints it alongside the existing
+deck-count caveat — which is a different number (70% of decks vs 58% of weight) and
+the weighted one is the one that decides. The note also states the consequence the
+normalisation cannot fix: a handtrap that only answers an unmeasured deck cannot
+appear in the ranking at all.
+
 ## P3 — correctness and housekeeping
 
 ### 9. The optimiser ledger is truncated, so it is not a checkpoint

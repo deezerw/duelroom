@@ -3173,3 +3173,40 @@ def test_wilson_says_what_is_wrong_with_swapped_arguments():
         wilson(20, 15)
     assert wilson(0, 0) == (0.0, 0.0, 1.0)
     assert wilson(0, 1)[0] == 0.0
+
+
+def test_weighted_coverage_names_the_unmeasured_weight():
+    """`weighted_handtrap_ranking` is correct — it divides by the weight
+    of the decks each card was measured on, so it does not assume full
+    coverage. What it could not say is how much of the room that was, and
+    `threat_handtraps` turns the ranking into the handtraps the optimiser
+    fires. Measured: locals.toml's largest single slice is `rogue` at
+    0.250 with no deck file, and coverage is 58%."""
+    from skills import scenarios
+
+    weights = {"a": 0.5, "b": 0.25, "rogue": 0.25}
+    matrix = {"a": {"cells": {}}, "b": {"cells": {}}}
+    share, missing = scenarios.covered_share(matrix, weights)
+    assert abs(share - 0.75) < 1e-9, share
+    assert missing == [("rogue", 0.25)], missing
+
+    # A deck present in the matrix but absent from the weights is not
+    # coverage either -- it is not in the room.
+    share2, _ = scenarios.covered_share(
+        {"a": {"cells": {}}, "zz": {"cells": {}}}, weights)
+    assert abs(share2 - 0.5) < 1e-9, share2
+
+    # Full coverage reports nothing missing.
+    share3, missing3 = scenarios.covered_share(
+        {k: {"cells": {}} for k in weights}, weights)
+    assert share3 == 1.0 and missing3 == []
+
+
+def test_matrix_states_weighted_coverage_not_just_deck_count():
+    """70% of decks and 58% of weight are different numbers, and the
+    weighted one is the decision-relevant one."""
+    import inspect
+    import daemon
+    src = inspect.getsource(daemon.cmd_matrix)
+    assert "WEIGHTED COVERAGE" in src
+    assert "covered_share" in src

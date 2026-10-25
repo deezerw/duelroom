@@ -384,6 +384,31 @@ def weighted_handtrap_ranking(matrix, weights, exclude=None):
     ]
 
 
+
+def covered_share(matrix, weights):
+    """What share of the stated meta a weighted ranking actually saw.
+
+    `weighted_handtrap_ranking` is correct: it divides each card's score
+    by the weight of the decks it was measured on, so it does not assume
+    full coverage. What it cannot do is say how much of the room that
+    was, and this ranking picks the handtraps `threat_handtraps` fires --
+    so the share is a decision input, not a footnote.
+
+    Measured 2026-10-24: locals.toml lists 11 archetypes summing to 1.0,
+    and five of them have no deck file at all -- azamina, doomz, invoked,
+    mitsurugi and **rogue at 0.250**, the single largest slice. So the
+    ranking is over roughly 58% of the stated meta with a quarter of it
+    absent, and nothing said so.
+
+    Returns (share, [missing archetypes by weight, heaviest first]).
+    """
+    seen = {d for d in matrix if weights.get(d, 0.0)}
+    share = sum(w for d, w in weights.items() if d in seen)
+    total = sum(weights.values()) or 1.0
+    missing = sorted(((w, d) for d, w in weights.items() if d not in seen),
+                     reverse=True)
+    return share / total, [(d, w) for w, d in missing if w > 0]
+
 def run_matrix(decks, targets_path, hands=12, solve_ms=None, workers=None,
                fire_ms=3000, out=None, timeout=None):
     """funnel_eval across several decks with every handtrap fired.

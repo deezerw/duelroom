@@ -936,6 +936,20 @@ def cmd_matrix(conn, args):
         print("no usable records")
         return
 
+    # Weighted coverage, not just the deck count. The ranking below is
+    # correct over what it measured, and `threat_handtraps` turns it into
+    # the handtraps the optimiser fires -- so how much of the room it saw
+    # is a decision input. locals.toml's largest single slice is `rogue`
+    # at 0.250 and there is no deck for it.
+    _share, _missing = scenarios.covered_share(m, config.weights())
+    if _missing:
+        print(f"  ! WEIGHTED COVERAGE {_share:.0%} of your stated meta. "
+              f"No deck measured for:")
+        print("    " + ", ".join(f"{d} ({w:.0%})" for d, w in _missing[:6]))
+        print(f"    Every ranking below is over the {_share:.0%} that was "
+              f"measured, correctly normalised — but a handtrap that only")
+        print(f"    answers an unmeasured deck cannot appear in it at all.")
+        print()
     codes = sorted(scenarios.HANDTRAPS)
     short = {c: scenarios.HANDTRAPS[c].split(" &")[0].split(",")[0][:9] for c in codes}
 
