@@ -3995,3 +3995,65 @@ def test_follow_up_categories_all_resolve():
     assert not missing, (
         f"FOLLOW_UP names categories that do not exist: {missing}. The "
         "`.get(..., 0)` default makes those labels silently unreachable")
+
+
+def test_replay_failures_are_counted_not_swallowed():
+    """A line that will not replay must not vanish from the figures.
+
+    `scenarios.special_summons` had `except Exception: continue` with no
+    tally, so every number it produced carried an invisible denominator:
+    "elfnote 6.1 summons" over an unknown number of lines. A submodule
+    bump that broke replaying — which CLAUDE.md warns about, since a card
+    whose Lua did not load replays as nothing — would have read as a
+    smaller sample rather than as a failure.
+
+    Measured 2026-10-25: **0 failures over all 271 solved lines** of
+    results/boards.jsonl, so nothing reported was wrong. This is a latent
+    defect closed, plus the reporting that makes it visible if it ever
+    fires.
+    """
+    import inspect
+    from skills import scenarios
+
+    src = inspect.getsource(scenarios.special_summons)
+    assert "failed[name]" in src, \
+        "a line that will not replay must be counted"
+    # The contract: both the sample and what it was drawn from.
+    rec = {"status": "solved", "deck": {"name": "d"},
+           "start": {"decks": {"a": []}}, "lines": []}
+    out = scenarios.special_summons([rec])
+    assert isinstance(out, dict)
+
+    import json
+    import pathlib
+    cache = (pathlib.Path(__file__).resolve().parent.parent
+             / "results" / "special_summons.json")
+    if cache.exists():
+        for name, v in json.loads(cache.read_text()).items():
+            if name.startswith("_"):
+                continue
+            assert "attempted" in v and "failed" in v, (
+                f"{name} must say how many lines were asked about; `n` "
+                "alone cannot distinguish 10 solved lines from 40 with "
+                "30 failures")
+            assert v["attempted"] == v["n"] + v["failed"]
+
+
+def test_drill_reports_a_real_error_instead_of_no_lines():
+    """`drill`'s source loop must not read an exception as "empty".
+
+    It walked every results/*.jsonl under `except Exception: continue`,
+    so a real error in `drill.export` — a bug, a malformed record, a
+    vendor change — was indistinguishable from "this source has no lines
+    for that deck", silently, for every source in turn. The loop still
+    moves on (a malformed record should not stop the search), but the
+    failures are reported when nothing is found.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "daemon.py").read_text()
+    i = src.index("def cmd_drill")
+    body = src[i:i + 4000]
+    assert "problems.append" in body, \
+        "a raising source must be recorded, not silently skipped"
+    assert "raised rather than being empty" in body, \
+        "and reported when no lines were found"

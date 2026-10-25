@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 54 items, as tagged on each heading:** 45 FIXED · 1 RESOLVED
+**Status of the 55 items, as tagged on each heading:** 46 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1894,3 +1894,62 @@ page renders the server's own constants. The test asserts the rendered
 template; mutation-checked by restoring the hardcoded version.
 
 No other duplicated computation found in the sweep.
+
+---
+
+## 55. Swallowed-exception sweep: two silent failures, three audited clean — FIXED 2026-10-25
+
+A class not previously swept: a broad `except` that hides a real failure.
+It produces no wrong number, which is what makes it worse — the feature
+quietly does less, or nothing, and nothing says so. Nine broad handlers
+exist; each was read.
+
+**FIXED — `scenarios.special_summons` (the worse one).** The replay loop
+had `except Exception: continue  # a line that will not replay tells us
+nothing` with **no tally**. Every figure it produces therefore carried an
+invisible denominator: "elfnote 6.1 summons" over an unknown number of
+lines. CLAUDE.md warns that a card whose Lua did not load "replays as
+nothing" after a submodule bump — that breakage would have read as a
+**smaller sample**, not as a failure, and the `n` it does compute is not
+displayed anywhere.
+
+**Measured before claiming: 0 failures over all 271 solved lines** of
+`results/boards.jsonl`. So nothing reported was wrong — this is a latent
+defect closed. The function now returns `attempted` and `failed` beside
+`n`, and `threats` prints a block naming any deck with failures and
+pointing at `setup`. It normally prints nothing, which is the right state
+for a guard.
+
+(My first attempt to measure this reimplemented the replay outside
+`special_summons` and got **271 of 271** failures — `FileNotFoundError`,
+because I had not reproduced its workdir setup. That was my harness, not
+the code. Instrumenting the real function instead gave 0, and is also the
+fix.)
+
+**FIXED — `cmd_drill`'s source loop.** It walked every `results/*.jsonl`
+under `except Exception: continue`, so a real error in `drill.export` — a
+bug, a malformed record, a vendor change — was indistinguishable from
+"this source has no lines for that deck", silently, for every source in
+turn. The loop still moves on, because one malformed record should not
+stop the search, but the failures are now reported when nothing is found.
+
+**NARROWED — `meta_scrape.same_scrape`.** `except Exception: return None`
+around a `SELECT` on `inclusion_history`; the intent is "no such table
+yet", which is a `sqlite3.OperationalError`. Narrowed to `sqlite3.Error`,
+because `drift` reads None as "cannot tell whether these are the same
+scrape" — a refusal indistinguishable from the benign case. Both paths
+re-verified (missing labels and missing table both still return None).
+
+**Audited CLEAN, no change:**
+
+- `daemon.py`'s top-level command dispatch — `except Exception:
+  traceback.print_exc()`. Correct: the REPL must survive a command
+  raising, and it prints the traceback rather than hiding it.
+- `tools/check_invariants.py` — comment reads "a broken check is itself a
+  finding", and it reports rather than skipping.
+- `tools/audit_fields.py` and the `json.JSONDecodeError` handlers — tool
+  internals skipping unparseable files, which is the intent.
+- `web/jobs.py` and `web/views.py` handlers both bind the exception and
+  surface it to the user.
+
+Both fixes mutation-checked.

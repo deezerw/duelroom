@@ -755,6 +755,7 @@ def special_summons(records, limit=None):
 
     NIBIRU_AT = 5
     per_deck = {}
+    failed = {}
     for rec in records:
         if rec.get("status") != "solved":
             continue
@@ -785,7 +786,14 @@ def special_summons(records, limit=None):
             try:
                 rep.duel().replay(rep.responses, observer=_Obs())
             except Exception:
-                continue   # a line that will not replay tells us nothing
+                # A line that will not replay tells us nothing -- but it
+                # must not vanish. Skipping in silence left every figure
+                # below with an invisible denominator: "elfnote 6.1
+                # summons" over an unknown number of lines, where a
+                # submodule bump that broke replaying entirely would read
+                # as a smaller sample rather than as a failure.
+                failed[name] = failed.get(name, 0) + 1
+                continue
             per_deck.setdefault(name, []).append(counted[0])
         if limit and len(per_deck.get(name, [])) >= limit:
             continue
@@ -796,6 +804,11 @@ def special_summons(records, limit=None):
             "max": max(c),
             "nibiru_rate": sum(1 for x in c if x >= NIBIRU_AT) / len(c),
             "n": len(c),
+            # How many lines were ASKED about, and how many would not
+            # replay. `n` alone cannot distinguish "this deck has 10
+            # solved lines" from "it has 40 and 30 of them failed".
+            "attempted": len(c) + failed.get(name, 0),
+            "failed": failed.get(name, 0),
         }
         for name, c in per_deck.items() if c
     }

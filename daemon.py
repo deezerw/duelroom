@@ -909,6 +909,22 @@ def cmd_threats(conn, args):
                       f"{v['nibiru_rate']*100:12.0f}%")
             print("\n  (Nibiru live = share of lines passing 5 summons. This")
             print("   explains its window counts: r=0.94 against them.)")
+            # A line that will not replay used to be skipped in silence,
+            # which left every figure above with an invisible
+            # denominator. Measured 0 failures over all 271 lines of
+            # boards.jsonl, so this normally prints nothing -- it exists
+            # so that a submodule bump breaking replay reads as a
+            # failure rather than as a smaller sample.
+            bad = [(d, v) for d, v in ss.items() if v.get("failed")]
+            if bad:
+                print("\n  ! lines that would NOT replay, so they are NOT in "
+                      "the figures above:")
+                for d, v in sorted(bad, key=lambda kv: -kv[1]["failed"]):
+                    print(f"      {d.ljust(28)}{v['failed']} of "
+                          f"{v['attempted']} failed")
+                print("      Run `setup` after any submodule bump — a deck "
+                      "holding a card whose")
+                print("      Lua did not load replays as nothing.")
             cost = scenarios.maxx_c_cost(ss)
             print("\n  cards surrendered to Maxx \"C\" if they combo through\n")
             print("  " + "archetype".ljust(28) + "  cards   worst")
@@ -1869,14 +1885,26 @@ def cmd_drill(conn, args):
     sources = sorted((ROOT / "results").glob("*.jsonl"),
                      key=lambda p: -p.stat().st_mtime)
     written = []
+    problems = []
     for src in sources:
         try:
             written = drill.export(conn, src, path.stem, limit=limit)
-        except Exception:
+        except Exception as exc:
+            # A broad `except: continue` here read a REAL error in
+            # drill.export -- a bug, a bad record, a vendor change -- as
+            # "this source has no lines", silently, for every source in
+            # turn. The loop still moves on, because a malformed record
+            # genuinely should not stop the search, but the failures are
+            # now reported if nothing is found.
+            problems.append((src.name, f"{type(exc).__name__}: {exc}"))
             continue
         if written:
             print(f"  from {src.name}")
             break
+    if not written and problems:
+        print(f"  {len(problems)} source(s) raised rather than being empty:")
+        for name, why in problems[:4]:
+            print(f"    {name}: {why}")
     if not written:
         print(f"no solved lines stored for {path.stem} — run `solve` or `gate` first")
         return

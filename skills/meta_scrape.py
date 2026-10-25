@@ -20,6 +20,7 @@ Be polite: this is an internal endpoint, not a documented public API.
 
 import json
 import re
+import sqlite3
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -509,7 +510,13 @@ def same_scrape(conn, old_label, new_label):
             r = conn.execute(
                 "SELECT scrape FROM inclusion_history WHERE label = ? LIMIT 1",
                 (label,)).fetchone()
-        except Exception:
+        except sqlite3.Error:
+            # Narrowed from `except Exception` 2026-10-25: the intent is
+            # "no inclusion_history table yet", which is an
+            # OperationalError. A broad catch also swallowed a real
+            # failure here and returned None, which `drift` reads as
+            # "cannot tell whether these are the same scrape" -- a
+            # refusal that looks identical to the benign case.
             return None
         if r is None:
             return None
