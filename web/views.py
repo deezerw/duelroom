@@ -198,7 +198,9 @@ def report(name=None):
     cost = None
     cache = ROOT_RESULTS / "special_summons.json"
     if cache.exists():
-        cost = json.loads(cache.read_text()).get(name)
+        # Skip the `_source` metadata key; only decks are looked up here.
+        cost = (json.loads(cache.read_text()) or {}).get(name) \
+            if not str(name).startswith("_") else None
 
     f = r["funnel"] or {}
     ci = stats.wilson(f.get("solved") or 0, f.get("hands") or 0) if f else None
@@ -243,7 +245,16 @@ def threats():
         flash("No board library yet.")
         return redirect(url_for("views.index"))
     cache = ROOT_RESULTS / "special_summons.json"
-    ss = json.loads(cache.read_text()) if cache.exists() else {}
+    raw = json.loads(cache.read_text()) if cache.exists() else {}
+    # The cache carries a `_source` key naming the board library it was
+    # derived from (added 2026-10-25 so a switch of library is detected,
+    # which a timestamp alone cannot see). Underscore keys are metadata,
+    # not decks -- unpacking one with ** raised
+    # "TypeError: 'str' object is not a mapping" and 500'd this page and
+    # /report. Caught by tests/test_web.py, which is why that smoke walk
+    # over every GET route exists.
+    ss = {k: v for k, v in raw.items() if not k.startswith("_")}
+    ss_source = raw.get("_source")
     counts = sorted({n for d in prof.values() for n in d})
     # Shaped here rather than in the template: a weighted mean is not
     # something Jinja should be asked to express.
@@ -261,6 +272,7 @@ def threats():
     return render_template(
         "threats.html", rows=rows, counts=counts, board_vs_hand=bvh,
         pieces=sorted(gate.common_pieces(c).items()), summons=summons,
+        ss_source=ss_source,
         mine=db.get_meta(c, "active_deck"), slug=config.slug,
         running=jobs.active(c))
 

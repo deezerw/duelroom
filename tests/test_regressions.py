@@ -3838,8 +3838,14 @@ def test_targets_source_is_nameable_and_stated():
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "daemon.py").read_text()
-    i = src.index("def cmd_targets")
-    body = src[i:i + 3000]
+
+    # The selection lives in ONE helper, shared by `targets` and
+    # `threats`, so the choice cannot drift between them. Scoped to the
+    # helper rather than to cmd_targets: where the code lives is not the
+    # invariant, and asserting the location is what broke this test when
+    # it was extracted.
+    i = src.index("def _board_library")
+    body = src[i:src.index("def _latest_matrix")]
 
     assert "args[0]" in body, "the board library must be nameable"
     assert "strftime" in body, "the source must be printed with its date"
@@ -3847,7 +3853,44 @@ def test_targets_source_is_nameable_and_stated():
     # boards_multi.narrow-stacks) must never be the suggested switch: it
     # exists BECAUSE it was built by defective code. Sorting the
     # candidates by name recommended exactly that.
-    assert 'q.stem' in body and 'st_mtime' in body, \
+    assert "q.stem" in body and "st_mtime" in body, \
         "candidates must be ranked by mtime, not by name"
     assert ".partial" in body, \
         "a library still being written is incomplete and must be flagged"
+    # Both consumers must go through it.
+    for fn in ("def cmd_targets", "def cmd_threats"):
+        j = src.index(fn)
+        assert "_board_library(" in src[j:j + 3000], \
+            f"{fn} must use the shared selector, not its own copy"
+
+
+def test_special_summon_cache_metadata_does_not_break_consumers():
+    """The cache's `_source` key is metadata, not a deck.
+
+    Added 2026-10-25 so that switching board library is detected -- a
+    timestamp cannot see it, because a cache built from a DIFFERENT
+    library may still be newer than the one now selected. Both readers
+    must skip underscore keys: `web/views.py` unpacked every value with
+    `{"archetype": a, **v}`, and on the string value that raised
+    "TypeError: 'str' object is not a mapping", 500ing /threats and
+    /report. tests/test_web.py's smoke walk over every GET route caught
+    it, which is the reason that walk exists.
+    """
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "web" / "views.py").read_text()
+    assert 'startswith("_")' in src, \
+        "web/views.py must skip the cache's metadata keys"
+
+    cache = root / "results" / "special_summons.json"
+    if cache.exists():
+        raw = json.loads(cache.read_text())
+        assert "_source" in raw, "the cache must record which library it came from"
+        decks = {k: v for k, v in raw.items() if not k.startswith("_")}
+        assert decks, "metadata must not be the only content"
+        for name, v in decks.items():
+            assert isinstance(v, dict), f"{name} should be a mapping"
+            assert "nibiru_rate" in v, \
+                "a replayed entry carries nibiru_rate; a window-count one does not"

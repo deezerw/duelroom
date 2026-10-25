@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 51 items, as tagged on each heading:** 42 FIXED · 1 PARTLY FIXED
+**Status of the 52 items, as tagged on each heading:** 43 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1681,3 +1681,63 @@ original content afterwards (branded back to `51409648`).
 - `assets/derived_targets.json` (2026-10-24) is newer than the library it
   came from (2026-10-18), so that chain was consistent — the defect was
   the inability to choose, not a stale file.
+
+---
+
+## 52. `threats` was hardcoded to the single-draw library too — FIXED 2026-10-25
+
+Sibling of #51, found by sweeping every hardcoded artifact path. Only one
+other existed: `daemon.py` `cmd_threats` read `results/boards.jsonl`
+unconditionally, so the special-summon and **"Nibiru live"** figures came
+only from the single-draw library.
+
+**It understates Nibiru exposure, because better boards need more
+summons.** Measured on the same decks from both libraries:
+
+| deck | single SS | multi SS | single Nibiru-live | multi Nibiru-live |
+|---|---|---|---|---|
+| elfnote | 6.1 | **8.2** | 68% | **90%** |
+| despia | 3.0 | **3.9** | 32% | **48%** |
+| kewl-tune | 2.5 | 2.7 | 5% | 8% |
+| branded | 0.6 | 1.1 | 3% | 3% |
+| fiendsmith | 8.4 | 7.9 | 100% | 95% |
+
+Up to **22 points** understated, on the figure that answers "will I get
+Nibiru'd" — a main/side-deck decision.
+
+**Fixed with ONE shared selector, not a second copy.** `_board_library()`
+now does the choosing for both `targets` and `threats`, for the same
+reason `survival_from_hands` is one function (#49): two implementations of
+a choice drift apart. Same deliberate default, same provenance line, same
+refusal to auto-switch.
+
+The cache also now records `_source` — the library it was built from —
+because a **timestamp alone cannot detect a library switch**: a cache
+built from a different library can still be newer than the one now
+selected. Verified: switching to the multi-draw arm rebuilt correctly on
+the `_source` mismatch despite the cache file being newer.
+
+### Three bugs of my own in this change, all caught before commit
+
+1. **I deleted a large block of `daemon.py`.** My first extraction used
+   `s.index()` splicing and cut out most of the command table and several
+   `cmd_*` definitions. `tools/check_names.py` reported **32 undefined
+   names** — `_resolve_deck`, `cmd_gate`, `cmd_threats` and more. Restored
+   with `git checkout` (the tree was clean at c9ed900) and redone as a
+   verified line-range replacement with assertions on both boundary
+   lines. Index splicing is the wrong tool for this; anchored or
+   line-ranged edits are not.
+2. **My own #51 test asserted the code's location, not its behaviour.**
+   It scoped `args[0]`/`strftime` to `cmd_targets`' body, so extracting
+   the helper broke it. Re-scoped to the helper, plus a new assertion
+   that **both** consumers go through it — the invariant is that the
+   choice is made once, not where it lives.
+3. **Adding `_source` 500'd two web pages.** `web/views.py` builds its
+   rows with `{"archetype": a, **v}` over every cache entry, and `**` on
+   the new string value raised `TypeError: 'str' object is not a
+   mapping` — breaking `/threats` **and** `/report`. I changed a shared
+   data format and updated only one of its two consumers.
+   `tests/test_web.py`'s smoke walk over every GET route caught it, which
+   is exactly why that walk was added (#29). Both readers now skip
+   underscore keys, mutation-checked, and the web panel states its
+   provenance like the CLI.

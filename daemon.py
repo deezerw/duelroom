@@ -93,6 +93,57 @@ def _warn_if_busy(what):
     return n
 
 
+def _board_library(args, why, usage):
+    """Pick a board library: the one named, or the single-draw default.
+
+    Shared by `targets` and `threats` so the choice is made in ONE place,
+    for the same reason `scenarios.survival_from_hands` is one function
+    (ISSUES #49): two implementations of a choice drift apart.
+
+    The default stays results/boards.jsonl deliberately. Silently
+    re-pointing at whatever file is newest would change every downstream
+    number with nobody asking, and newer is NOT better here -- the
+    `boards_multi.*` arms are controls preserved BECAUSE they were built
+    by defective code. Newer candidates are reported, never used.
+
+    Returns (path, stamp), or (None, None) when there is nothing usable.
+    """
+    src = Path(args[0]) if args else ROOT / "results" / "boards.jsonl"
+    if not src.is_absolute():
+        src = src if src.exists() else ROOT / "results" / src.name
+    if not src.exists():
+        print(f"no {src} — build the board library first, or name one: {usage}")
+        return None, None
+    stamp = datetime.fromtimestamp(src.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    print(f"library: {src.name} ({stamp})")
+    cands = [q for q in (ROOT / "results").glob("boards*.jsonl")
+             if q != src and q.stat().st_mtime > src.stat().st_mtime]
+    # Newest LAST by MTIME. Sorting by NAME recommended
+    # boards_multi.stale-ranking.jsonl -- a deliberately-defective arm.
+    cands.sort(key=lambda q: q.stat().st_mtime)
+    if cands:
+        print(f"  ! newer libraries exist; none is used automatically, "
+              f"because {why}:")
+        for q in reversed(cands):
+            when = datetime.fromtimestamp(q.stat().st_mtime).strftime("%m-%d %H:%M")
+            # A dot in the stem marks a preserved variant
+            # (boards_multi.narrow-stacks vs boards_multi).
+            tag = "  (preserved variant)" if "." in q.stem else ""
+            # sweep._checkpoint writes <out>.partial for a run's whole
+            # duration, so its presence means that library is incomplete.
+            if Path(str(q) + ".partial").exists():
+                tag += "  (RUN IN PROGRESS — incomplete)"
+            print(f"      {q.name:<40} {when}{tag}")
+        pick = next((q for q in reversed(cands)
+                     if "." not in q.stem
+                     and not Path(str(q) + ".partial").exists()), None)
+        if pick:
+            print(f"    Re-run as `{usage.split()[0]} {pick.name}` to switch.")
+        else:
+            print("    Nothing complete to switch to yet.")
+    return src, stamp
+
+
 def _latest_matrix():
     """Newest handtrap matrix file, whatever hand count it used."""
     cands = sorted((ROOT / "results").glob("handtrap_matrix*.jsonl"),
@@ -808,8 +859,17 @@ def cmd_threats(conn, args):
             print("\n  (Not special summons — Maxx \"C\" has no activation")
             print("   condition, so its window count tracks line length, r=0.94.)")
 
-    bpath = ROOT / "results" / "boards.jsonl"
-    if bpath.exists():
+    # The library was hardcoded here too, so the special-summon and
+    # "Nibiru live" figures came only from the single-draw library. It
+    # matters: the multi-draw arm gives elfnote 8.2 summons and 90%
+    # Nibiru-live against 6.1 and 68%, and despia 3.9/48% against 3.0/32%
+    # -- better boards need more summons, so single-draw UNDERSTATES
+    # Nibiru exposure by up to 22 points. Same shared selector as
+    # `targets`, same deliberate default.
+    bpath, _bstamp = _board_library(
+        args, "the summon counts below are derived from it",
+        "threats [boards_multi.jsonl]")
+    if bpath is not None:
         cache = ROOT / "results" / "special_summons.json"
         # Nothing used to WRITE this cache. `scenarios.special_summons`
         # is the producer and no command called it, so the three tables
@@ -817,9 +877,17 @@ def cmd_threats(conn, args):
         # moment the board library is rebuilt, and gone for good if it
         # were ever deleted. Replaying is cheap (6.6 s for all 280
         # records, no search involved), so regenerate it whenever it is
-        # missing or older than the library it describes, and say which.
+        # missing, older than the library, or was built from a DIFFERENT
+        # library -- the last of which a timestamp alone cannot see.
+        cached = {}
+        if cache.exists():
+            try:
+                cached = json.loads(cache.read_text())
+            except json.JSONDecodeError:
+                cached = {}
         stale = (not cache.exists()
-                 or cache.stat().st_mtime < bpath.stat().st_mtime)
+                 or cache.stat().st_mtime < bpath.stat().st_mtime
+                 or cached.get("_source") != bpath.name)
         if stale:
             print(f"\n  (rebuilding special-summon counts from "
                   f"{bpath.name} — replaying lines, no search)")
@@ -827,12 +895,14 @@ def cmd_threats(conn, args):
                       bpath.read_text().splitlines() if l.strip()]
             fresh = scenarios.special_summons(recs_b, limit=20)
             if fresh:
-                cache.write_text(json.dumps(fresh, indent=1))
-        if cache.exists():
-            ss = json.loads(cache.read_text())
+                cache.write_text(json.dumps(
+                    {"_source": bpath.name, **fresh}, indent=1))
+                cached = {"_source": bpath.name, **fresh}
+        if cached:
+            ss = {k: v for k, v in cached.items() if not k.startswith("_")}
             age = "rebuilt just now" if stale else "cached"
             print(f"\n  special summons per line (replayed, not inferred; "
-                  f"{age} from {bpath.name})\n")
+                  f"{age} from {cached.get('_source', bpath.name)})\n")
             print("  " + "archetype".ljust(28) + "  SS/line   max   Nibiru live")
             for deck, v in sorted(ss.items(), key=lambda kv: -kv[1]["mean"]):
                 print(f"  {deck.ljust(28)}{v['mean']:8.1f}{v['max']:6}"
@@ -940,43 +1010,11 @@ def cmd_targets(conn, args):
     # a run abandoned mid-way). So: the source is nameable, it is always
     # printed with its date, and a newer candidate is reported rather
     # than used.
-    src = Path(args[0]) if args else ROOT / "results" / "boards.jsonl"
-    if not src.is_absolute():
-        src = src if src.exists() else ROOT / "results" / src.name
-    if not src.exists():
-        print(f"no {src} — build the board library first, or name a "
-              f"library: targets [boards_multi.jsonl]")
+    src, _stamp = _board_library(
+        args, "targets decide what every later solve aims at",
+        "targets [boards_multi.jsonl]")
+    if src is None:
         return
-    stamp = datetime.fromtimestamp(src.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-    print(f"deriving from {src.name} ({stamp})")
-    # Candidates, newest LAST by mtime -- not alphabetically, which
-    # recommended `boards_multi.stale-ranking.jsonl`, a control arm
-    # deliberately preserved BECAUSE it was built by defective code.
-    # A stem containing a dot is such a variant (boards_multi vs
-    # boards_multi.narrow-stacks), so those are listed, never suggested.
-    cands = [q for q in (ROOT / "results").glob("boards*.jsonl")
-             if q != src and q.stat().st_mtime > src.stat().st_mtime]
-    cands.sort(key=lambda q: q.stat().st_mtime)
-    variants = [q for q in cands if "." in q.stem]
-    primary = [q for q in cands if "." not in q.stem]
-    if cands:
-        print("  ! newer libraries exist; none is used automatically, because")
-        print("    targets decide what every later solve aims at:")
-        for q in reversed(cands):
-            when = datetime.fromtimestamp(q.stat().st_mtime).strftime("%m-%d %H:%M")
-            tag = "  (preserved variant)" if "." in q.stem else ""
-            # sweep._checkpoint writes <out>.partial during a run, so its
-            # presence means that library is still being appended to and
-            # covers only the decks finished so far.
-            if Path(str(q) + ".partial").exists():
-                tag += "  (RUN IN PROGRESS — incomplete)"
-            print(f"      {q.name:<40} {when}{tag}")
-        pick = next((q for q in reversed(primary)
-                     if not Path(str(q) + ".partial").exists()), None)
-        if pick:
-            print(f"    Re-run as `targets {pick.name}` to switch.")
-        else:
-            print("    Nothing complete to switch to yet.")
     out = ROOT / "assets" / "derived_targets.json"
     t = scenarios.write_targets(src, out)
     print(f"\nderived targets for {len(t)} decks -> {out}\n")

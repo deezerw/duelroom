@@ -39,6 +39,13 @@
 <h2>Special summons per line <span class="muted" style="text-transform:none">—
   replayed, not inferred</span></h2>
 <div class="panel">
+  {% if ss_source %}
+  <p class="muted" style="margin-top:0">Derived from
+    <code>{{ ss_source }}</code>. The single-draw library understates
+    these — the multi-draw arm gives elfnote 8.2 summons and 90%
+    Nibiru-live against 6.1 and 68%, because better boards need more
+    summons. Rebuild with <code>threats &lt;library&gt;</code>.</p>
+  {% endif %}
   <table><thead><tr><th>archetype</th><th class="num">per line</th>
     <th class="num">worst</th><th class="num">Nibiru live</th>
     <th class="num">cards to Maxx "C"</th></tr></thead><tbody>

@@ -42,7 +42,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   ladder <deck> [hands]     calibrate the solver budget (run this first)
   gate <deck> [hands] [ms]  validation gate: solve rate + every brick hand
   boards [load]             meta end-board library (what you must break)
-  threats                   interruption counts + common pieces per archetype
+  threats [library]         interruption counts + common pieces per archetype
   snapshot [label]          freeze today's inclusion rates for later comparison
   drift <archetype> [a] [b] what's rising or falling between two snapshots
   targets [library]         derive solver targets from the board library
