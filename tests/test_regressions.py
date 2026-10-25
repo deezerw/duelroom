@@ -4205,3 +4205,74 @@ def test_an_unreadable_banlist_status_does_not_break_the_app():
     src = inspect.getsource(optimizer.candidate_pool)
     assert "except ValueError" in src, \
         "an unreadable status must exclude the candidate, not kill the pool"
+
+
+def test_identify_ignores_archetypes_built_from_too_few_lists(tmp_path):
+    """A core drawn from 3 scraped lists cannot identify a deck.
+
+    At three lists, a card present in all three reads as 100% "core", so
+    the core is whatever those three decks happened to share. Measured
+    2026-10-25 on the active deck: Primite scored overlap 1.0 on a
+    3-card core built from **3 lists** and beat Branded's 0.60 on a
+    5-card core built from **94** — both matched 3 cards absolutely, and
+    the ranking was on ratio alone.
+
+    The deck really does run all three Primite cards, so this was a
+    sample-size error, not a phantom match. It was not cosmetic either:
+    `optimize` and `flex` take `guesses[0][0]` programmatically, so
+    `removable` ranked the deck's cards against Primite's 3-list
+    inclusion table where most had no entry, making the ordering
+    arbitrary.
+
+    Same floor logic as the existing 3-card minimum, and the same
+    reasoning as MIN_LISTS_FOR_DRIFT.
+    """
+    from skills import db, meta_scrape as ms
+    from skills.deck import Deck
+
+    conn = db.connect(tmp_path / "t.db")
+    rows = []
+    # Thin sample, whole core present.
+    for cid in (301, 302, 303):
+        rows.append(("Tiny", "F", cid, "main", 1.0, 3.0, 3, "now"))
+    # Well sampled, most of the core present.
+    for cid in (401, 402, 403, 404, 405):
+        rows.append(("Big", "F", cid, "main", 1.0, 3.0, 94, "now"))
+    with conn:
+        conn.executemany(
+            "INSERT INTO inclusion (archetype, format, card_id, section, "
+            "pct_lists, avg_copies, n_lists, computed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)", rows)
+
+    deck = Deck(main=[301, 302, 303, 401, 402, 403], extra=[], side=[])
+    got = ms.identify_archetype(conn, deck, fmt="F")
+    names = [g[0] for g in got]
+    assert "Tiny" not in names, (
+        "an archetype whose core rests on 3 lists must not identify a deck")
+    assert got and got[0][0] == "Big", f"expected Big to win, got {got}"
+    # n_lists is returned, because the docstring makes judging the
+    # caller's job and it previously had no way to.
+    assert got[0][3] == 94, f"n_lists must be reported, got {got[0]}"
+
+
+def test_identify_archetype_tuple_stays_index_compatible():
+    """Adding n_lists must not break the seven index-based consumers.
+
+    `identify_archetype` is read as guesses[0][0], [0][1] and [0][2] in
+    daemon.py, web/views.py and skills/report.py. The 4th element is
+    additive for exactly that reason -- the lesson of ISSUES #58, where
+    widening a tuple broke a consumer found only by a smoke walk.
+    """
+    from skills import db, meta_scrape as ms
+    from skills.deck import Deck
+
+    conn = db.connect()
+    d = Deck.from_ydk("assets/decks/blue-eyes-branded-test.ydk")
+    d.canonicalise(conn)
+    got = ms.identify_archetype(conn, d)
+    if not got:
+        import pytest
+        pytest.skip("no inclusion data")
+    arch, overlap, n_core, n_lists = got[0]
+    assert isinstance(arch, str) and 0 <= overlap <= 1
+    assert n_core >= 3 and n_lists >= ms.MIN_LISTS_FOR_ID

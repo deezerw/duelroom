@@ -3,12 +3,12 @@
 Found by a comprehensive pass on 2026-10-24. Ordered by **impact on getting a deck
 optimised for a tournament**, not by how interesting they are.
 
-Every guard currently passes — 285 tests, 7 invariants, field audit clean, doc
+Every guard currently passes — 287 tests, 7 invariants, field audit clean, doc
 drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here is
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 60 items, as tagged on each heading:** 51 FIXED · 1 RESOLVED
+**Status of the 61 items, as tagged on each heading:** 52 FIXED · 1 RESOLVED
 by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -2201,6 +2201,65 @@ JSON had been passing all along. I checked the rendered output before
 "fixing" anything, which is the only reason nothing was broken chasing it.
 The committed pattern now matches the key rather than the position.
 
-285 tests. This closes the loop the review has been running on: a number is
+287 tests. This closes the loop the review has been running on: a number is
 only fixed once the thing the user reads says what it means, and a test
 says so.
+
+---
+
+## 61. A 3-list archetype outranked a 94-list one — FIXED 2026-10-25
+
+**Severity: high for `optimize` and `flex`**, and it was mis-labelling the
+active deck.
+
+Found while quantifying something else: `identify_archetype` called the
+active deck **Primite** at overlap **1.0**, ahead of **Branded** at
+**0.60**. The ranking is on overlap alone, and:
+
+| archetype | core | overlap | built from | cards matched |
+|---|---|---|---|---|
+| Primite | 3 cards | **1.00** | **3 scraped lists** | 3 |
+| Branded | 5 cards | 0.60 | **94 scraped lists** | 3 |
+
+**Both matched three cards absolutely.** Primite won because its core is
+smaller, and its core is smaller because at three lists any card present
+in all three reads as 100% "core". The deck genuinely runs all three
+Primite cards, so this was a **sample-size** error, not a phantom match —
+which is why it looked plausible.
+
+**It is not cosmetic.** `optimize`, `flex` and `report` take
+`guesses[0][0]` programmatically. With `arch="Primite"`, `removable`
+ranked the deck's cards against a 3-list inclusion table in which **7 of
+12 candidates had no entry at all**, so the ordering of the single most
+consequential choice in the hill climb — which card to cut — was
+arbitrary. That is the exact bug `removable`'s own docstring records
+having been fixed once before.
+
+Fixed with the same floor logic the function already applies to thin
+cores (`len(cards) < 3`): an archetype whose core rests on fewer than
+`MIN_LISTS_FOR_ID = 10` lists cannot identify a deck. Reasoning and
+precedent are `MIN_LISTS_FOR_DRIFT = 15`. The tuple also now carries
+`n_lists`, because the docstring makes judging the caller's job and the
+caller previously had **no way** to — it is appended as a 4th element,
+additive, because seven consumers read `[0]`, `[1]` and `[2]` by index
+(the #58 lesson, applied deliberately this time; a test pins that
+compatibility).
+
+After: the active deck identifies as **Branded, overlap 0.60, 5-card
+core, 94 lists.** Mutation-checked.
+
+### A limitation this surfaced, worth stating plainly
+
+Re-running `removable` against the correct archetype still leaves **14 of
+22 cut candidates with no meta inclusion figure**, because the deck is a
+Blue-Eyes / Primite / Branded hybrid and Branded's 94 lists contain none
+of its Blue-Eyes engine.
+
+So for this deck specifically, `optimize` has little to offer: its
+candidate pool is Branded's flex slots, which do not cover the half of
+the list that makes it a Blue-Eyes deck, and `removable`'s ordering is
+uninformative across most of it. That is consistent with the measured
+result already on record — **48 distinct swaps across 3 cut slots, none
+beating the current list**. The honest reading is not "the list is
+optimal" but "the meta data cannot evaluate this list", and the two look
+identical in the output.

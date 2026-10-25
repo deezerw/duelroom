@@ -443,6 +443,10 @@ def classify(conn, archetype, fmt=DEFAULT_FORMAT, section="main"):
 # Below this many lists an archetype's inclusion rates move by more than
 # a tech card ever would, purely from which lists happened to be scraped.
 MIN_LISTS_FOR_DRIFT = 15
+# An archetype whose core is drawn from fewer lists than this cannot
+# identify a deck: at three lists, a card in all three reads as 100%
+# "core". See identify_archetype.
+MIN_LISTS_FOR_ID = 10
 
 
 
@@ -600,21 +604,43 @@ def identify_archetype(conn, deck, fmt=DEFAULT_FORMAT, min_overlap=0.5):
     """
     have = set(deck.main) | set(deck.extra)
     rows = conn.execute(
-        """SELECT archetype, card_id, pct_lists FROM inclusion
+        """SELECT archetype, card_id, pct_lists, n_lists FROM inclusion
             WHERE format = ? AND section = 'main' AND pct_lists >= ?""",
         (fmt, CORE_THRESHOLD),
     ).fetchall()
-    core = {}
+    core, lists = {}, {}
     for r in rows:
         core.setdefault(r["archetype"], set()).add(r["card_id"])
+        lists[r["archetype"]] = max(lists.get(r["archetype"], 0),
+                                    r["n_lists"] or 0)
 
     scored = []
     for arch, cards in core.items():
         if len(cards) < 3:          # too thin a core to identify anything
             continue
+        # ... and neither can a core drawn from too FEW LISTS. At three
+        # scraped lists a card in all three reads as 100% "core", so the
+        # core is whatever those three decks happened to share. Measured
+        # 2026-10-25 on the active deck: Primite scored 1.0 on a 3-card
+        # core built from 3 lists and beat Branded's 0.6 on a 5-card core
+        # built from 94 -- both matched 3 cards absolutely. The deck
+        # really does run all three Primite cards, so this is not a
+        # phantom match; it is a sample-size one.
+        #
+        # It is not cosmetic: `optimize` and `flex` take guesses[0][0]
+        # programmatically, so `removable` ranked the deck's cards against
+        # Primite's 3-list inclusion table, where 7 of the 12 had no entry
+        # at all and the ordering was therefore arbitrary. Same floor
+        # logic as the 3-card one above, and the same reasoning as
+        # MIN_LISTS_FOR_DRIFT.
+        if lists.get(arch, 0) < MIN_LISTS_FOR_ID:
+            continue
         hit = len(cards & have)
-        scored.append((arch, hit / len(cards), len(cards)))
-    scored.sort(key=lambda t: (-t[1], -t[2]))
+        # n_lists is returned so a caller can judge, which the docstring
+        # says is the caller's job -- it previously had no way to.
+        scored.append((arch, hit / len(cards), len(cards), lists.get(arch, 0)))
+    # At equal overlap, prefer the better-sampled archetype.
+    scored.sort(key=lambda t: (-t[1], -t[3], -t[2]))
     return [s for s in scored if s[1] >= min_overlap] or scored[:1]
 
 # Tournament placement, best first. `export` used to take whichever list
