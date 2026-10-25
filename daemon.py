@@ -953,8 +953,10 @@ def cmd_matrix(conn, args):
     codes = sorted(scenarios.HANDTRAPS)
     short = {c: scenarios.HANDTRAPS[c].split(" &")[0].split(",")[0][:9] for c in codes}
 
-    print("  SURVIVAL — of the windows where the handtrap could be used,")
-    print("  how often the line still completed. Lower is better for you.")
+    print("  SURVIVAL — of the HANDS where the handtrap had a legal window,")
+    print("  how often the line survived it being fired in EVERY window.")
+    print("  Not a per-window rate: 8 windows converted of 11 counts as 0.")
+    print("  Lower is better for you.")
     print("  '-' means it never had a legal window in any solved hand.\n")
     mine = db.get_meta(conn, "active_deck")
     def _tag(deck):

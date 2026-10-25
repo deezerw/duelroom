@@ -915,3 +915,51 @@ code is gone and the warning is not.
   *costs* — the cards handed over — is invisible to the metric.
 - **`special_summons`** is never populated in `trials`; real counts need each line
   replayed through ygorl.
+
+---
+
+## 38. Handtrap survival was labelled with the wrong denominator — FIXED 2026-10-25
+
+**Severity: high.** It inverts the maining decision, which is the whole
+point of `matrix`.
+
+`handtrap_matrix` computes `survival = survived / tested` where `tested`
+counts **hands that had at least one legal window** and `survived` counts
+hands where `fire.survives` is true — and `survives` is the all-windows
+standard (`converted >= windows`). So the number is "of the hands where it
+was live, how often did the line survive it being fired in every window."
+
+All three display sites described it as a **per-window** rate: "of the
+windows where the handtrap could be used, how often the line still
+completed" — `skills/scenarios.py` docstring, `daemon.py matrix` legend,
+and the `web/templates/matrix.html` caption.
+
+**Measured over the 47 cells of `results/handtrap_matrix_40h.jsonl`:**
+mean |per-window − per-hand| = **17.3 points**, max **77**, and **8 of 47
+cells land on opposite sides of 50%**. The extreme case is the damaging
+one: fiendsmith vs Effect Veiler is **0% per hand and 77% per window**.
+Veiler stopped the line in all 35 hands where it was live; a reader
+following the printed label concludes it gets played through three times
+in four and declines to main it.
+
+The computation was always right — `weighted_handtrap_ranking` consumes
+`1 - survival` as "given a window, chance the line fails", which is the
+per-hand reading — so **no stored ranking was wrong**. Only the labels
+lied, and they lied in the direction that makes a stopping handtrap look
+played-through.
+
+Fixed: all three labels now say hands, name the all-windows standard, and
+give the "8 of 11 windows converted counts as 0" example.
+`test_handtrap_survival_denominator_is_hands_not_windows` pins the metric
+(mutation-checked: a per-window denominator returns 0.73 and fails) and
+`test_handtrap_matrix_labels_say_hands_not_windows` pins the wording.
+
+**Not done, deliberately:** the per-window conversion rate is genuinely
+informative and very different — it is the "do they play through it"
+question the old label was reaching for. Showing both would be a better
+matrix. That is a display change rather than a bug, so it is recorded here
+rather than taken.
+
+This is the **eighth** instance of the defect class that has dominated
+this review: a number printed without the thing it is over. The other
+seven are #6, #9, #13, #18, #22, #27 and #31.

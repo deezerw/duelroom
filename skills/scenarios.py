@@ -291,10 +291,20 @@ def handtrap_matrix(records):
     number is most of why Nibiru ranked last among handtraps to main.
 
     So report both, because both matter and they are different questions:
-      survival  -- of the windows where it COULD be used, how often did
-                   the line still complete (did they play through it)
-      windows   -- how often it had any legal window at all (is it even
-                   live in this matchup)
+      survival  -- of the HANDS where it had a legal window, how often
+                   the line survived it being fired in EVERY window.
+                   NOT a per-window conversion rate: `survives` is the
+                   all-windows standard (converted >= windows), so a hand
+                   with 11 windows that converted 8 counts as 0, not 8/11.
+                   The two differ by a mean 17.3 points over the 47
+                   measured cells of results/handtrap_matrix_40h.jsonl and
+                   by 77 at the extreme -- fiendsmith vs Effect Veiler is
+                   0% per hand and 77% per window, so the per-window
+                   reading dismisses a handtrap that stopped the line in
+                   all 35 of its hands. 8 of 47 cells fall on opposite
+                   sides of 50%, which is the whole maining decision.
+      windows   -- of the solved hands, how often it had any legal window
+                   at all (is it even live in this matchup)
     A handtrap with no window is useless here, but for a different reason
     than one that gets played through, and the fixes differ.
     """

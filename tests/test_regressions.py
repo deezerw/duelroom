@@ -3269,3 +3269,54 @@ def test_no_duplicate_stack_is_proposed():
     out = combinations_to_try(atts, max_new=10)
     keys = [frozenset(t) for t, _ in out]
     assert len(keys) == len(set(keys)), out
+
+
+def test_handtrap_survival_denominator_is_hands_not_windows():
+    """`survival` counts HANDS that survived every window, not windows.
+
+    The three labels (scenarios docstring, `daemon.py matrix`, the web
+    matrix caption) all said "of the windows where the handtrap could be
+    used, how often the line still completed", which is a different and
+    much larger number: over the 47 measured cells of
+    results/handtrap_matrix_40h.jsonl the two differ by a mean 17.3
+    points, and fiendsmith vs Effect Veiler is 0% per hand against 77%
+    per window. 8 of 47 cells land on opposite sides of 50%, so the
+    per-window reading dismisses handtraps that stop every line.
+
+    This pins the metric, not the wording: a hand with 11 windows that
+    converted 8 contributes 0, because `survives` is the all-windows
+    standard.
+    """
+    from skills.scenarios import handtrap_matrix
+
+    rec = {
+        "summary": {"deck": "d", "solved": 2, "hands": 2},
+        "hands": [
+            # Converted 8 of 11 windows -- a high per-window rate, but the
+            # line did not survive, so it contributes 0.
+            {"status": "solved",
+             "fire": {"97268402": {"status": "solved", "windows": 11,
+                                   "converted": 8, "survives": False}}},
+            {"status": "solved",
+             "fire": {"97268402": {"status": "solved", "windows": 11,
+                                   "converted": 8, "survives": False}}},
+        ],
+    }
+    cell = handtrap_matrix([rec])["d"]["cells"][97268402]
+    assert cell["tested"] == 2
+    assert cell["survival"] == 0.0, (
+        "survival must be hands-that-survived / hands-with-a-window; "
+        f"got {cell['survival']} -- 16/22 converted windows is 0.73 and "
+        "would mean the denominator slipped back to windows")
+
+
+def test_handtrap_matrix_labels_say_hands_not_windows():
+    """The three display sites must not describe survival per window."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for rel in ("skills/scenarios.py", "daemon.py",
+                "web/templates/matrix.html"):
+        text = (root / rel).read_text()
+        assert "of the windows where" not in text.lower(), (
+            f"{rel} describes survival per window; the denominator is "
+            "hands that had a legal window")
