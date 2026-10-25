@@ -14,7 +14,17 @@ SIDE_MAX = 15
 
 # Extra-deck frame types, used to route cards to the right section when a
 # .ydk is malformed and when validating an assembled list.
-EXTRA_FRAMES = {"fusion", "synchro", "xyz", "link"}
+# Extra-deck frames. The four pendulum hybrids belong here too: a Fusion
+# Pendulum monster such as Starving Venom Wing Dragon is an extra-deck
+# card. Leaving them out made `validate` report "main-deck card in the
+# extra deck" on real tournament lists -- the scraped decks hold 3
+# fusion_pendulum and 2 xyz_pendulum cards in their extra sections -- and
+# miss the same card sitting illegally in a main deck.
+# ritual_pendulum stays out: Ritual monsters are main-deck cards.
+EXTRA_FRAMES = {
+    "fusion", "synchro", "xyz", "link",
+    "fusion_pendulum", "synchro_pendulum", "xyz_pendulum",
+}
 
 
 class Deck:
@@ -133,7 +143,13 @@ class Deck:
             if row is None:
                 problems.append(f"{name}: not in the card database")
                 continue
-            limit = card_db.banlist_limit(conn, cid, region)
+            try:
+                limit = card_db.banlist_limit(conn, cid, region)
+            except ValueError as exc:
+                # The mirror holds a status we cannot interpret. Report it
+                # as a problem rather than letting it pass as legal.
+                problems.append(f"{name}: {exc}")
+                continue
             if n > limit:
                 status = "forbidden" if limit == 0 else f"limit {limit}"
                 problems.append(f"{name}: {n} copies but {status} on the {region} list")

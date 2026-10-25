@@ -215,8 +215,16 @@ live in `locals.toml` read by `config.py`, not in a `meta_scrape.LOCALS_WEIGHTS`
 
 ## SQLite Schema (`data/duelroom.db`)
 
-**`cards`** — `id`, `name`, `type`, `attribute`, `race`, `level`, `atk`, `def`,
-`archetype`, `text`, `banlist_tcg`, `banlist_ocg`, `last_fetched`
+**`cards`** — `id`, `name`, `type`, **`frame`**, `race`, `attribute`, `level`, `atk`,
+`def`, `linkval`, `scale`, `archetype`, `text`, `banlist_tcg`, `banlist_ocg`,
+`last_fetched`
+
+`frame` drives every main-vs-extra routing decision (`deck.EXTRA_FRAMES`) and was
+missing from this list. `banlist_tcg`/`banlist_ocg` hold YGOPRODeck's wording —
+`Forbidden`, `Limited`, `Semi-Limited`, or NULL — read only through
+`card_db.banlist_limit`, which raises on a status it does not recognise rather than
+assuming three copies are fine. There is no row for an unlimited card; NULL means
+unlimited.
 
 **`decks`** — scraped lists: `id`, `archetype`, `source_url`, `format`, `placement`,
 `list_hash`, `scraped_at`

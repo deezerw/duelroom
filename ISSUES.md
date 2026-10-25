@@ -8,7 +8,7 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 39 items, as tagged on each heading:** 31 FIXED · 1 PARTLY FIXED
+**Status of the 41 items, as tagged on each heading:** 33 FIXED · 1 PARTLY FIXED
 (#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
@@ -1041,3 +1041,84 @@ naming a missing file. Mutation-checked on all four.
 
 One redundancy noted, not fixed: `scenarios.NIBIRU = 27204311` is defined
 twice (lines 632 and 683), same value, so it is harmless shadowing.
+
+---
+
+## 40. Every forbidden card validated as legal at three copies — FIXED 2026-10-25
+
+**Severity: CRITICAL. This is the worst bug found in this review**, because
+it is the one that loses a tournament before a single game is played.
+
+`card_db.banlist_limit` mapped the ban list like this:
+
+```python
+return {"Banned": 0, "Limited": 1, "Semi-Limited": 2}.get(status, 3)
+```
+
+The mirror does not store `"Banned"`. It stores **`"Forbidden"`** — 121
+cards on the TCG list, 
+including Apollousa, Abyss Dweller, Agido, Archlord Kristya and
+Archnemeses Protos. No key matched, so `.get(status, 3)` returned **3** for
+every single one of them.
+
+`"Limited"` and `"Semi-Limited"` were spelled correctly and worked
+perfectly, which is exactly why this survived: the ban list *looked*
+functional. `check` would tell you a deck running three Apollousa was
+legal.
+
+**It is not only `check`.** `optimizer.py:116` excludes candidates with
+`banlist_limit(conn, card_id) == 0`, so no forbidden card was ever
+excluded — **`optimize` could recommend adding a banned card to a
+tournament list** and then rank it as an improvement.
+
+**Measured on `assets/decks`, before and after:**
+
+| deck | before | after |
+|---|---|---|
+| Blitzclique | **legal** | 1 — Dimension Shifter forbidden |
+| kewl-tune | **legal** | 1 — Kewl Tune Rotary ×3 forbidden |
+| snake_eye | 1 problem | **4** — +3 forbidden (Original Sinful Spoils ×3, Maxx "C" ×2, Moon of the Closed Heaven) |
+
+Two decks flipped from "legal" to illegal and snake_eye's problem count
+quadrupled. The one problem snake_eye did report beforehand was Triple
+Tactics Talent at "limit 1" — a `Limited` card, the spelling that worked.
+
+The active deck `blue-eyes-branded-test` is **legal** both before and
+after, so no tournament list of yours was affected. The bug was still live
+for every future `check` and every `optimize`.
+
+**Fixed.** `BANLIST_LIMITS` now maps `Forbidden` and `Banned` (the API has
+used both) plus `Unlimited`, and an unrecognised non-null status **raises
+`ValueError`** instead of defaulting to 3 — the permissive default is the
+entire mechanism of this bug, and one upstream rename would reopen it
+silently. `Deck.validate` catches that and reports it as a per-card
+problem, so `check` still works and says what it could not read.
+
+Three tests, all mutation-checked: the `Forbidden`/`Banned` mapping, the
+refusal on an unknown status, and `validate` surfacing it.
+
+## 41. Pendulum extra-deck frames were treated as main-deck cards — FIXED 2026-10-25
+
+**Severity: medium** — a false legality error on real lists, and a missed
+real one.
+
+`deck.EXTRA_FRAMES` held `{fusion, synchro, xyz, link}`. The mirror also
+has `fusion_pendulum` (15 cards), `synchro_pendulum` (8) and
+`xyz_pendulum` (10), which are **extra-deck cards** — a Fusion Pendulum
+monster such as Starving Venom Wing Dragon goes in the extra deck.
+
+Both directions were wrong. A correctly-built list with one in its extra
+deck was told `"main-deck card in the extra deck"` — and the scraped decks
+really do hold 3 `fusion_pendulum` and 2 `xyz_pendulum` cards in their
+extra sections, so this fires on genuine tournament lists. The same card
+sitting illegally in a main deck went unflagged.
+
+`ritual_pendulum` (6 cards) is deliberately left out: Ritual monsters are
+main-deck cards.
+
+Fixed with a mutation-checked test covering both directions and pinning
+`ritual_pendulum`/`effect_pendulum` as main-deck frames.
+
+**Related note, not a defect:** the `cards` table has a `frame` column that
+CLAUDE.md's schema section does not list, and `frame` is what every
+section-routing decision reads. Added to the schema docs.

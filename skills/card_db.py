@@ -176,10 +176,40 @@ def by_name(conn, name):
     ).fetchone()
 
 
+# YGOPRODeck's wording for the ban list. It stores "Forbidden"; this map
+# read "Banned" and nothing else, so `.get(status, 3)` silently returned 3
+# for every forbidden card -- all 121 of them on the TCG list, Apollousa
+# and Archnemeses Protos included. `Limited` and `Semi-Limited` were
+# spelled correctly, so the ban list looked like it worked.
+#
+# Both spellings are accepted because the API has used both, and an
+# unrecognised status now RAISES rather than defaulting to 3: a permissive
+# default is exactly how a renamed status reopens the hole without anyone
+# noticing. Callers that want a legality verdict should surface the error.
+BANLIST_LIMITS = {
+    "Forbidden": 0,
+    "Banned": 0,
+    "Limited": 1,
+    "Semi-Limited": 2,
+    "Unlimited": 3,
+}
+
+
 def banlist_limit(conn, card_id, region="tcg"):
-    """Max legal copies of a card: 0, 1, 2, or 3."""
+    """Max legal copies of a card: 0, 1, 2, or 3.
+
+    Raises ValueError if the mirror holds a ban-list status this map does
+    not know, because guessing 3 is how a forbidden card becomes legal.
+    """
     row = resolve(conn, card_id)
     if row is None:
         return 3
     status = row["banlist_tcg"] if region == "tcg" else row["banlist_ocg"]
-    return {"Banned": 0, "Limited": 1, "Semi-Limited": 2}.get(status, 3)
+    if status is None:
+        return 3
+    try:
+        return BANLIST_LIMITS[status]
+    except KeyError:
+        raise ValueError(
+            f"unknown {region} ban-list status {status!r} for card "
+            f"{card_id}; refusing to guess a copy limit") from None

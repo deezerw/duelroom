@@ -3320,3 +3320,99 @@ def test_handtrap_matrix_labels_say_hands_not_windows():
         assert "of the windows where" not in text.lower(), (
             f"{rel} describes survival per window; the denominator is "
             "hands that had a legal window")
+
+
+def _banlist_conn(rows):
+    """In-memory card mirror. rows = [(id, name, frame, banlist_tcg)]."""
+    from skills import db
+    conn = db.connect(":memory:")
+    conn.executemany(
+        "INSERT INTO cards (id, name, frame, banlist_tcg, last_fetched) "
+        "VALUES (?,?,?,?,?)",
+        [(i, n, fr, st, "now") for i, n, fr, st in rows])
+    conn.commit()
+    return conn
+
+
+def test_forbidden_cards_are_not_legal_at_three_copies():
+    """The ban-list map read "Banned"; the mirror stores "Forbidden".
+
+    `.get(status, 3)` therefore returned 3 for every forbidden card -- all
+    121 on the TCG list, Apollousa and Archnemeses Protos included -- so
+    `check` passed a deck running three of them. "Limited" and
+    "Semi-Limited" were spelled correctly, which is why the ban list
+    looked like it worked.
+
+    Measured over assets/decks before the fix: Blitzclique and kewl-tune
+    both reported "legal" while holding a forbidden card, and snake_eye
+    reported 1 problem instead of 4.
+    """
+    from skills import card_db
+
+    conn = _banlist_conn([
+        (1, "forbidden card", "effect", "Forbidden"),
+        (2, "banned card", "effect", "Banned"),       # the other spelling
+        (3, "limited card", "effect", "Limited"),
+        (4, "semi card", "effect", "Semi-Limited"),
+        (5, "free card", "effect", None),
+    ])
+    assert card_db.banlist_limit(conn, 1) == 0, "Forbidden must mean 0 copies"
+    assert card_db.banlist_limit(conn, 2) == 0, "Banned must mean 0 copies"
+    assert card_db.banlist_limit(conn, 3) == 1
+    assert card_db.banlist_limit(conn, 4) == 2
+    assert card_db.banlist_limit(conn, 5) == 3
+
+
+def test_unknown_banlist_status_refuses_rather_than_allowing_three():
+    """A status the map does not know must raise, not default to 3.
+
+    The permissive `.get(status, 3)` default is the whole mechanism of the
+    bug above: one renaming upstream and every affected card silently
+    becomes legal at three copies. A loud failure is the only safe answer,
+    and `Deck.validate` turns it into a reported problem.
+    """
+    import pytest
+    from skills import card_db, deck as deck_mod
+
+    conn = _banlist_conn([(1, "odd card", "effect", "Semi-Forbidden?")])
+    with pytest.raises(ValueError, match="unknown tcg ban-list status"):
+        card_db.banlist_limit(conn, 1)
+
+    d = deck_mod.Deck(name="t", main=[1] * 40, extra=[], side=[])
+    problems = d.validate(conn)
+    assert any("unknown tcg ban-list status" in p for p in problems), (
+        f"validate must report the unreadable status, not pass: {problems}")
+
+
+def test_pendulum_extra_deck_frames_route_to_the_extra_deck():
+    """fusion/synchro/xyz_pendulum are EXTRA-deck cards.
+
+    `EXTRA_FRAMES` held only the four plain frames, so a Fusion Pendulum
+    monster such as Starving Venom Wing Dragon was called a "main-deck
+    card in the extra deck" -- a false legality error on real lists; the
+    scraped decks hold 3 fusion_pendulum and 2 xyz_pendulum cards in their
+    extra sections -- and the same card sitting illegally in a main deck
+    went unflagged.
+
+    ritual_pendulum stays a main-deck frame: Ritual monsters are main
+    deck.
+    """
+    from skills import deck as deck_mod
+
+    for frame in ("fusion_pendulum", "synchro_pendulum", "xyz_pendulum"):
+        assert frame in deck_mod.EXTRA_FRAMES, f"{frame} belongs in the extra deck"
+    assert "ritual_pendulum" not in deck_mod.EXTRA_FRAMES
+    assert "effect_pendulum" not in deck_mod.EXTRA_FRAMES
+
+    conn = _banlist_conn([
+        (1, "filler", "effect", None),
+        (2, "Starving Venom Wing Dragon", "fusion_pendulum", None),
+    ])
+    ok = deck_mod.Deck(name="t", main=[1] * 40, extra=[2], side=[])
+    assert not [p for p in ok.validate(conn) if "deck" in p and "cards" not in p], (
+        "a fusion_pendulum card in the extra deck is correctly placed")
+
+    bad = deck_mod.Deck(name="t", main=[1] * 39 + [2], extra=[], side=[])
+    assert any("extra-deck card in the main deck" in p
+               for p in bad.validate(conn)), \
+        "a fusion_pendulum card in the MAIN deck must be flagged"
