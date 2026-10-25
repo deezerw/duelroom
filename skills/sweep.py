@@ -685,3 +685,65 @@ def sweep(decks, hands=8, draws=DRAWS, pieces=4, solve_ms=None, seed=0,
             f"mean {row['mean_interruptions']} interruptions per solved hand, "
             f"{row['wall_per_hand_s']:.0f}s/hand")
     return {"decks": table}
+
+def draws_curve(jsonl_path, deck_name=None):
+    """What each additional draw actually bought, per deck.
+
+    The budget has `ladder`; `draws` had nothing, so `DRAWS` was a guess
+    applied to every deck. Measured on despia, four draws bought +0.10
+    mean interruptions for 2.6x the solver time with one hand of ten
+    improving; on an elfnote hand the same machinery beat the stored
+    library outright. Two decks, opposite answers -- so the value of
+    draws is a per-deck question and needs measuring like the budget.
+
+    This costs NO solver time: every record stores each attempt with its
+    draw index, so the running best over the order the solves were RUN is
+    exact and recoverable after the fact.
+
+    Returns {deck: {"hands", "best", "at_draw", "wasted", "solves"}} where
+    `at_draw[k]` is how many hands had already reached their eventual best
+    board by the end of draw k.
+    """
+    out = {}
+    for raw in Path(jsonl_path).read_text().splitlines():
+        if not raw.strip():
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        d = rec.get("deck")
+        name = d.get("name") if isinstance(d, dict) else str(d)
+        if deck_name and name != deck_name:
+            continue
+        b = (rec.get("solver") or {}).get("blocking") or {}
+        atts = b.get("attempts") or []
+        if not atts:
+            continue
+        row = out.setdefault(name, {"hands": 0, "solves": 0, "best": [],
+                                    "at_draw": {}, "wasted": 0})
+        row["hands"] += 1
+        row["solves"] += len(atts)
+        # The order they ran: breadth (draw 0) first, then the depth rounds.
+        order = sorted(atts, key=lambda a: (a.get("draw", 0),
+                                            a.get("label", "")))
+        best, first_at = (0, 0), None
+        by_draw = {}
+        for i, a in enumerate(order, 1):
+            if a.get("status") == "solved":
+                k = (a.get("interruptions") or 0, a.get("negates") or 0)
+                if k > best:
+                    best, first_at = k, i
+            by_draw[a.get("draw", 0)] = best[0]
+        row["best"].append(best[0])
+        row["wasted"] += len(order) - (first_at or len(order))
+        for k, v in by_draw.items():
+            row["at_draw"].setdefault(k, []).append(v == best[0])
+    for row in out.values():
+        row["mean_best"] = (round(sum(row["best"]) / len(row["best"]), 2)
+                            if row["best"] else 0.0)
+        row["at_draw"] = {k: f"{sum(v)}/{len(v)}"
+                          for k, v in sorted(row["at_draw"].items())}
+        row["wasted_share"] = (round(row["wasted"] / row["solves"], 3)
+                               if row["solves"] else 0.0)
+    return out

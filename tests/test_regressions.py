@@ -2995,3 +2995,54 @@ def test_the_dead_yield_agent_is_gone_but_its_warning_is_not():
     assert "def action_kinds_seen" not in src
     assert "END OF THE RECORDING" in src, (
         "the reason close_turn=True is needed was deleted with the code")
+
+
+def test_draws_curve_recovers_the_per_draw_payoff(tmp_path):
+    """The budget has `ladder`; `draws` had nothing, so `sweep.DRAWS` was
+    one guess applied to every deck — worth +0.10 on despia for 2.6x the
+    CPU, and far more on an elfnote hand. Every record stores each
+    attempt with its draw index, so the curve is recoverable with no
+    solver time at all."""
+    import json as _json
+    from skills import sweep
+
+    def rec(hand, attempts):
+        return _json.dumps({
+            "status": "solved", "deck": {"name": "d"}, "hand_index": hand,
+            "lines": [{"board": {}}],
+            "solver": {"blocking": {"attempts": attempts}}})
+
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join([
+        # hand 0 peaks immediately; hand 1 improves on a later draw
+        rec(0, [{"draw": 0, "label": "a", "status": "solved",
+                 "interruptions": 4, "negates": 1},
+                {"draw": 1, "label": "a", "status": "solved",
+                 "interruptions": 4, "negates": 1}]),
+        rec(1, [{"draw": 0, "label": "a", "status": "solved",
+                 "interruptions": 2, "negates": 0},
+                {"draw": 1, "label": "a", "status": "solved",
+                 "interruptions": 5, "negates": 2}]),
+    ]) + "\n")
+
+    curve = sweep.draws_curve(path)
+    row = curve["d"]
+    assert row["hands"] == 2 and row["solves"] == 4
+    assert row["mean_best"] == 4.5, row["mean_best"]
+    # After draw 0 only hand 0 is at its best; after draw 1 both are.
+    assert row["at_draw"][0] == "1/2", row["at_draw"]
+    assert row["at_draw"][1] == "2/2", row["at_draw"]
+    # One solve ran after hand 0 had already peaked.
+    assert row["wasted"] == 1, row["wasted"]
+
+
+def test_draws_curve_ignores_records_without_attempts(tmp_path):
+    import json as _json
+    from skills import sweep
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join([
+        "not json",
+        _json.dumps({"status": "solved", "deck": {"name": "d"},
+                     "solver": {}}),
+    ]) + "\n")
+    assert sweep.draws_curve(path) == {}

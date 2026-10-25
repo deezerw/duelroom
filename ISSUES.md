@@ -178,12 +178,29 @@ flatters every board.
   what surfaced it, which is the fifth time that has worked tonight. `boards` now
   states its denominator: "per SOLVED hand; hands with no line are not in this
   library" — a bare mean invited reading it as per-hand.
-### 7. `draws` has no per-deck calibration
+### 7. `draws` had no per-deck calibration — FIXED
 
 Four draws bought +0.10 mean interruptions on despia for 2.6x the solver time (one
 hand of ten improved); the same machinery beat the stored library outright on an
 elfnote hand. Two decks, opposite answers, so `sweep.DRAWS` cannot have one right
-value. The budget already has `ladder`; draws needs the same.
+value. The budget had `ladder`; draws had nothing.
+
+`sweep.draws_curve` and the `draws [deck]` command now report it, **at no solver
+cost** — every record stores each attempt with its draw index, so the running best
+over the order the solves actually ran is exact after the fact.
+
+First real answer, on the active deck (40 hands, 540 solves, mean best 3.83):
+
+    hands already at their best board by end of draw
+       draw  0   24/40      draw  6   31/40
+       draw  2   27/40      draw  8   35/40
+       draw  5   28/40      draw 10   40/40
+    solves after the best was already found: 285 (53%)
+
+So 60% of hands peak in the breadth round and the rest keep improving all the way to
+draw 10 — **this deck earns its draw budget**, unlike despia where almost nothing
+moved. That is the per-deck answer the single `DRAWS` constant could not express, and
+the command says which case it is looking at.
 
 ### 8. Coverage gaps the reports do not refuse over
 

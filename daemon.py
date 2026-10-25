@@ -57,6 +57,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   second <theirs> <ours>    going second into their real board
   gauntlet <deck> <hand>    rank this hand's end boards by what they stop
   rescore [deck] [w]        re-rank stored optimiser trials, no solver time
+  draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
   help / quit
 """
@@ -1304,6 +1305,49 @@ def cmd_rescore(conn, args):
           "the order moves.")
 
 
+def cmd_draws(conn, args):
+    """What each extra draw bought, per deck, from a finished sweep.
+
+    The budget has `ladder`; `draws` had nothing, so `sweep.DRAWS` was one
+    guess applied to every deck. Measured: four draws bought +0.10 mean
+    interruptions on despia for 2.6x the solver time, and far more on an
+    elfnote hand. Costs no solver time -- every record stores each attempt
+    with its draw index.
+    """
+    name = None
+    if args:
+        path = _resolve_deck(args[0], conn)
+        name = path.stem if path else args[0]
+    sources = sorted((ROOT / "results").rglob("*.jsonl"),
+                     key=lambda p: -p.stat().st_mtime)
+    for src in sources:
+        try:
+            curve = sweep.draws_curve(src, name)
+        except (OSError, ValueError):
+            continue
+        if curve:
+            print(f"  from {src.name}\n")
+            for deck, row in sorted(curve.items()):
+                print(f"  {deck}")
+                print(f"    {row['hands']} hands, {row['solves']} solves, "
+                      f"mean best {row['mean_best']} interruptions")
+                print(f"    hands already at their best board by end of draw:")
+                for k, v in row["at_draw"].items():
+                    print(f"       draw {k:>2}  {v}")
+                print(f"    solves after the best was already found: "
+                      f"{row['wasted']} ({row['wasted_share']:.0%})")
+                last = list(row["at_draw"].values())
+                if last and last[0] == last[-1]:
+                    print(f"    -> every hand peaked in the breadth round. "
+                          f"draws=1 would have given the same boards here.")
+                else:
+                    print(f"    -> later draws kept improving boards, so draws "
+                          f"is earning its budget on this deck.")
+                print()
+            return
+    print("no sweep records with per-draw attempts yet — run `solve` first")
+
+
 def cmd_second(conn, args):
     if len(args) < 2:
         print("usage: second <their_deck> <our_deck> [hands]")
@@ -1697,6 +1741,7 @@ COMMANDS = {
     "second": cmd_second,
     "gauntlet": cmd_gauntlet,
     "rescore": cmd_rescore,
+    "draws": cmd_draws,
     "floodgates": cmd_floodgates,
 }
 
