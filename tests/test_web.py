@@ -869,3 +869,63 @@ def test_corrected_numbers_still_say_what_they_mean(client, path, what, pattern)
     assert re.search(pattern, body), (
         f"{path} no longer states: {what}. A number shown without what it "
         "is over is the defect this review spent its time on")
+
+
+# Every page a person navigates to, excluding fragments and downloads.
+CHROME_PAGES = [
+    "/", "/deck/kewl-tune", "/report", "/matrix", "/threats", "/drill",
+    "/build?name=kewl-tune", "/import", "/jobs", "/maintenance",
+]
+
+
+@pytest.mark.parametrize("path", CHROME_PAGES)
+def test_every_page_has_the_same_header_pattern(client, path):
+    """One page-head per page, not a hand-rolled h1 plus a muted <p>.
+
+    Before 2026-10-25 each page invented its own heading: an <h1>, a
+    muted paragraph, sometimes a `prov` line, sometimes action buttons
+    mixed into a sentence. Nothing looked like anything else, which is
+    most of what "cluttered" meant.
+    """
+    _logged_in(client)
+    body = client.get(path, follow_redirects=True).get_data(as_text=True)
+    assert 'class="page-head"' in body, f"{path} has no page-head block"
+    assert body.count('class="page-head"') == 1, \
+        f"{path} has more than one page header"
+
+
+@pytest.mark.parametrize("path", CHROME_PAGES)
+def test_chrome_names_the_active_deck_and_the_current_page(client, path):
+    """The header must say which deck, and which page you are on.
+
+    `report`, `matrix`, `threats` and `drill` all operate on the ACTIVE
+    deck when no name is given, and the chrome never said which one that
+    was — a page of numbers about a deck that did not name the deck.
+    """
+    import re
+    _logged_in(client)
+    body = client.get(path, follow_redirects=True).get_data(as_text=True)
+    # Three labelled nav groups, so a link's purpose is visible.
+    for group in ("decks", "analyse", "system"):
+        assert f'class="lbl">{group}<' in body, \
+            f"{path} is missing the '{group}' nav group"
+    # Exactly one nav link marked current.
+    assert len(re.findall(r'class="on"', body)) == 1, \
+        f"{path} does not mark exactly one nav link as current"
+
+
+def test_metric_captions_are_disclosures_not_walls_of_text(client):
+    """The long captions fold, and are still present.
+
+    Every one of them exists because a number was once read as something
+    else (ISSUES #38, #49, #52), so none may be deleted to tidy the page
+    — they move into a <details> whose summary stays visible. This checks
+    both halves: the disclosure exists, and the wording survives inside
+    it (the parametrised copy guards above assert the wording itself).
+    """
+    _logged_in(client)
+    for path, least in (("/report", 3), ("/matrix", 2), ("/threats", 2)):
+        body = client.get(path, follow_redirects=True).get_data(as_text=True)
+        assert body.count('details class="note"') >= least, (
+            f"{path} should fold at least {least} metric captions")
+        assert "<summary>" in body

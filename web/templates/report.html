@@ -2,12 +2,23 @@
 {% import "_macros.html" as m %}
 {% block title %}{{ name }} · report{% endblock %}
 {% block body %}
-<h1>{{ name }}</h1>
-<p class="muted">{{ r.sizes[0] }} main · {{ r.sizes[1] }} extra · {{ r.sizes[2] }} side
-  {%- if r.archetype %} · {{ r.archetype }}
-  {% if r.archetype_guess %}<span class="muted">(identified from your cards,
-    {{ '%.0f'|format(r.archetype_guess[1]*100) }}% of its
-    {{ r.archetype_guess[2] }}-card core)</span>{% endif %}{% endif %}</p>
+
+<div class="page-head">
+  <h1>{{ name }}</h1>
+  <div class="sub">{{ r.sizes[0] }} main · {{ r.sizes[1] }} extra · {{ r.sizes[2] }} side
+    {%- if r.archetype %} · <b>{{ r.archetype }}</b>{% endif %}</div>
+  {% if r.archetype and r.archetype_guess %}
+    <details class="note"><summary>how this archetype was identified</summary>
+      <p>From your cards, not a label you set:
+        {{ '%.0f'|format(r.archetype_guess[1]*100) }}% of its
+        {{ r.archetype_guess[2] }}-card core is present
+        {%- if r.archetype_guess|length > 3 %}, and that core was built from
+        {{ r.archetype_guess[3] }} scraped lists{% endif %}. The flex slots
+        <code>optimize</code> searches come from this archetype, so a deck
+        spanning several will get candidates its own engine never appears in.</p>
+    </details>
+  {% endif %}
+</div>
 
 {% if r.legality %}<div class="flag bad"><strong>Not legal.</strong>
   <ul style="margin:6px 0 0">{% for p in r.legality %}<li>{{ p }}</li>{% endfor %}</ul></div>
@@ -15,12 +26,13 @@
 {% if r.engine_blockers %}<div class="flag bad">{{ r.engine_blockers|length }}
   card(s) the solver cannot load — rebuild the merged card database.</div>{% endif %}
 
-<h2>Solver target</h2>
+<div class="sec"><h2>Solver target</h2>
+  <span class="hint">what every number below is measured against</span></div>
 <div class="panel {% if r.target_warning %}untrusted{% endif %}">
   {% if not r.target %}
-    <p class="muted" style="margin:0">None yet. Running a gate derives one.</p>
+    <p class="muted">None yet. Running a gate derives one.</p>
   {% else %}
-    <p style="margin:0" class="mono">{{ r.target }}</p>
+    <p class="mono">{{ r.target }}</p>
     {% if r.target_warning %}
       <div class="flag">{{ r.target_warning }}.<br>
         Everything below measures reaching <em>that</em>, so read it as
@@ -29,11 +41,10 @@
   {% endif %}
 </div>
 
-<h2>Measured</h2>
+<div class="sec"><h2>Measured</h2></div>
 {% if not r.funnel %}
-  <div class="panel"><p class="muted" style="margin:0">No run yet — start a
-    validation gate from the <a href="{{ url_for('views.deck', name=name) }}">deck
-    page</a>.</p></div>
+  <div class="panel"><p class="muted">No run yet — start a validation gate from
+    the <a href="{{ url_for('views.deck', name=name) }}">deck page</a>.</p></div>
 {% else %}
 <div class="panel {% if r.target_warning %}untrusted{% endif %}">
   {{ m.provenance(r.provenance) }}
@@ -58,13 +69,9 @@
 </div>
 
 {% if surv %}
-<h2>Plays through <span class="muted" style="text-transform:none">— higher is
-  better, this is your deck</span></h2>
+<div class="sec"><h2>Plays through</h2>
+  <span class="hint">higher is better — this is your deck</span></div>
 <div class="panel">
-  <p class="muted" style="margin-top:0">Of the hands where the card was
-    <strong>live</strong> (it had a legal window), how often the line still
-    completed — not of all hands. A card that was never live is unmeasured,
-    not harmless.</p>
   <table><tbody>
   {% for s in surv %}
     <tr>
@@ -95,28 +102,46 @@
     {% endif %}
   {% endfor %}
   </tbody></table>
+  <details class="note"><summary>what the percentage is over</summary>
+    <p>Of the hands where the card was <strong>live</strong> (it had a legal
+      window), how often the line still completed — <em>not</em> of all hands,
+      and not of all windows. A card that was never live is unmeasured, not
+      harmless: the <span class="mono">live n/m</span> column says how many
+      hands it could actually be used in.</p>
+  </details>
 </div>
 {% endif %}
 {% endif %}
 
-<h2>Opening odds <span class="muted" style="text-transform:none">going first</span></h2>
+<div class="sec"><h2>Opening odds</h2><span class="hint">going first</span></div>
 <div class="panel"><table>
   <thead><tr><th>card</th><th class="num">copies</th><th class="num">chance</th></tr></thead>
   <tbody>{% for name_, copies, pc in r.hand_math %}
     <tr><td>{{ name_ }}</td><td class="num">{{ copies }}</td>
       <td class="num">{{ (pc*100)|round(1) }}%</td></tr>
   {% endfor %}</tbody>
-</table></div>
+</table>
+<details class="note"><summary>per card, not per group</summary>
+  <p>Each row is that card alone. Cards that do the same job are
+    interchangeable, so the chance of opening <em>any</em> of them is much
+    higher than the best single row — the <code>hand</code> command gives the
+    group figures.</p>
+</details></div>
 
 {% if r.inclusion %}
-<h2>Vs the meta <span class="muted" style="text-transform:none">—
-  {{ r.inclusion.lists }} lists of {{ r.archetype }}</span></h2>
+<div class="sec"><h2>Vs the meta</h2>
+  <span class="hint">{{ r.inclusion.lists }} lists of {{ r.archetype }}</span></div>
 <div class="panel">
-  <p style="margin-top:0">{{ r.inclusion.core }} core cards ·
-    {{ r.inclusion.flex }} contested slots</p>
+  <p>{{ r.inclusion.core }} core cards · {{ r.inclusion.flex }} contested slots</p>
   {% if r.inclusion.off_meta %}
     <p class="muted">Cards in your list that no scraped list runs:</p>
     <div class="grid">{% for n in r.inclusion.off_meta %}<div>{{ n }}</div>{% endfor %}</div>
+    <details class="note"><summary>why this matters for optimize</summary>
+      <p>These cards have no inclusion figure, so the optimiser cannot rank
+        cutting them against anything. If much of your list sits here, "no swap
+        beat the current list" means the meta data could not evaluate it —
+        which looks identical to the list being optimal.</p>
+    </details>
   {% endif %}
 </div>
 {% endif %}

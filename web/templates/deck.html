@@ -1,18 +1,31 @@
 {% extends "base.html" %}
 {% block title %}{{ name }} · duelroom{% endblock %}
 {% block body %}
-<h1>{{ name }}</h1>
-<p class="muted">
-  {{ deck.main|length }} main · {{ deck.extra|length }} extra ·
-  {{ deck.side|length }} side
-  {%- if archetype %} · {{ archetype[0] }}
-    <span class="muted">({{ '%.0f'|format(archetype[1]*100) }}% of its
-    {{ archetype[2] }}-card core)</span>{% endif %}
-</p>
-{% for alt in alts %}
-  <p class="muted" style="margin:-6px 0 0">also matches {{ alt[0] }}
-    ({{ '%.0f'|format(alt[1]*100) }}% of {{ alt[2] }} core)</p>
-{% endfor %}
+
+<div class="page-head">
+  <h1>{{ name }}</h1>
+  <div class="sub">{{ deck.main|length }} main · {{ deck.extra|length }} extra ·
+    {{ deck.side|length }} side
+    {%- if archetype %} · <b>{{ archetype[0] }}</b>{% endif %}</div>
+  <div class="acts">
+    <a class="btn primary" href="{{ url_for('views.pilot', name=name) }}">Pilot a hand</a>
+    <a class="btn" href="{{ url_for('views.report', name=name) }}">Report</a>
+    <a class="btn" href="{{ url_for('views.build', name=name) }}">Edit</a>
+    <a class="btn" href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a>
+  </div>
+  {% if archetype %}
+    <details class="note"><summary>how this archetype was identified</summary>
+      <p>{{ '%.0f'|format(archetype[1]*100) }}% of its {{ archetype[2] }}-card
+        core is present{% if archetype|length > 3 %}, from
+        {{ archetype[3] }} scraped lists{% endif %}.
+        {%- for alt in alts %} Also matches {{ alt[0] }}
+          ({{ '%.0f'|format(alt[1]*100) }}% of {{ alt[2] }}).{% endfor %}</p>
+      {% if alts %}<p>A deck spanning several archetypes gets its flex-slot
+        candidates from the top one only, so the others' engines are invisible
+        to <code>optimize</code>.</p>{% endif %}
+    </details>
+  {% endif %}
+</div>
 
 {% if problems %}
   <div class="flag bad"><strong>Not legal.</strong>
@@ -23,11 +36,28 @@
   <div class="flag">{{ unresolved|length }} passcode(s) unknown to the card
     mirror — run <code>cards</code> to refresh.</div>
 {% endif %}
+{% if running %}
+  <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
+    Anything you start now queues behind it.</div>
+{% endif %}
+
+<div class="sec"><h2>Analyse</h2>
+  <span class="hint">runs on the worker, one at a time — you can close the tab</span></div>
+<div class="panel">
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+  {% for kind, label, cost in runnable %}
+    <form method="post" action="{{ url_for('views.run_job', name=name, kind=kind) }}"
+          style="margin:0">
+      <button title="{{ cost }}">{{ label }} <span class="muted">{{ cost }}</span></button>
+    </form>
+  {% endfor %}
+  </div>
+</div>
 
 {% for sec in ['main','extra','side'] %}
   {% if sections[sec] %}
-  <h2>{{ sec }} deck <span class="muted">·
-    {{ sections[sec]|sum(attribute='copies') }} cards</span></h2>
+  <div class="sec"><h2>{{ sec }} deck</h2>
+    <span class="hint">{{ sections[sec]|sum(attribute='copies') }} cards</span></div>
   <div class="panel"><div class="grid">
     {% for c in sections[sec] %}
       <div style="display:flex;gap:7px;align-items:center">
@@ -40,34 +70,9 @@
   {% endif %}
 {% endfor %}
 
-<h2>Analyse</h2>
+<div class="sec"><h2>Export</h2></div>
 <div class="panel">
-  <p style="margin-top:0"><a class="btn" href="{{ url_for('views.pilot', name=name) }}">
-    Pilot a hand</a>
-    <span class="muted">— pick the cards you are holding and get the board,
-    the steps, and every point a hand trap is live.</span></p>
-  {% if running %}
-    <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.
-      Anything you start now queues behind it.</div>
-  {% endif %}
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-  {% for kind, label, cost in runnable %}
-    <form method="post" action="{{ url_for('views.run_job', name=name, kind=kind) }}"
-          style="margin:0">
-      <button title="{{ cost }}">{{ label }} <span class="muted">{{ cost }}</span></button>
-    </form>
-  {% endfor %}
-  </div>
-  <p class="muted" style="margin:10px 0 0">These run on the worker, one at a
-    time. You can close the tab.</p>
-</div>
-
-<h2>Export</h2>
-<div class="panel">
-  <p style="margin-top:0"><a class="btn"
-     href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a>
-     <a class="btn" href="{{ url_for('views.build', name=name) }}">Edit in builder</a></p>
-  <p class="muted" style="margin-bottom:4px">ydke:// — paste into EDOPro or any builder</p>
+  <p class="muted">ydke:// — paste into EDOPro or any builder</p>
   <textarea readonly onclick="this.select()">{{ ydke }}</textarea>
 </div>
 {% endblock %}

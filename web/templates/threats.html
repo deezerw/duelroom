@@ -1,10 +1,15 @@
 {% extends "base.html" %}
 {% block title %}threats · duelroom{% endblock %}
 {% block body %}
-<h1>Threats</h1>
-<p class="muted">Decks you will sit across from. A higher mean is a harder board
-  to break — the reading inverts on a row marked yours.</p>
 
+<div class="page-head">
+  <h1>Threats</h1>
+  <div class="sub">The decks you will sit across from, and what their boards
+    cost to break.</div>
+</div>
+
+<div class="sec"><h2>Interruptions per board</h2>
+  <span class="hint">higher mean = harder to break; inverts on your own row</span></div>
 <div class="panel"><div style="overflow-x:auto"><table>
   <thead><tr><th>archetype</th>
     {% for n in counts %}<th class="num">{{ n }}</th>{% endfor %}
@@ -22,7 +27,7 @@
   </tbody>
 </table></div></div>
 
-<h2>Visible board vs cards in hand</h2>
+<div class="sec"><h2>Visible board vs cards in hand</h2></div>
 <div class="panel">
   <table><thead><tr><th>archetype</th><th class="num">on field</th>
     <th class="num">in hand</th></tr></thead><tbody>
@@ -31,21 +36,18 @@
       <td class="num">{{ '%.1f'|format(v.hand) }}</td></tr>
   {% endfor %}
   </tbody></table>
-  <p class="muted" style="margin-bottom:0">Going second you can play around a
-    visible negate; you cannot play around a handtrap you have not seen.</p>
+  <details class="note"><summary>why the split matters</summary>
+    <p>Going second you can play around a visible negate; you cannot play
+      around a handtrap you have not seen. Two decks with the same total
+      interruption count play completely differently depending on where it
+      sits.</p>
+  </details>
 </div>
 
 {% if summons %}
-<h2>Special summons per line <span class="muted" style="text-transform:none">—
-  replayed, not inferred</span></h2>
+<div class="sec"><h2>Special summons per line</h2>
+  <span class="hint">replayed, not inferred</span></div>
 <div class="panel">
-  {% if ss_source %}
-  <p class="muted" style="margin-top:0">Derived from
-    <code>{{ ss_source }}</code>. The single-draw library understates
-    these — the multi-draw arm gives elfnote 8.2 summons and 90%
-    Nibiru-live against 6.1 and 68%, because better boards need more
-    summons. Rebuild with <code>threats &lt;library&gt;</code>.</p>
-  {% endif %}
   <table><thead><tr><th>archetype</th><th class="num">per line</th>
     <th class="num">worst</th><th class="num">Nibiru live</th>
     <th class="num">cards to Maxx "C"</th></tr></thead><tbody>
@@ -57,13 +59,21 @@
       <td class="num">{{ '%.1f'|format(v.mean) }}</td></tr>
   {% endfor %}
   </tbody></table>
-  <p class="muted" style="margin-bottom:0">Maxx "C" draws on every special
-    summon, so the summon count <em>is</em> what comboing through it costs them.
-    The survival table cannot see that.</p>
+  <details class="note"><summary>where these come from, and what they cost</summary>
+    <p>Maxx "C" draws on every special summon, so the summon count <em>is</em>
+      what comboing through it costs them. The survival table cannot see that —
+      those lines mostly complete, which reads as "fine".</p>
+    {% if ss_source %}
+    <p>Derived from <code>{{ ss_source }}</code>. The single-draw library
+      understates these: the multi-draw arm gives elfnote 8.2 summons and 90%
+      Nibiru-live against 6.1 and 68%, because better boards need more summons.
+      Rebuild with <code>threats &lt;library&gt;</code>.</p>
+    {% endif %}
+  </details>
 </div>
 {% endif %}
 
-<h2>Most common interruptions</h2>
+<div class="sec"><h2>Most common interruptions</h2></div>
 <div class="panel">
 {% for arch, rows in pieces %}
   <p style="margin:12px 0 4px"><strong>{{ arch }}</strong></p>

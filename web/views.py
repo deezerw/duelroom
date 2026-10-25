@@ -46,6 +46,27 @@ def deck_path(name):
     return path
 
 
+@bp.app_context_processor
+def _chrome():
+    """What the header needs on every page.
+
+    `report`, `matrix`, `threats` and `drill` all operate on the ACTIVE
+    deck when no name is given, and the chrome never said which one that
+    was -- so a page of numbers about a deck did not name the deck. This
+    puts it in the header, where it also doubles as the link to that
+    deck's own page.
+
+    Kept deliberately cheap: one meta lookup. It runs for every request,
+    including the login page, so it must not touch the solver or the
+    card mirror.
+    """
+    try:
+        return {"active_deck": db.get_meta(conn(), "active_deck")}
+    except Exception:
+        # The chrome must never be the reason a page fails to render.
+        return {"active_deck": None}
+
+
 @bp.route("/")
 @login_required
 def index():

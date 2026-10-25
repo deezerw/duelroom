@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}drill {{ name }} · duelroom{% endblock %}
 {% block body %}
-<h1>Drill — {{ name }}</h1>
-{% if source %}<div class="prov">{{ source }}</div>{% endif %}
-<p class="muted">A line the tool found and you cannot execute at the table is
-  worth nothing. Best boards first.</p>
+<div class="page-head">
+  <h1>Drill</h1>
+  <div class="sub"><b>{{ name }}</b> — a line the tool found and you cannot
+    execute at the table is worth nothing. Best boards first.</div>
+  {% if source %}<div class="prov">{{ source }}</div>{% endif %}
+</div>
 
 {% if not lines %}
   <div class="panel"><p class="muted" style="margin:0">No solved lines stored

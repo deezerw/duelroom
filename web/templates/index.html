@@ -1,32 +1,38 @@
 {% extends "base.html" %}
 {% block body %}
-<h1>Decks</h1>
-<p class="muted">{{ decks|length }} list{{ '' if decks|length == 1 else 's' }}
-  {%- if active %} · active: <strong>{{ active }}</strong>{% endif %}</p>
-<p style="margin:10px 0 0"><a class="btn" href="{{ url_for('views.build') }}">Build
-  a deck</a> <a class="btn" href="{{ url_for('views.import_deck') }}">Import</a></p>
+
+<div class="page-head">
+  <h1>Decks</h1>
+  <div class="sub">{{ decks|length }} list{{ '' if decks|length == 1 else 's' }}.
+    The <b>active</b> one is what report, handtraps, threats and drill use when
+    you do not name a deck.</div>
+  <div class="acts">
+    <a class="btn primary" href="{{ url_for('views.build') }}">Build a deck</a>
+    <a class="btn" href="{{ url_for('views.import_deck') }}">Import</a>
+  </div>
+</div>
 
 <div class="panel">
 <table>
-  <thead><tr><th>deck</th><th>archetype</th><th>main</th><th>extra</th>
-    <th>side</th><th>legal</th><th></th></tr></thead>
+  <thead><tr><th>deck</th><th>archetype</th><th class="num">main</th>
+    <th class="num">extra</th><th class="num">side</th><th>legal</th><th></th></tr></thead>
   <tbody>
   {% for d in decks %}
     <tr>
       <td><a href="{{ url_for('views.deck', name=d.name) }}">{{ d.name }}</a>
         {% if d.active %}<span class="pill active">active</span>{% endif %}</td>
       <td class="muted">{{ d.archetype or '—' }}</td>
-      <td class="mono">{{ d.main }}</td>
-      <td class="mono">{{ d.extra }}</td>
-      <td class="mono">{{ d.side }}</td>
+      <td class="num">{{ d.main }}</td>
+      <td class="num">{{ d.extra }}</td>
+      <td class="num">{{ d.side }}</td>
       <td>{% if d.legal %}<span class="pill ok">legal</span>
           {% else %}<span class="pill bad">illegal</span>{% endif %}</td>
-      <td style="text-align:right">
+      <td style="text-align:right;white-space:nowrap">
         <a href="{{ url_for('views.build', name=d.name) }}"
            class="muted" style="font-size:12px;margin-right:8px">edit</a>
         {% if not d.active %}
         <form method="post" action="{{ url_for('views.activate', name=d.name) }}"
-              style="margin:0"><button style="padding:3px 9px;font-size:12px">
+              style="margin:0;display:inline"><button class="sm">
           make active</button></form>
         {% endif %}</td>
     </tr>
@@ -37,7 +43,11 @@
   {% endfor %}
   </tbody>
 </table>
+<details class="note"><summary>where the archetype column comes from</summary>
+  <p>Inferred from each deck's cards, by overlap with the scraped meta's core —
+    not a label you set. An archetype whose core rests on too few scraped lists
+    is ignored, because at three lists any card in all three reads as
+    "core".</p>
+</details>
 </div>
-<p class="muted">Archetypes are inferred from each deck's cards, by overlap with
-  the scraped meta's core. Commands default to the active deck.</p>
 {% endblock %}

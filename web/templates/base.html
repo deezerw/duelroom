@@ -5,28 +5,95 @@
 <style>
   :root{
     --bg:#11131a; --panel:#1a1d26; --line:#2a2f3d; --ink:#e6e8ef;
-    --dim:#9aa3b8; --accent:#7aa2f7; --ok:#86d98b; --warn:#e0af68; --bad:#f7768e;
+    --dim:#9aa3b8; --faint:#6d7488; --accent:#7aa2f7;
+    --ok:#86d98b; --warn:#e0af68; --bad:#f7768e;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
-       font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
-  header{display:flex;gap:18px;align-items:center;padding:12px 20px;
-         border-bottom:1px solid var(--line);background:var(--panel)}
-  header .brand{font-weight:650;letter-spacing:.3px}
-  header nav{display:flex;gap:16px;margin-left:auto;align-items:center}
-  main{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
-  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:28px 0 10px;
-     color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+
+  /* ---------- chrome ------------------------------------------------
+     The nav was nine flat links in one row, so nothing said which of
+     them manage a deck, which analyse one, and which are housekeeping.
+     Three labelled groups, and the active deck named in the bar --
+     because report/matrix/threats/drill all operate on it and the page
+     never used to say so. */
+  header{border-bottom:1px solid var(--line);background:var(--panel)}
+  .bar{display:flex;gap:16px;align-items:center;
+       padding:10px 20px;max-width:1180px;margin:0 auto}
+  .brand{font-weight:650;letter-spacing:.3px;flex:none}
+  .brand a{color:var(--ink)} .brand a:hover{text-decoration:none}
+  .ctx{font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center;
+       padding:3px 9px;border:1px solid var(--line);border-radius:999px}
+  .ctx b{color:var(--ink);font-weight:550}
+  .bar form{margin:0;margin-left:auto}
+  .groups{display:flex;gap:4px;align-items:stretch;flex-wrap:wrap;
+          padding:0 20px 8px;max-width:1180px;margin:0 auto}
+  .g{display:flex;gap:2px;align-items:center}
+  .g + .g{margin-left:14px;padding-left:16px;border-left:1px solid var(--line)}
+  .g > .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+            color:var(--faint);margin-right:6px}
+  .g a{font-size:13px;padding:4px 9px;border-radius:6px;color:var(--dim)}
+  .g a:hover{background:#ffffff0c;color:var(--ink);text-decoration:none}
+  .g a.on{background:#7aa2f71c;color:var(--accent)}
+
+  main{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
+
+  /* ---------- page + section headings -------------------------------
+     Every page used an <h1> plus a hand-rolled muted <p>, and every
+     section an uppercase <h2> with an inline
+     `style="text-transform:none"` span glued on for its subtitle. One
+     pattern for each instead. */
+  .page-head{margin:0 0 18px}
+  .page-head h1{font-size:21px;margin:0 0 3px;letter-spacing:-.01em}
+  .page-head .sub{color:var(--dim);font-size:13px}
+  .page-head .sub b{color:var(--ink);font-weight:550}
+  .page-head .acts{margin-top:11px;display:flex;gap:8px;flex-wrap:wrap}
+
+  .sec{display:flex;align-items:baseline;gap:9px;margin:26px 0 9px}
+  .sec h2{font-size:13px;margin:0;color:var(--dim);text-transform:uppercase;
+          letter-spacing:.08em;font-weight:600}
+  .sec .hint{font-size:12px;color:var(--faint)}
+  h2{font-size:13px;margin:26px 0 9px;color:var(--dim);
+     text-transform:uppercase;letter-spacing:.08em}
+
   .panel{background:var(--panel);border:1px solid var(--line);
-         border-radius:10px;padding:16px 18px;margin:14px 0}
+         border-radius:10px;padding:15px 17px;margin:10px 0}
+  .panel > :first-child{margin-top:0}
+  .panel > :last-child{margin-bottom:0}
   /* A panel whose numbers cannot be trusted is greyed with its reason
      attached, rather than showing a confident value. */
   .panel.untrusted{opacity:.62;border-style:dashed}
+
+  /* ---------- the note disclosure -----------------------------------
+     Most panels carried a permanent paragraph explaining what the
+     number is OVER -- the denominator, the standard, the sample. That
+     text is load-bearing: every one of them exists because the number
+     was once read as something else. But always-on, it buried the
+     numbers it describes.
+
+     So it folds. The summary line stays visible, the full wording is
+     one click away, and nothing is deleted. Open it once and the
+     browser remembers nothing -- that is deliberate, because the
+     caveat should greet a new reader, not hide from them. */
+  details.note{margin:9px 0 0;font-size:12.5px;color:var(--dim)}
+  details.note > summary{cursor:pointer;color:var(--faint);list-style:none;
+    display:inline-flex;gap:6px;align-items:center;padding:2px 0}
+  details.note > summary::-webkit-details-marker{display:none}
+  details.note > summary::before{content:"?";font-size:10px;line-height:1;
+    width:14px;height:14px;border:1px solid var(--line);border-radius:50%;
+    display:inline-flex;align-items:center;justify-content:center;flex:none}
+  details.note > summary:hover{color:var(--dim)}
+  details.note[open] > summary{color:var(--dim);margin-bottom:5px}
+  details.note > :not(summary){margin:0 0 6px;padding-left:20px;
+    border-left:1px solid var(--line);max-width:74ch}
+
   .flag{display:block;border-left:3px solid var(--warn);padding:8px 12px;
         margin:10px 0;color:var(--warn);background:#e0af6810;border-radius:0 6px 6px 0}
   .flag.bad{border-color:var(--bad);color:var(--bad);background:#f7768e10}
-  .muted{color:var(--dim)} .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .muted{color:var(--dim)} .faint{color:var(--faint)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:7px 10px}
   th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase;
      letter-spacing:.06em;border-bottom:1px solid var(--line)}
@@ -45,6 +112,7 @@
   button:hover,.btn:hover{background:#2c3246;text-decoration:none}
   button.primary{background:var(--accent);border-color:var(--accent);color:#0d0f15;
     font-weight:600}
+  button.sm,.btn.sm{padding:3px 9px;font-size:12px}
   .msg{border:1px solid #7aa2f744;background:#7aa2f714;color:var(--accent);
        padding:9px 13px;border-radius:7px;margin:10px 0}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
@@ -66,30 +134,63 @@
   .iv .n{font-size:11px;color:var(--dim);min-width:46px}
   .prov{font-size:11px;color:var(--dim);font-family:ui-monospace,Menlo,monospace;
         margin:2px 0 10px}
-  .two{display:flex;gap:18px;flex-wrap:wrap}
+  .two{display:flex;gap:22px;flex-wrap:wrap}
   .two > div{flex:1;min-width:150px}
   .big{font-size:22px;font-weight:600}
   td.num,th.num{text-align:right;font-family:ui-monospace,Menlo,monospace}
   .heat{display:inline-block;min-width:44px;text-align:right;padding:1px 6px;
         border-radius:5px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
   .yours{outline:1px solid #7aa2f755;background:#7aa2f70d}
-  @media(max-width:620px){main{padding:16px 14px 50px} header{padding:10px 14px}}
+  @media(max-width:620px){
+    main{padding:16px 14px 50px} .bar{padding:10px 14px}
+    .groups{padding:0 14px 8px}
+    .g + .g{margin-left:0;padding-left:0;border-left:0}
+    .groups{flex-direction:column;gap:2px}
+  }
 </style>
 <header>
-  <span class="brand">duelroom</span>
-  <nav>
-    <a href="{{ url_for('views.index') }}">decks</a>
-    <a href="{{ url_for('views.build') }}">build</a>
-    <a href="{{ url_for('views.import_deck') }}">import</a>
-    <a href="{{ url_for('views.report') }}">report</a>
-    <a href="{{ url_for('views.matrix') }}">matrix</a>
-    <a href="{{ url_for('views.threats') }}">threats</a>
-    <a href="{{ url_for('views.drill_view') }}">drill</a>
-    <a href="{{ url_for('views.job_list') }}">jobs</a>
-    <a href="{{ url_for('views.maintenance') }}">setup</a>
-    <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
-      <button style="padding:4px 10px;font-size:12px">log out</button></form>
-  </nav>
+  <div class="bar">
+    <span class="brand"><a href="{{ url_for('views.index') }}">duelroom</a></span>
+    {% if active_deck %}
+      <span class="ctx">active
+        <b><a href="{{ url_for('views.deck', name=active_deck) }}">{{ active_deck }}</a></b>
+      </span>
+    {% endif %}
+    <form method="post" action="{{ url_for('auth.logout') }}">
+      <button class="sm">log out</button></form>
+  </div>
+  {% set ep = request.endpoint %}
+  <div class="groups">
+    {# A page reached FROM a group belongs to it: the deck view and the
+       pilot hang off a deck, so "all" stays lit while you are in them.
+       Exactly one link is current on every page, which a test asserts. #}
+    <span class="g"><span class="lbl">decks</span>
+      <a href="{{ url_for('views.index') }}"
+         class="{{ 'on' if ep in ('views.index', 'views.deck', 'views.activate',
+                                  'views.download_ydk', 'views.pilot',
+                                  'views.pilot_report_view') }}">all</a>
+      <a href="{{ url_for('views.build') }}"
+         class="{{ 'on' if ep in ('views.build', 'views.build_save') }}">build</a>
+      <a href="{{ url_for('views.import_deck') }}"
+         class="{{ 'on' if ep == 'views.import_deck' }}">import</a>
+    </span>
+    <span class="g"><span class="lbl">analyse</span>
+      <a href="{{ url_for('views.report') }}"
+         class="{{ 'on' if ep == 'views.report' }}">report</a>
+      <a href="{{ url_for('views.matrix') }}"
+         class="{{ 'on' if ep == 'views.matrix' }}">handtraps</a>
+      <a href="{{ url_for('views.threats') }}"
+         class="{{ 'on' if ep == 'views.threats' }}">threats</a>
+      <a href="{{ url_for('views.drill_view') }}"
+         class="{{ 'on' if ep == 'views.drill_view' }}">drill</a>
+    </span>
+    <span class="g"><span class="lbl">system</span>
+      <a href="{{ url_for('views.job_list') }}"
+         class="{{ 'on' if ep in ('views.job_list', 'views.job_detail') }}">jobs</a>
+      <a href="{{ url_for('views.maintenance') }}"
+         class="{{ 'on' if ep == 'views.maintenance' }}">setup</a>
+    </span>
+  </div>
 </header>
 <main>
   {% with msgs = get_flashed_messages() %}

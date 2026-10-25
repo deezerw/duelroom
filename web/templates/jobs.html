@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block body %}
-<h1>Jobs</h1>
+<div class="page-head">
+  <h1>Jobs</h1>
+  <div class="sub">Solver runs queue here, one at a time.</div>
+</div>
 {% if running %}
   <div class="panel" style="border-color:#7aa2f744">
     <strong>Running:</strong> job {{ running.id }} — {{ kinds[running.kind][1] }}

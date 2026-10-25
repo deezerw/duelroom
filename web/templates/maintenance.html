@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}maintenance · duelroom{% endblock %}
 {% block body %}
-<h1>Maintenance</h1>
-<p class="muted">Jobs about the installation rather than about one deck.
-  They queue behind solver runs like everything else.</p>
+<div class="page-head">
+  <h1>Setup</h1>
+  <div class="sub">Jobs about the installation rather than about one deck. They
+    queue behind solver runs like everything else.</div>
+</div>
 
 {% if running %}
   <div class="flag">Job {{ running.id }} ({{ running.kind }}) is running.

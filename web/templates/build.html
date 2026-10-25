@@ -2,19 +2,28 @@
 {% block title %}build {{ name }} · duelroom{% endblock %}
 {% block body %}
 
-<h1 style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-  <input type="text" id="deckname" value="{{ name }}"
-         style="width:auto;flex:1;min-width:200px;font:inherit;font-size:19px">
-  <button class="primary" id="save">Save</button>
-  {% if existing %}<a class="btn" href="{{ url_for('views.deck', name=name) }}">open</a>{% endif %}
-</h1>
-<p class="muted" style="margin-top:0">
-  Searching all {{ '{:,}'.format(n_pool) }} cards.
-  {{ '{:,}'.format(n_meta) }} of them appear in a scraped tournament list and
-  are ranked first.
-  {%- if archetype %} Inclusion rates shown for <strong>{{ archetype }}</strong>
-  where it plays the card.{% endif %}
-</p>
+<div class="page-head">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <input type="text" id="deckname" value="{{ name }}" aria-label="deck name"
+           style="width:auto;flex:1;min-width:200px;font:inherit;font-size:19px">
+    <button class="primary" id="save">Save</button>
+    {% if existing %}<a class="btn" href="{{ url_for('views.deck', name=name) }}">Open</a>{% endif %}
+  </div>
+  <div class="sub" style="margin-top:7px">Searching all
+    {{ '{:,}'.format(n_pool) }} cards; the
+    {{ '{:,}'.format(n_meta) }} that appear in a scraped tournament list rank
+    first{% if archetype %}, by inclusion in <b>{{ archetype }}</b>{% endif %}.</div>
+  <details class="note"><summary>how results are ranked, and what the badges mean</summary>
+    <p>Ranked on the <strong>Wilson lower bound</strong> of the inclusion rate,
+      not the raw rate — so 100% of two lists does not outrank 85% of forty. The
+      bar draws both: solid is the lower bound that the sample supports, ghost
+      reaches the point estimate.</p>
+    <p>A <span class="lim l0">forbidden</span>,
+      <span class="lim l1">limited</span> or <span class="lim l2">semi</span>
+      badge is the copy limit from the ban list. Legality itself is always
+      checked by the server on every edit, never in the browser.</p>
+  </details>
+</div>
 
 {% if is_new %}
   <div class="flag">No saved deck called <strong>{{ name }}</strong> — this is a
