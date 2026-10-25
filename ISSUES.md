@@ -8,8 +8,8 @@ drift clean, undefined-name gate clean, 31/31 mutations killed. So nothing here 
 a test failure. These are gaps between what the program reports and what it can
 actually support.
 
-**Status of the 52 items, as tagged on each heading:** 43 FIXED · 1 PARTLY FIXED
-(#3, rides on #5) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
+**Status of the 52 items, as tagged on each heading:** 43 FIXED · 1 RESOLVED
+by measurement, fix not warranted (#3) · 1 RE-RUN IN PROGRESS (#5) · 3 AUDITED CLEAN, no fix needed
 (#33, #34, #37, #46) · **3 OPEN** — #2 (the objective measures consistency, not
 winrate: inherent to the solitaire design), #4 (`gauntlet` board ranking: both
 causes sit in the pinned C++ solver), #11 (the documented blind spots, which are
@@ -47,7 +47,7 @@ measure games won. That is the honest ceiling of the solitaire design (CLAUDE.md
 "Why No Duel AI"), and it should be stated wherever a "best list" is printed rather
 than implied away.
 
-### 3. The optimiser's inputs come from the single-draw solver — PARTLY FIXED — bricks re-checked; full fix rides on #5
+### 3. The optimiser's inputs come from the single-draw solver — RESOLVED 2026-10-25 — the proposed fix is NOT warranted; the guard stays
 
 `optimizer.evaluate` → `gate.run_funnel` → funnel_eval, which takes **one** draw per
 hand. The solver is a randomized search (CLAUDE.md), so a single draw reports bricks
@@ -88,8 +88,30 @@ properly for the board library.
   brick rate is wrong and survival cannot discriminate, which leaves combo length.
 - The same run logged `solver 857.09 s (budget 120 s: OVER)` — the budget guard is
   being exceeded by 7x and only warns.
-- **Fix:** route `evaluate` through the sweep, or at minimum re-draw the hands it
-  calls bricks before believing them.
+- **RESOLVED 2026-10-25, against the original proposal.** The rebuilt library
+  settles it with a second, independent experiment. Comparing the single-draw and
+  four-draw arms over 40 identical hand seeds on each of five decks, **the set of
+  unsolved hands is identical in both arms for every deck** — 0 rescued, 0 lost
+  across all 200 paired hands. Branded's same 9 hands failed at one draw and at
+  four.
+
+  Scope, stated precisely: this means **re-drawing the same goal does not rescue
+  it**, not that those hands hold no line at all. They might solve toward an
+  easier target.
+
+  Sample size, stated honestly: only branded had any unsolved hands, so the
+  evidence is 9 brick-hands here plus the 5 that `paired_check` re-solved three
+  ways on the active deck — **0 of 14 rescued, 95% CI 0-22%.** That rules out a
+  large effect, not a small one.
+
+  So the "Fix" below is **not warranted**: routing `evaluate` through the full
+  sweep would cost four times the solver time to chase an effect measured at 0
+  and bounded at 22% of bricks. `confirm_bricks` stays as the guard — it is free
+  when there are no false bricks, and it is now the second measurement to find
+  none. This joins CLAUDE.md's "measured and NOT worth doing" list rather than
+  its backlog.
+- **Fix (NOT TAKEN — see above):** route `evaluate` through the sweep, or at
+  minimum re-draw the hands it calls bricks before believing them.
 
 ---
 

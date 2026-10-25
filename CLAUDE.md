@@ -325,6 +325,18 @@ response windows). Real counts need each line replayed through ygorl.
   and goals that solve there are kept outright. And the full budget still belongs on
   the depth pass, because the borderline goals are exactly the slow ones: one despia
   pair hit at 17.7 s, 32.8 s and 45.4 s across seeds, each of which 15 s calls a brick.
+- **Re-drawing a brick does NOT rescue it — measured, so the optimiser keeps its
+  cheap single-draw brick rate.** Two independent experiments. (1) The
+  single-draw and four-draw library arms, 40 identical hand seeds on each of five
+  decks: the set of unsolved hands is **identical in both arms for every deck**,
+  0 rescued and 0 lost across all 200 paired hands; branded's same 9 hands failed
+  at one draw and at four. (2) `optimizer.paired_check` re-solved the active
+  deck's 5 funnel bricks three ways each and found 0 false bricks. Combined:
+  **0 of 14 brick-hands rescued, 95% CI 0-22%** — a large effect is ruled out, a
+  small one is not. Scope: re-drawing the SAME goal does not rescue it; those
+  hands might still solve toward an easier target. So routing `evaluate` through
+  the sweep would cost 4x the solver time for an effect measured at zero.
+  `confirm_bricks` stays as the free guard.
 - **Measured and NOT worth doing:** keeping 4 verified lines per solve instead of 1
   costs 0.1 s (4.1 s vs 4.2 s, same seed, same search), and re-ranking over 32 written
   lines instead of 4 did not improve the board in 4 of 4 cases. The line ceiling is not
