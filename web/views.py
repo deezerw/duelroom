@@ -116,7 +116,14 @@ def deck(name):
         alts=guesses[1:3] if guesses else [],
         ydke=importer.to_ydke(d),
         running=jobs.active(c),
-        runnable=[(k, v[1], v[2]) for k, v in jobs.KINDS.items() if k != "meta"],
+        # DECKLESS kinds, not just the literal "meta". `images` is also
+        # deckless, so the deck page offered a "cache card art" button
+        # whose POST came back "Unknown job type" -- a button that
+        # renders and then refuses is indistinguishable from the whole
+        # feature being broken. Those jobs live on the setup page, which
+        # also gives `images` its scope options.
+        runnable=[(k, v[1], v[2]) for k, v in jobs.KINDS.items()
+                  if k not in jobs.DECKLESS],
     )
 
 

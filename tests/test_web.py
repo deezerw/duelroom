@@ -929,3 +929,58 @@ def test_metric_captions_are_disclosures_not_walls_of_text(client):
         assert body.count('details class="note"') >= least, (
             f"{path} should fold at least {least} metric captions")
         assert "<summary>" in body
+
+
+def test_every_job_button_on_the_deck_page_is_actually_startable(client):
+    """A button that renders and then refuses is worse than no button.
+
+    The deck page built its list as `KINDS.items() if k != "meta"` — the
+    literal string, not `jobs.DECKLESS`, which is `("meta", "images")`.
+    So it offered "cache card art", and POSTing it to the per-deck route
+    answered **"Unknown job type"**. Clicking a button and being told the
+    job does not exist reads as the whole feature being broken, which is
+    how this was reported.
+
+    This walks every button the page actually renders and asserts the
+    route accepts it, so the two lists cannot drift apart again.
+    """
+    import re
+
+    _logged_in(client)
+    deck = "kewl-tune"
+    body = client.get(f"/deck/{deck}", follow_redirects=True).get_data(as_text=True)
+    kinds = re.findall(rf'/deck/{deck}/run/([a-z]+)"', body)
+    assert kinds, "the deck page renders no job buttons at all"
+
+    from skills import db
+    from web import jobs
+
+    conn = db.connect()
+    for kind in kinds:
+        assert kind not in jobs.DECKLESS, (
+            f"the deck page offers {kind!r}, which is deckless and will be "
+            "refused by the per-deck route")
+        r = client.post(f"/deck/{deck}/run/{kind}", follow_redirects=True)
+        page = r.get_data(as_text=True)
+        assert "Unknown job type" not in page, \
+            f"the deck page offers {kind!r} but the route refuses it"
+        # Started it, so put it back -- a test must not leave hours of
+        # solver queued on the machine it runs on.
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE kind=? ORDER BY id DESC LIMIT 1",
+            (kind,)).fetchone()
+        if row:
+            jobs.cancel(conn, row["id"])
+
+
+def test_deckless_jobs_live_on_the_setup_page(client):
+    """...and the deckless ones must still be reachable somewhere."""
+    import re
+    from web import jobs
+
+    _logged_in(client)
+    body = client.get("/maintenance", follow_redirects=True).get_data(as_text=True)
+    offered = set(re.findall(r'action="/run/([a-z]+)"', body))
+    for kind in jobs.DECKLESS:
+        assert kind in offered, \
+            f"{kind} is deckless and has no button on the setup page either"
