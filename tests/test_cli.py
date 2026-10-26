@@ -83,3 +83,26 @@ def test_every_command_is_either_walked_or_excluded():
         f"{sorted(missing)} are registered but neither walked nor "
         "excluded -- add them to READ_ONLY or to the exclusion set with a "
         "reason")
+
+
+def test_doctor_does_not_re_enter_the_test_suite():
+    """`doctor` must not shell out to pytest from inside pytest.
+
+    The guard block runs `venv/bin/pytest tests/ -q` as a subprocess, and
+    this file calls `cmd_doctor` -- so each doctor started a suite that
+    started a doctor. It looked harmless only because the inner run died
+    instantly on `import daemon` (no conftest); once collection worked the
+    recursion took the machine's load average to 13.
+
+    Asserting on the printed line rather than on the environment check,
+    because the line is what proves the subprocess was skipped.
+    """
+    conn = db.connect()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        daemon.COMMANDS["doctor"](conn, [])
+    out = buf.getvalue()
+    assert "regression tests" in out
+    assert "already running under pytest" in out, (
+        "doctor ran the suite recursively -- see the GUARDS block in "
+        "cmd_doctor")

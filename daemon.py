@@ -550,8 +550,18 @@ def cmd_doctor(conn, args):
     print(f"            active deck: {active or '(none — `import` or `mydeck`)'}")
 
     print("\n  GUARDS")
+    # `tests/test_cli.py` calls this function, so shelling out to the suite
+    # from inside the suite re-enters it: each `doctor` starts a pytest that
+    # starts a `doctor` that starts a pytest. It only ever looked harmless
+    # because the inner run died instantly on an ImportError -- a broken
+    # collection was the only thing ending the recursion. With that fixed
+    # (tests/conftest.py) the same loop ran the machine's load average to
+    # 13 before the timeout killed the tree. Under pytest, skip the guard
+    # that IS pytest; the other four are plain scripts and cannot re-enter.
+    in_pytest = "PYTEST_CURRENT_TEST" in os.environ
     for label, cmd in (
-        ("regression tests", [str(engine.ROOT / "venv/bin/pytest"), "tests/", "-q"]),
+        ("regression tests", None if in_pytest
+         else [str(engine.ROOT / "venv/bin/pytest"), "tests/", "-q"]),
         ("invariants", [str(engine.PYTHON), "tools/check_invariants.py"]),
         ("field audit", [str(engine.PYTHON), "tools/audit_fields.py"]),
         ("doc drift", [str(engine.PYTHON), "tools/check_docs.py"]),
@@ -561,6 +571,9 @@ def cmd_doctor(conn, args):
         # an hour later. pyflakes finds both by name and line.
         ("undefined names", [str(engine.PYTHON), "tools/check_names.py"]),
     ):
+        if cmd is None:
+            print(f"    --    {label:18} skipped — already running under pytest")
+            continue
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
         tail = (r.stdout or r.stderr).strip().splitlines()
         summary = tail[-1] if tail else "(no output)"
