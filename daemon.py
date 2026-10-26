@@ -1326,6 +1326,15 @@ def cmd_optimize(conn, args):
         for code, share in sorted(wr.items()):
             nm = handlab._name(conn, int(code)) if str(code).isdigit() else code
             print(f"    {nm:34s} {(share or 0)*100:5.1f}% of windows recovered")
+        # This share is BINARY per window: the funnel counts a window as
+        # recovered only when the whole board came back, and it never sees
+        # the solver's own grade ("best 4/5"), which lives in a fire log
+        # the funnel discards. So a window that rebuilt four of five board
+        # cards is a 0 here. `hand <deck> <cards>` reads those logs and
+        # reports the grade; this column is the floor of it, not a
+        # different measurement of the same thing.
+        print("  Binary per window: only a WHOLE board counts, so a window")
+        print("  that rebuilt 4 of 5 cards reads 0 here. `hand` grades them.")
     print("\n  A gain inside its confidence interval is noise. With 8-12 hands")
     print("  most of these intervals overlap — treat the table as a shortlist")
     print("  to re-run at higher hand counts, not as a ranking.")

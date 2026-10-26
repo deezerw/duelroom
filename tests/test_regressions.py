@@ -4693,3 +4693,19 @@ def test_rank_boards_sorts_unscored_last():
         "a measured one by default")
     assert rows[0]["through"] == 0.0 and rows[1]["through"] is None
     assert rows[1]["coverage"] == 0.0
+
+
+def test_pilot_body_shows_the_recovery_grade():
+    """The hand lab must show the grade, not only the converted count.
+
+    The CLI and the web read the same `handlab.analyse` record, and the
+    web view is the one being built to replace the CLI -- a number that
+    only the CLI prints is a number the user will stop seeing.
+    """
+    from pathlib import Path
+
+    src = Path("web/templates/_pilot_body.html").read_text()
+    assert "h.kept" in src and "h.of" in src, (
+        "the per-trap grade (kept/of board cards) must reach the web view")
+    assert "d.kept" in src and "d.of" in src, (
+        "the per-window grade must reach the web view")

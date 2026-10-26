@@ -178,6 +178,14 @@
           {% endif %},
           <span class="{{ 'bad' if (h.windows - (h.converted or 0)) else 'ok' }}">
           {{ h.windows - (h.converted or 0) }} with no recovery found</span></span>
+        {% if h.of %}
+          {# The GRADE, not the verdict. "0 recovered" over windows that
+             each kept four of five board cards is a different hand to
+             hold from one that kept none, and the solver graded every
+             window. #}
+          <span class="pill">keeps {{ h.kept }}/{{ h.of }} board card(s)
+            ({{ (h.kept_share * 100)|round|int }}%)</span>
+        {% endif %}
       {% else %}
         <span class="muted">no legal window in this line</span>
       {% endif %}
@@ -199,7 +207,10 @@
         <span class="muted mono">decision {{ d.decision }}{% if d.after_summons
           is not none %} · after {{ d.after_summons }} summon(s){% endif %}</span>
         {% if d.survived %}<span class="pill ok">you play through it</span>
-        {% else %}<span class="pill bad">no recovery found</span>{% endif %}
+        {% else %}<span class="pill bad">no recovery found</span>
+          {% if d.of %}<span class="pill">kept {{ d.kept }}/{{ d.of }}</span>
+          {% endif %}
+        {% endif %}
         {% if d.missing and not d.survived %}
           <div class="muted" style="font-size:12px">would have needed:
             {{ d.missing|join(', ') }}</div>
