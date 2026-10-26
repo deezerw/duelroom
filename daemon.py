@@ -280,9 +280,13 @@ def _print_pilot(r):
         # kept four of five board cards is a different hand to hold from
         # one that kept none, and the solver graded every window.
         if h.get("of"):
-            print(f"      of the board it asked back for, you keep "
-                  f"{h['kept']}/{h['of']} card(s) "
-                  f"({h['kept_share']*100:.0f}%) across those points")
+            print(f"      you get back {h['kept']}/{h['of']} of the target "
+                  f"board's cards ({h['kept_share']*100:.0f}%) over those "
+                  f"points")
+            if h.get("complete_but_unmatched"):
+                print(f"      of which {h['complete_but_unmatched']} point(s) "
+                      f"got EVERY card back in a board that did not match "
+                      f"the original")
         if h["blind_spot"]:
             print(f"      note: {h['blind_spot']}")
         if h["parse_error"]:
@@ -293,8 +297,11 @@ def _print_pilot(r):
             print(f"      when it lands and you play on, you still reach: {got}")
         for d in h["detail"]:
             mark = "survives" if d["survived"] else "NO RECOVERY FOUND"
-            grade = (f"  [kept {d['kept']}/{d['of']}]"
-                     if d.get("of") and not d["survived"] else "")
+            grade = ""
+            if d.get("of") and not d["survived"]:
+                grade = f"  [got back {d['kept']}/{d['of']}"
+                grade += ("; all of them, but not in a matching board]"
+                          if d["kept"] == d["of"] else "]")
             print(f"      on {d['over'] or '?'}  ->  {mark}{grade}")
             if d["missing"] and not d["survived"]:
                 print(f"         would have needed: {', '.join(d['missing'])}")
@@ -1405,12 +1412,24 @@ def cmd_gauntlet(conn, args):
               f"a cheap run is a wrong run, not a fast one")
     print()
 
-    cands = gauntlet.candidate_boards(deck_path, hand, keep=boards,
+    found = gauntlet.candidate_boards(deck_path, hand, keep=None,
                                       draws=draws, solve_ms=solve_ms,
                                       log=print)
-    if not cands:
+    if not found:
         print("\nno end board was reached at all — this hand is a brick")
         return
+    cands = found[:boards]
+    # The `base` rung -- build nothing, keep what the hand holds -- survives
+    # the cut even when the heuristic score buries it, and it matters MORE
+    # to this method than to the old one: its pieces are the hand traps you
+    # kept, which is exactly what `--fire` measures. "Is building anything
+    # better than holding your traps?" is the comparison, and without the
+    # rung there is nothing to compare against.
+    base = next((c for c in found if c.label == "base"), None)
+    if base is not None and base not in cands:
+        cands.append(base)
+        print(f"  + [base]: {base.interruptions} int (do nothing, hold what "
+              f"the hand holds) — carried as the comparison")
 
     print("\nranking the boards by what gets through them")
     rows = gauntlet.rank_boards(cands, m, weights, log=print)
@@ -1420,8 +1439,9 @@ def cmd_gauntlet(conn, args):
         c = r["candidate"]
         thr = ("    n/a" if r["through"] is None
                else f"  {r['through']:5.0%}")
+        tag = "  (built nothing)" if c["label"] == "base" else ""
         print(f"  {thr}  {c['interruptions']} int / {c['negates']} neg"
-              f"  [{c['label']}]")
+              f"  [{c['label']}]{tag}")
         # Three classes, kept apart on purpose. "Held in hand" is what
         # the fire test reproduces exactly; a held card with no matrix
         # cell is eligible but unmeasured; a field or graveyard piece is
@@ -1464,6 +1484,24 @@ def cmd_gauntlet(conn, args):
     best = scored[0]
     print(f"\n  best board: [{best['candidate']['label']}], "
           f"{best['through']:.0%} of the weighted meta plays through it")
+    # The comparison that decides whether building was worth it. If the
+    # base rung scores the same, this method is saying your hand traps did
+    # the work and the board added nothing it can see -- which is a real
+    # answer, not a failure, and the field pieces it cannot see are where
+    # the difference would be.
+    base_row = next((r for r in scored
+                     if r["candidate"]["label"] == "base"), None)
+    if base_row is not None and base_row is not best:
+        print(f"  building nothing and holding your traps lets "
+              f"{base_row['through']:.0%} through, so the board is worth "
+              f"{base_row['through'] - best['through']:+.0%} on what was "
+              f"measured")
+    elif base_row is not None:
+        print("  ! holding your traps and building NOTHING scores as well as "
+              "the best board.")
+        print("    On the pieces this method can see, the board added "
+              "nothing — and what it")
+        print("    cannot see (the field) is where any difference would be.")
     if len({round(r["through"], 4) for r in scored}) == 1:
         print("  ! every scored board came out the SAME. They hold the same")
         print("    measurable pieces, so this method cannot separate them —")

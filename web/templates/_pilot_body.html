@@ -183,8 +183,12 @@
              each kept four of five board cards is a different hand to
              hold from one that kept none, and the solver graded every
              window. #}
-          <span class="pill">keeps {{ h.kept }}/{{ h.of }} board card(s)
-            ({{ (h.kept_share * 100)|round|int }}%)</span>
+          <span class="pill">gets back {{ h.kept }}/{{ h.of }} target
+            card(s) ({{ (h.kept_share * 100)|round|int }}%)</span>
+          {% if h.complete_but_unmatched %}
+            <span class="pill">{{ h.complete_but_unmatched }} point(s) got
+              EVERY card back in a board that did not match</span>
+          {% endif %}
         {% endif %}
       {% else %}
         <span class="muted">no legal window in this line</span>
@@ -208,7 +212,9 @@
           is not none %} · after {{ d.after_summons }} summon(s){% endif %}</span>
         {% if d.survived %}<span class="pill ok">you play through it</span>
         {% else %}<span class="pill bad">no recovery found</span>
-          {% if d.of %}<span class="pill">kept {{ d.kept }}/{{ d.of }}</span>
+          {% if d.of %}<span class="pill">got back {{ d.kept }}/{{ d.of
+            }}{% if d.kept == d.of %}; all of them, but not in a matching
+            board{% endif %}</span>
           {% endif %}
         {% endif %}
         {% if d.missing and not d.survived %}

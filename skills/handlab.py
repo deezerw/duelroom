@@ -139,13 +139,21 @@ def parse_windows(log_text):
             "after_summons": int(sm.group("n")) if sm else None,
             "survived": survived,
             "rollouts": int(roll.group("n")) if roll else None,
-            # HOW MUCH OF THE BOARD came back, not just whether all of it
-            # did: the solver prints "best 4/5" beside every window, and
-            # that is the graded recovery this report used to throw away.
+            # HOW MUCH OF THE BOARD came back, not just whether all of
+            # it did. The solver prints "best 4/5" beside every window --
+            # `st.best_overlap / target.codes.size()` in main.cpp -- and
             # `_ROLLOUTS` has always captured the pair; nothing read it.
             # A window that keeps 4 of 5 and one that keeps 0 of 5 both
             # read "NO RECOVERY FOUND" without it, and they are not the
             # same hand to hold.
+            #
+            # It counts the target board's CARD CODES, by multiset
+            # overlap. Conversion is stricter -- a full board match -- so
+            # `kept == of` on an unconverted window is a real state and
+            # not a contradiction: every card came back, in a board that
+            # does not match the original. `complete_but_unmatched`
+            # counts those, because a bare "2/2, no recovery found" reads
+            # like a parser bug.
             "kept": int(roll.group("a")) if roll and roll.group("a") else None,
             "of": int(roll.group("b")) if roll and roll.group("b") else None,
             "missing": ([x.strip() for x in miss.group("cards").split(",")]
@@ -349,6 +357,21 @@ def recovery_grade(rows):
     return (kept, of) if of else (None, None)
 
 
+def complete_but_unmatched(rows):
+    """Windows where every target card came back but the board did not match.
+
+    `kept`/`of` is a multiset overlap on the target board's card CODES;
+    conversion demands the whole board match. So `kept == of` on a window
+    that did not convert is a real state -- the cards are all back, in a
+    different board -- and the closest thing to a full recovery that
+    "NO RECOVERY FOUND" can hide. Counted rather than smoothed over,
+    because `2/2` beside `no recovery found` reads like a parser bug.
+    """
+    return sum(1 for r in rows
+               if not r.get("survived") and r.get("of")
+               and r.get("kept") == r["of"])
+
+
 def spare_spec(target):
     """A goal target as ``--fire-spare`` can resolve it: a BARE CODE.
 
@@ -523,6 +546,8 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                     kept, of = recovery_grade(detail)
                     row["kept"], row["of"] = kept, of
                     row["kept_share"] = (kept / of) if of else None
+                    row["complete_but_unmatched"] = complete_but_unmatched(
+                        detail)
                     v = parse_verdict(logf.read_text())
                     if v:
                         row["full"] = v["full"]

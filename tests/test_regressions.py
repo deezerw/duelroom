@@ -4754,7 +4754,39 @@ def test_pilot_body_renders_the_recovery_grade():
     app = create_app()
     with app.test_request_context():
         html = render_template("_pilot_body.html", r=rec)
-    assert "keeps 4/5 board card(s)" in html, (
+    assert "gets back 4/5 target" in html, (
         "the per-trap grade did not reach the rendered page")
-    assert "kept 4/5" in html, (
+    assert "got back 4/5" in html, (
         "the per-window grade did not reach the rendered page")
+    # `kept == of` on an unconverted window is a real state, not a bug:
+    # the cards all came back in a board that does not match. It must be
+    # SAID, because "2/2" beside "no recovery found" reads like a parser
+    # bug and that is how the first run of this looked.
+    rec["handtraps"][0]["detail"][0].update({"kept": 2, "of": 2})
+    rec["handtraps"][0]["complete_but_unmatched"] = 1
+    with app.test_request_context():
+        html = render_template("_pilot_body.html", r=rec)
+    assert "not in a matching" in html, (
+        "a full-overlap window that did not convert must say so")
+    assert "EVERY card back" in html
+
+
+def test_complete_but_unmatched_is_counted_not_smoothed_over():
+    """`kept == of` on an unconverted window is a real state.
+
+    `kept`/`of` is the solver's multiset overlap on the target board's
+    CARD CODES (`st.best_overlap / target.codes.size()`); conversion
+    demands the whole board match. So a window can get every card back
+    in a board that does not match the original -- the closest thing to a
+    full recovery that "NO RECOVERY FOUND" can hide. The first real run
+    printed "2/2" beside "no recovery found", which reads like a parser
+    bug, and that is why it is named.
+    """
+    from skills.handlab import complete_but_unmatched
+
+    rows = [{"survived": False, "kept": 2, "of": 2},     # all back, no match
+            {"survived": False, "kept": 0, "of": 2},     # nothing back
+            {"survived": True, "kept": 2, "of": 2},      # converted
+            {"survived": False, "kept": None, "of": None}]  # ungraded
+    assert complete_but_unmatched(rows) == 1
+    assert complete_but_unmatched([]) == 0
