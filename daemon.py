@@ -1879,10 +1879,14 @@ def cmd_report(conn, args):
                               cell.get("offered") or 0))
         live = [t for t in surv_rows if t[2] is not None and t[3]]
         unmeasured = [t for t in surv_rows if t[2] is None or not t[3]]
+        # Bound before `if live:`, not inside it. The blind-spot loop
+        # below reads it whenever there are UNMEASURED rows, so a deck
+        # with no live handtrap and at least one unmeasured one raised
+        # UnboundLocalError -- `report Blitzclique` did exactly that.
+        blind = []
         if live:
             print("\n  PLAYS THROUGH (higher is better — this is YOUR deck)")
             print("    % is of the hands where the card was LIVE, not of all hands")
-            blind = []
             for row, code, sv, tested, offered in sorted(live,
                                                          key=lambda t: t[2]):
                 name = row["name"] if row else code
@@ -1897,29 +1901,45 @@ def cmd_report(conn, args):
             judged = [t for t in live
                       if int(t[1]) not in scenarios.BLIND_SPOTS]
             if judged:
-                worst = min(judged, key=lambda t: t[2])
-                wname = worst[0]["name"] if worst[0] else worst[1]
-                print(f"    -> {wname} is your worst matchup card")
+                # Ties are the common case, not an edge: branded folds to
+                # Imperm, Ash AND Veiler at 0%, and `min` named whichever
+                # the stored record happened to list first -- a card
+                # picked by JSON key order, presented as the answer.
+                floor = min(t[2] for t in judged)
+                tied = [t for t in judged if t[2] == floor]
+                names = [(t[0]["name"] if t[0] else str(t[1])) for t in tied]
+                if len(names) == 1:
+                    print(f"    -> {names[0]} is your worst matchup card")
+                else:
+                    print(f"    -> {len(names)} cards tie as your worst "
+                          f"matchup at {floor*100:.0f}%: "
+                          f"{', '.join(sorted(names))}")
         for row, code, _sv, tested, offered in unmeasured:
-            name = (row["name"] if row else code)
-            print(f"    n/a   {name:<30} never had a legal window in "
+            uname = (row["name"] if row else code)
+            print(f"    n/a   {uname:<30} never had a legal window in "
                   f"{offered} solved hand(s) — UNMEASURED")
-            for name, code in blind:
-                print(f"    ! {name}: {scenarios.BLIND_SPOTS[code]}.")
-                if code == 23434538:
-                    cache = ROOT / "results" / "special_summons.json"
-                    cost = None
-                    if cache.exists():
-                        ss = json.loads(cache.read_text())
-                        if r["name"] in ss:
-                            cost = ss[r["name"]]
-                    if cost:
-                        print(f"      Measured separately: comboing through it hands "
-                              f"them {cost['mean']:.1f} cards")
-                        print(f"      on average, {cost['max']} at worst. Surviving it "
-                              f"is not beating it.")
-                    else:
-                        print(f"      Run `threats` for the cards it actually costs you.")
+        # Dedented out of the loop above, where it had been printing once
+        # per unmeasured row (branded printed the Maxx "C" note twice) and
+        # not at all for a deck with no unmeasured rows -- which is every
+        # deck whose handtraps were all live, i.e. the ones where the
+        # blind spot most needed saying. It also shadowed that loop's
+        # `name` and `code`.
+        for name, code in blind:
+            print(f"    ! {name}: {scenarios.BLIND_SPOTS[code]}.")
+            if code == 23434538:
+                cache = ROOT / "results" / "special_summons.json"
+                cost = None
+                if cache.exists():
+                    ss = json.loads(cache.read_text())
+                    if r["name"] in ss:
+                        cost = ss[r["name"]]
+                if cost:
+                    print(f"      Measured separately: comboing through it hands "
+                          f"them {cost['mean']:.1f} cards")
+                    print(f"      on average, {cost['max']} at worst. Surviving it "
+                          f"is not beating it.")
+                else:
+                    print(f"      Run `threats` for the cards it actually costs you.")
         # The "never had a window" rows are printed by the `unmeasured`
         # loop above, which names how many solved hands the card was
         # absent from. This was a second, stale copy left behind by the
@@ -1942,8 +1962,18 @@ def cmd_report(conn, args):
         how = (f" — identified from your cards, {g[1]*100:.0f}% of its "
                f"{g[2]}-card core" if g else "")
         print(f"\n  VS THE META  ({inc['lists']} lists of {r['archetype']}){how}")
-        for alt, ov, n_ in (r.get("archetype_alts") or []):
-            print(f"    also matches {alt} ({ov*100:.0f}% of {n_} core)")
+        # `identify_archetype` returns (archetype, overlap, n_core,
+        # n_lists); this unpacked the first three and raised ValueError on
+        # every deck with an alternative guess. Indexed rather than
+        # unpacked because this is the SECOND time a widened tuple broke a
+        # stale call site in `report` -- #49 did it to surv_rows -- and
+        # indexing cannot break that way again.
+        for guess in (r.get("archetype_alts") or []):
+            alt, ov, n_core = guess[0], guess[1], guess[2]
+            n_lists = guess[3] if len(guess) > 3 else None
+            seen = f", {n_lists} lists" if n_lists else ""
+            print(f"    also matches {alt} ({ov*100:.0f}% of {n_core} "
+                  f"core{seen})")
         print(f"    {inc['core']} core cards, {inc['flex']} contested slots")
         if inc["off_meta"]:
             print("    cards in your list that no scraped list runs:")

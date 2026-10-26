@@ -106,3 +106,49 @@ def test_doctor_does_not_re_enter_the_test_suite():
     assert "already running under pytest" in out, (
         "doctor ran the suite recursively -- see the GUARDS block in "
         "cmd_doctor")
+
+
+def _deck_names():
+    from skills import engine
+    return sorted(p.stem for p in (engine.ROOT / "assets" / "decks").glob("*.ydk"))
+
+
+@pytest.mark.parametrize("deck", _deck_names())
+def test_report_does_not_raise_on_any_deck(deck):
+    """`report` was walked only with no arguments, i.e. only ever against
+    the active deck, and the active deck happened to miss both crashes
+    living in it:
+
+      * `cmd_report` unpacked `identify_archetype`'s rows as 3-tuples
+        after a fourth field was added, so every deck with an
+        ALTERNATIVE archetype guess raised ValueError -- 6 of the 12
+        deck files. The active deck has one guess, so it passed.
+      * `blind` was bound inside `if live:` but read from the
+        UNMEASURED loop, so a deck with no live handtrap and at least
+        one unmeasured one raised UnboundLocalError. `Blitzclique` did.
+
+    The dispatcher catches both, prints a traceback and exits 0, which
+    is why nothing noticed. A deck file is cheap to walk; this is the
+    same argument that put the CLI smoke walk here in the first place.
+    """
+    fn = daemon.COMMANDS["report"]
+    conn = db.connect()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(conn, [deck])
+
+
+def test_report_prints_a_blind_spot_note_once_per_deck():
+    """The blind-spot loop sat INSIDE the unmeasured loop, so it printed
+    once per unmeasured row and not at all when there were none. branded
+    printed the Maxx "C" note twice; kewl-tune, despia, elfnote,
+    fiendsmith, sky-striker and light-and-darkness-ritual -- every deck
+    whose handtraps were all live -- printed it zero times, which is
+    where a blind spot most needs saying."""
+    conn = db.connect()
+    for deck in ("branded", "kewl-tune"):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            daemon.COMMANDS["report"](conn, [deck])
+        n = buf.getvalue().count('! Maxx "C": lines convert')
+        assert n == 1, f"{deck} printed the blind-spot note {n} times"

@@ -598,9 +598,14 @@ def identify_archetype(conn, deck, fmt=DEFAULT_FORMAT, min_overlap=0.5):
     than its whole pool: the core is what makes a deck that deck, while
     the flex slots are mostly shared staples that would match everything.
 
-    Returns [(archetype, overlap, n_core)] best first. The caller decides
-    whether the top score is good enough -- a 50% overlap on a 4-card
-    core is two staples and means nothing.
+    Returns [(archetype, overlap, n_core, n_lists)] best first. The
+    caller decides whether the top score is good enough -- a 50% overlap
+    on a 4-card core is two staples and means nothing, and a core drawn
+    from three lists is whatever those three decks shared.
+
+    The docstring said three fields for as long as there were four, and
+    `cmd_report` unpacked three and raised ValueError on every deck with
+    an alternative guess.
     """
     have = set(deck.main) | set(deck.extra)
     rows = conn.execute(
