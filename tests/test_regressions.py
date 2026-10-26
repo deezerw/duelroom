@@ -4721,17 +4721,40 @@ def test_rank_boards_sorts_unscored_last():
     assert rows[1]["coverage"] == 0.0
 
 
-def test_pilot_body_shows_the_recovery_grade():
-    """The hand lab must show the grade, not only the converted count.
+def test_pilot_body_renders_the_recovery_grade():
+    """The hand lab must SHOW the grade, not only the converted count.
 
     The CLI and the web read the same `handlab.analyse` record, and the
-    web view is the one being built to replace the CLI -- a number that
-    only the CLI prints is a number the user will stop seeing.
+    web view is the one being built to replace the CLI -- a number only
+    the CLI prints is a number the user will stop seeing. Rendered rather
+    than grepped, because a field named in a template that never reaches
+    the output is the failure this is guarding.
     """
-    from pathlib import Path
+    from flask import render_template
 
-    src = Path("web/templates/_pilot_body.html").read_text()
-    assert "h.kept" in src and "h.of" in src, (
-        "the per-trap grade (kept/of board cards) must reach the web view")
-    assert "d.kept" in src and "d.of" in src, (
-        "the per-window grade must reach the web view")
+    from web import create_app
+
+    rec = {
+        "deck": "d", "hand": [1], "hand_names": ["X"], "chosen": [1],
+        "filled": [], "status": "solved", "solve_ms": 1000, "fire_ms": 1000,
+        "interruptions": 2, "steps": [], "board": [], "goal": [],
+        "reading": {"interruptions": [], "follow_up": [], "resources": {}},
+        "candidates": [], "error": "",
+        "handtraps": [{
+            "code": 14558127, "name": "Ash", "status": "solved",
+            "windows": 4, "converted": 1, "blind_spot": None,
+            "parse_error": None, "kept": 4, "of": 5, "kept_share": 0.8,
+            "recovered_board": [], "recovered_reading": None,
+            "recovered_steps": [],
+            "detail": [{"window": 0, "over": "A", "decision": 4,
+                        "after_summons": 1, "survived": False,
+                        "rollouts": 494, "kept": 4, "of": 5,
+                        "missing": ["Zalen"], "answers": [],
+                        "open_window": False}]}]}
+    app = create_app()
+    with app.test_request_context():
+        html = render_template("_pilot_body.html", r=rec)
+    assert "keeps 4/5 board card(s)" in html, (
+        "the per-trap grade did not reach the rendered page")
+    assert "kept 4/5" in html, (
+        "the per-window grade did not reach the rendered page")
