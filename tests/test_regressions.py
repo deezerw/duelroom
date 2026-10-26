@@ -2917,18 +2917,32 @@ def test_optimize_announces_the_pool_it_will_actually_use():
 
 
 def test_rescore_labels_distinguish_the_cut(tmp_path):
-    """Trial names are "<deck>_r<round>_<cut>_<add>" since the cut was
-    added to them, but the label parser read only the last segment — so a
-    3-slot run rendered as duplicate rows ("Called by the Grave" twice,
-    over two different cuts)."""
-    import inspect
-    import daemon
-    src = inspect.getsource(daemon.cmd_rescore)
-    assert 'parts[-2].isdigit()' in src, (
-        "rescore still reads only the add card from the trial name")
-    # Both shapes must render: with a cut, and the older add-only names.
-    assert 'f"-{handlab._name(conn, int(parts[-2]))}"' in src
-    assert 'f"+{handlab._name(conn, int(parts[-1]))}"' in src
+    """Two trials that add the same card over DIFFERENT cuts are two
+    different lists and must render as two different rows. They once
+    rendered identically ("Called by the Grave" twice) because the label
+    parser read only the last segment of the trial name.
+
+    Asserted on behaviour rather than on the source of the parser: the
+    cut and add now come from the trial's own .ydk, so there is no
+    parser left to inspect, but the requirement is unchanged.
+    """
+    from skills import optimizer
+
+    summary = {"brick_rate": 0.3, "best_line_rate": 0.7,
+               "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.4},
+               "window_recovery": {"ash": 0.36}, "hands": 10}
+    _optimizer_scratch(tmp_path, [
+        ("d_r0_1005_2000", 1005, 2000, dict(summary)),
+        ("d_r0_1006_2000", 1006, 2000, dict(summary)),
+    ])
+
+    rows = optimizer.rescore("d", scratch=tmp_path)
+    cands = [r for r in rows if r["label"] != "base"]
+    assert len(cands) == 2, "same add over two cuts is two candidates"
+    assert {tuple(r["cut"]) for r in cands} == {(1005,), (1006,)}
+    assert all(r["add"] == [2000] for r in cands)
+    assert all(r.get("measured", 1) == 1 for r in cands), (
+        "different lists must not be merged just because they score alike")
 
 
 def test_drill_reports_the_number_it_ranks_by(tmp_path):
@@ -3034,6 +3048,98 @@ def test_draws_curve_recovers_the_per_draw_payoff(tmp_path):
     assert row["at_draw"][1] == "2/2", row["at_draw"]
     # One solve ran after hand 0 had already peaked.
     assert row["wasted"] == 1, row["wasted"]
+
+
+def _optimizer_scratch(tmp_path, trials):
+    """A stored optimiser run: a base .ydk/.jsonl plus one of each per trial."""
+    import json as _json
+    base_main = list(range(1000, 1040))
+
+    def write(label, main):
+        (tmp_path / f"{label}.ydk").write_text(
+            "#created by duelroom\n#main\n"
+            + "\n".join(str(c) for c in main)
+            + "\n#extra\n!side\n")
+
+    write("d", base_main)
+    (tmp_path / "d.jsonl").write_text(_json.dumps(
+        {"summary": {"brick_rate": 0.2, "best_line_rate": 0.8,
+                     "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.0},
+                     "window_recovery": {"ash": 0.3}, "hands": 10}}) + "\n")
+    for label, cut, add, summary in trials:
+        main = [c for c in base_main if c != cut] + [add]
+        write(label, main)
+        (tmp_path / f"{label}.jsonl").write_text(
+            _json.dumps({"summary": summary}) + "\n")
+    return base_main
+
+
+def test_rescore_reads_the_change_from_the_decklist_not_the_filename(tmp_path):
+    """Trial names gained the cut partway through the project, so the
+    older half of every stored run is named `<deck>_r<round>_<add>` with
+    no cut in it. `cmd_rescore` parsed the name, so those rows rendered
+    as a bare "+Card" -- a pure addition, which would be a 45-card deck
+    and is not what ran. Proven on the stored run:
+    `blue-eyes-branded-test_r0_24224830.ydk` and
+    `..._r0_30576089_24224830.ydk` are byte-identical and both cut
+    30576089.
+    """
+    from skills import optimizer
+
+    summary = {"brick_rate": 0.3, "best_line_rate": 0.7,
+               "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.4},
+               "window_recovery": {"ash": 0.36}, "hands": 10}
+    _optimizer_scratch(tmp_path, [("d_r0_2000", 1005, 2000, summary)])
+
+    change = optimizer.trial_change("d_r0_2000", "d", scratch=tmp_path)
+    assert change["cut"] == [1005], change
+    assert change["add"] == [2000], change
+
+
+def test_rescore_does_not_count_one_experiment_twice(tmp_path):
+    """The same decklist is stored under both naming schemes, with
+    identical summaries -- the solver is deterministic given the same
+    deck, hands and target. Printing both shows one experiment as two
+    agreeing rows, which is how a ranking gets believed harder than its
+    evidence."""
+    from skills import optimizer
+
+    summary = {"brick_rate": 0.3, "best_line_rate": 0.7,
+               "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.4},
+               "window_recovery": {"ash": 0.36}, "hands": 10}
+    _optimizer_scratch(tmp_path, [
+        ("d_r0_2000", 1005, 2000, summary),            # old naming, no cut
+        ("d_r0_1005_2000", 1005, 2000, dict(summary)),  # new naming
+    ])
+
+    rows = optimizer.rescore("d", scratch=tmp_path)
+    assert len(rows) == 2, [r["label"] for r in rows]   # base + one candidate
+    cand = [r for r in rows if r["label"] != "base"][0]
+    assert cand["measured"] == 2, cand
+    assert cand["label"] == "d_r0_1005_2000", (
+        "keep the label that names both halves of the swap")
+
+
+def test_rescore_keeps_both_rows_when_two_runs_of_a_list_disagree(tmp_path):
+    """A disagreement between two records of the SAME decklist is a
+    finding, not a duplicate -- the solver is supposed to be
+    deterministic here. Collapsing it would hide exactly the thing worth
+    seeing."""
+    from skills import optimizer
+
+    a = {"brick_rate": 0.3, "best_line_rate": 0.7, "hand_trap_survival": 0.0,
+         "combo_actions": {"mean": 8.4}, "window_recovery": {"ash": 0.36},
+         "hands": 10}
+    b = dict(a, brick_rate=0.5)
+    _optimizer_scratch(tmp_path, [
+        ("d_r0_2000", 1005, 2000, a),
+        ("d_r0_1005_2000", 1005, 2000, b),
+    ])
+
+    rows = optimizer.rescore("d", scratch=tmp_path)
+    cands = [r for r in rows if r["label"] != "base"]
+    assert len(cands) == 2, cands
+    assert all(r["inconsistent"] == 2 for r in cands), cands
 
 
 def test_draws_curve_denominator_does_not_move_when_hands_stop_early(tmp_path):

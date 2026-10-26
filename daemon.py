@@ -1451,6 +1451,27 @@ def cmd_gauntlet(conn, args):
     print(f"  written to {path}")
 
 
+def _trial_change_text(conn, row):
+    """What a trial changed, from its stored decklist.
+
+    This used to be parsed out of the trial's FILENAME, and the filenames
+    are not all the same shape: trial names gained the cut partway
+    through the project, so `<deck>_r<round>_<add>` from the earlier runs
+    rendered as a bare "+Card" -- an addition with nothing cut, which
+    would be a 45-card deck and was never what ran. The .ydk next to each
+    trial says exactly what it did, so `optimizer.trial_change` reads
+    that and the filename is no longer load-bearing.
+    """
+    if row["label"] == "base":
+        return "(your current list)"
+    cut, add = row.get("cut"), row.get("add")
+    if cut is None and add is None:
+        return row["label"]          # no .ydk kept; say nothing we cannot show
+    parts = [f"-{handlab._name(conn, c)}" for c in (cut or [])]
+    parts += [f"+{handlab._name(conn, c)}" for c in (add or [])]
+    return "  ".join(parts) if parts else "(no change)"
+
+
 def cmd_rescore(conn, args):
     """Re-rank a finished optimiser run under the current objective.
 
@@ -1484,19 +1505,11 @@ def cmd_rescore(conn, args):
     print(f"  {'score':>7} {'brick':>6} {'solve':>6} {'surv':>5} "
           f"{'combo':>6} {'recov':>6}  change")
     for r in rows:
-        # Trial names are "<deck>_r<round>_<cut>_<add>" since the cut was
-        # added to them. Reading only the last segment showed the ADD and
-        # dropped the cut, so a 3-slot run rendered as duplicate rows --
-        # "Called by the Grave" twice, over two different cuts.
-        parts = r["label"].split("_")
-        shown = r["label"]
-        if r["label"] == "base":
-            shown = "(your current list)"
-        elif len(parts) >= 2 and parts[-1].isdigit() and parts[-2].isdigit():
-            shown = (f"-{handlab._name(conn, int(parts[-2]))}"
-                     f"  +{handlab._name(conn, int(parts[-1]))}")
-        elif parts[-1].isdigit():
-            shown = f"+{handlab._name(conn, int(parts[-1]))}"
+        shown = _trial_change_text(conn, r)
+        if r.get("inconsistent"):
+            shown += f"  [!{r['inconsistent']} runs DISAGREE]"
+        elif r.get("measured", 1) > 1:
+            shown += f"  (measured {r['measured']}x, same result)"
         print(f"  {r['score']:+7.3f} {(r['brick_rate'] or 0):6.2f} "
               f"{(r['best_line_rate'] or 0):6.2f} {(r['survival'] or 0):5.2f} "
               f"{(r['combo_mean'] or 0):6.2f} {r['window_recovery']:6.3f}  "

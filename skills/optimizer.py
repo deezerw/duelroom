@@ -24,6 +24,7 @@ Two costs to respect:
 """
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -608,6 +609,42 @@ def stored_trials(deck_name, scratch=None):
     return sorted(out, key=lambda t: t[0] != "base")
 
 
+def trial_change(label, deck_name, scratch=None):
+    """What a stored trial actually did to the base list, from its .ydk.
+
+    `evaluate` writes the trial's decklist next to its JSONL, so the edit
+    is recoverable exactly. Reading it from the FILENAME is not reliable:
+    trial names gained the cut partway through this project
+    (`<deck>_r<round>_<add>` became `<deck>_r<round>_<cut>_<add>`), so the
+    older half of the stored runs name only the card that went in. The
+    decklists prove those were 1-for-1 swaps all along --
+    `blue-eyes-branded-test_r0_24224830.ydk` and
+    `..._r0_30576089_24224830.ydk` are byte-identical, and both cut
+    30576089 -- so the old names were rendering a tested swap as an
+    untested pure addition, which is a different (and illegal, at 45
+    cards) list.
+
+    Returns {"cut": [...], "add": [...], "list_hash": "..."} or None when
+    the .ydk is not there to read.
+    """
+    scratch = Path(scratch or (engine.ROOT / "results" / "optimizer"))
+    trial_ydk = scratch / f"{label}.ydk"
+    base_ydk = scratch / f"{deck_name}.ydk"
+    if not trial_ydk.exists() or not base_ydk.exists():
+        return None
+    try:
+        trial, base = Deck.from_ydk(trial_ydk), Deck.from_ydk(base_ydk)
+    except OSError:
+        return None
+    cut, add = [], []
+    for section in ("main", "extra", "side"):
+        before = Counter(getattr(base, section))
+        after = Counter(getattr(trial, section))
+        cut += sorted((before - after).elements())   # left the deck
+        add += sorted((after - before).elements())   # joined it
+    return {"cut": cut, "add": add, "list_hash": trial.list_hash}
+
+
 def rescore(deck_name, objective=None, scratch=None):
     """Re-rank a finished run's trials under `objective`.
 
@@ -622,7 +659,7 @@ def rescore(deck_name, objective=None, scratch=None):
     objective = objective or Objective()
     rows = []
     for label, s in stored_trials(deck_name, scratch):
-        rows.append({
+        row = {
             "label": label,
             "score": objective.score(s),
             "brick_rate": s.get("brick_rate"),
@@ -631,8 +668,51 @@ def rescore(deck_name, objective=None, scratch=None):
             "combo_mean": (s.get("combo_actions") or {}).get("mean"),
             "window_recovery": round(mean_window_recovery(s), 4),
             "hands": s.get("hands"),
-        })
-    return sorted(rows, key=lambda r: -r["score"])
+            "measured": 1,
+        }
+        row.update(trial_change(label, deck_name, scratch)
+                   or {"cut": None, "add": None, "list_hash": None})
+        rows.append(row)
+    return sorted(_merge_duplicate_lists(rows), key=lambda r: -r["score"])
+
+
+def _merge_duplicate_lists(rows):
+    """One decklist is one candidate, however many names it was stored under.
+
+    The stored runs contain the same list twice: a trial named
+    `<deck>_r0_<add>` from before the cut was part of the name, and
+    `<deck>_r0_<cut>_<add>` from after. Identical .ydk, identical summary
+    -- the solver is deterministic given the same deck, hands and target,
+    so re-running it reproduced the numbers exactly. A ranking table that
+    prints both shows one experiment as two agreeing data points, which
+    is how a ranking gets believed harder than its evidence.
+
+    Collapses only on identical metrics. If two records of the same
+    decklist DISAGREE, that is a finding rather than a duplicate, so both
+    rows stay and are flagged.
+    """
+    def metrics(r):
+        return (r["brick_rate"], r["best_line_rate"], r["survival"],
+                r["combo_mean"], r["window_recovery"], r["hands"])
+
+    groups, out = {}, []
+    for r in rows:
+        if r["label"] == "base" or not r["list_hash"]:
+            out.append(r)
+            continue
+        groups.setdefault(r["list_hash"], []).append(r)
+    for group in groups.values():
+        if len({metrics(r) for r in group}) == 1:
+            # Keep the longest label: it is the one naming both halves of
+            # the swap, and so the one a reader can trace back.
+            keep = max(group, key=lambda r: len(r["label"]))
+            keep["measured"] = len(group)
+            out.append(keep)
+        else:
+            for r in group:
+                r["inconsistent"] = len(group)
+                out.append(r)
+    return out
 
 def paired_check(deck_path, record, draws=3, solve_ms=None, log=None):
     """Re-solve EVERY hand of a funnel record with the multi-draw path.
