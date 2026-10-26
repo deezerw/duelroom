@@ -74,6 +74,7 @@ path may simply be unexercised. Read the solver's own sources for how
 """
 
 import subprocess
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -168,40 +169,30 @@ def deck_with_hand(deck_path, hand, out_path):
     return Path(out_path)
 
 
-def going_second_args(start_replay, our_deck_path, our_hand, target,
-                      solve_ms=None, turns=2):
-    """Solver arguments for "can we still do our thing through their board".
+def going_second_args(*_args, **_kw):
+    """REMOVED. It drove the solver in SYNTHETIC-START mode.
 
-    `--board-remove` does NOT mean this. It edits the captured goal so a
-    card is no longer REQUIRED (`main.cpp` sets `c.present = false` on the
-    target board) -- goal relaxation, not destruction. The help's "stop
-    requiring this card" says so; it is easy to read as the opposite.
-    Breaking a board is therefore not expressible in the solver's goal
-    language, which only talks about what `--player`'s own final board
-    contains.
+    The start replay went in as the positional argument -- which is a
+    TEMPLATE, not a position -- with `--deck`/`--hand` beside it, and
+    that mode builds a fresh duel. The solver says so in its own report,
+    "=== synthetic start ===", and queried at the root the fields of both
+    players were empty. So every going-second number this project ever
+    printed was measured with no board on the field, and `--deck` and
+    `--hand` reached side a while `--player 1` pointed the search at side
+    b, whose hand came from the template's decklist order. That is why
+    four separate fixes each "changed the hand" and none changed the
+    result, and why a board of one vanilla monster stopped 18 of 18
+    hands: nothing was ever in front of them.
 
-    The question that matters is expressible, and is arguably the better
-    one: going second, into their real board, can we still assemble our
-    payoff? If their interruptions stop us we fail; if we play through,
-    we succeed. That is the handtrap matrix generalised from one card to
-    a whole board.
-
-    `--deck` and `--hand` are REQUIRED alongside `--start`. Without them
-    the solver enters "repair mode" -- it tries to re-reach the
-    reference's own target, has nothing to search with, and exits 0 after
-    the analysis phase without ever searching. That silent no-op cost an
-    afternoon; the giveaway is output with no "probe:" or
-    "bounded-discrepancy search" line.
+    `attack_args` is the supported shape. Kept as a raiser because the
+    broken one was copied into three call sites, and a function that
+    still returns a command line is a function that gets copied again.
     """
-    return [
-        str(Path(start_replay).resolve()),
-        "--deck", str(Path(our_deck_path).resolve()),
-        "--hand", "|".join(str(c) for c in our_hand),
-        "--player", "1",
-        "--turns", str(turns),
-        "--target", str(target),
-        "--solve-ms", str(solve_ms or engine.SOLVE_MS),
-    ]
+    raise NotImplementedError(
+        "going_second_args drove the solver in synthetic-start mode, which "
+        "builds a FRESH duel and puts no board on the field. Use "
+        "attack_args(reference, start, prefix, target) with a position from "
+        "second_position(); see ISSUES.md #4.")
 
 
 SEARCH_MARKERS = ("probe:", "bounded-discrepancy")
@@ -255,164 +246,289 @@ def _run_solver(cmd, what):
     return r
 
 
-def build_start(their_deck, our_deck, their_target, seed, scratch,
-                solve_ms=None):
-    """Solve their turn 1 against our deck, then close the turn.
+# --- the going-second POSITION ------------------------------------------
+#
+# `going_second_args` above says what was wrong with the old shape and why
+# it now refuses. This is the supported one.
+#
+# `--start` plus `--approach` is how the solver is told to search from a
+# position a duel has already reached -- it is what
+# `ygorl.solver.combo_solver.SolveRequest` uses for continuations:
+#
+#   <reference> --start <start.yrpX> --approach <prefix.yrpX> --no-ref
+#              --target <payoff> --player 1
+#
+# `start` carries the duel's parameters with NO responses; `prefix` is the
+# same header plus the responses that reach the position. The solver roots
+# its finisher on the approach's own duel, so the search begins where the
+# prefix ended. VERIFIED by replaying the prefix and querying the core:
+# the board builder has a board and the attacker holds six cards, five
+# plus the draw for turn. `check_root` is that check and it runs on every
+# position this module builds.
 
-    Returns the path to a replay that `--start` accepts, or None if their
-    hand genuinely found no line. Raises SolverFailed if the solver
-    itself broke. Two steps are load-bearing: the template must carry our
-    deck as side b (otherwise the opponent is 40 vanilla monsters), and
-    the solved line must be re-emitted with `close_turn=True` (otherwise
-    `--start` rejects it -- "the line does not get through the turn").
+ATTACKER = 1
+"""Engine seat of the going-second player.
+
+Both templates here put the board builder in side a, and `first=0` seats
+side a as engine player 0, so the attacker is always player 1. Named
+rather than spelled "1" at four call sites.
+"""
+
+
+class RootNotPlayable(RuntimeError):
+    """The position the search would be rooted on is not a real turn 2."""
+
+
+def split_position(source, responses, out_dir, names=("them", "us")):
+    """A (start, prefix) pair sharing ONE header, for --start/--approach.
+
+    `source` is a Replay whose header is the duel to start from -- in
+    practice the solver's own output replay, because its responses are
+    only valid against the decklist order IT wrote (see `template_vs`).
+    Both files therefore carry that same order, which is what makes a
+    board prefix and a do-nothing control PAIRED: same decks, same seed,
+    same cards dealt to the attacker, differing only in what the board
+    builder did with its turn.
     """
-    from ygorl.engine.replay import Replay, load_yrp
-    from ygorl.solver.batch import sample_hand
-    from ygorl.solver.combo_solver import Workdir
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def emit(name, rs):
+        rep = Replay(seed=source.seed, first=source.first,
+                     rule_flags=source.rule_flags, player=source.player,
+                     shuffle_decks=source.shuffle_decks, decks=source.decks,
+                     responses=list(rs), seed_words=source.seed_words)
+        path = out_dir / name
+        rep.to_yrpx(path, names=names)
+        return path
+
+    return emit("start.yrpX", []), emit("prefix.yrpX", responses)
+
+
+def pass_turn_responses(start_path, cards=None):
+    """Responses for "the board builder does NOTHING and passes turn 1".
+
+    The paired control for every stop rate here. `convert_line` with an
+    empty response list is exactly this: it replays nothing and then
+    takes passive actions until the turn flips.
+    """
+    from ygorl.engine.replay import load_yrp
     from ygorl.solver.demo import convert_line
 
-    scratch = Path(scratch)
+    line = convert_line(load_yrp(Path(start_path)), [], responses=[],
+                        close_turn=True, cards=cards)
+    return list(line.responses)
+
+
+def root_state(prefix_path, cards=None):
+    """The position a search rooted on this prefix actually starts from.
+
+    Replays the prefix and queries the core for each player's field and
+    hand. NOTHING in this project looked at this before, which is how a
+    whole feature came to report stop rates measured against an empty
+    field on both sides.
+    """
+    from ygorl.engine import constants as C
+    from ygorl.engine import messages as M
+
+    rep = Replay.from_yrp(Path(prefix_path))
+    duel = rep.duel(cards=cards)
+
+    class _Watch:
+        """Keeps the last field query: `replay` closes the duel."""
+
+        def __init__(self):
+            self.last = None
+
+        def on_start(self, core):
+            self._grab(core)
+
+        def on_buffer(self, core, buf):
+            self._grab(core)
+
+        def _grab(self, core):
+            try:
+                self.last = M.decode_message(
+                    bytes([C.MSG_RELOAD_FIELD]) + core.query_field())
+            except Exception:                              # noqa: BLE001
+                pass
+
+    watch = _Watch()
+    res = duel.replay(rep.responses, observer=watch)
+    if watch.last is None:
+        raise RootNotPlayable(f"{Path(prefix_path).name}: no field state")
+    out = {"reason": getattr(res, "reason", None), "players": []}
+    for pl in watch.last.players:
+        d = pl if isinstance(pl, dict) else vars(pl)
+        field = [c for c in (list(d.get("mzone") or [])
+                             + list(d.get("szone") or [])) if c]
+        out["players"].append({"field": len(field), "hand": d.get("hand"),
+                               "main": d.get("main"), "grave": d.get("grave"),
+                               "extra": d.get("extra")})
+    return out
+
+
+def check_root(prefix_path, expect_board, cards=None):
+    """Refuse a position that cannot measure anything. Returns the state.
+
+    Two ways a going-second position is not one, both of which held
+    silently for weeks:
+
+    * the attacker never drew for turn, so the "turn 2" never began;
+    * the board under test is not on the field at all.
+
+    `expect_board` is False for the do-nothing control, where an empty
+    field is the whole point.
+    """
+    st = root_state(prefix_path, cards=cards)
+    me = st["players"][ATTACKER]
+    builder = st["players"][1 - ATTACKER]
+    hand = me.get("hand") or 0
+    if hand < 6:
+        raise RootNotPlayable(
+            f"{Path(prefix_path).name}: the attacker holds {hand} cards, so "
+            f"it has not drawn for turn -- this is not a turn 2")
+    if expect_board and not builder["field"]:
+        raise RootNotPlayable(
+            f"{Path(prefix_path).name}: the board builder's field is EMPTY, "
+            f"so there is no board to measure")
+    st["attacker_hand"] = hand
+    st["board_cards"] = builder["field"]
+    return st
+
+
+def attack_args(reference, start, prefix, target, solve_ms=None,
+                finisher_ms=None, player=ATTACKER, turns=2):
+    """Solver arguments for "can the attacker play through this board".
+
+    `--no-ref` is not optional: without it the goal comes from the
+    reference instead of `--target`, and the solver spends the run
+    re-reaching the reference's own board ("repair mode") and exits 0
+    having searched nothing.
+
+    `--finisher-min` is load-bearing for a different reason. The NRPA
+    phase is rooted on the START duel, where the board builder has not
+    played yet, so its rollouts are spent on a position nobody asked
+    about; the phase that searches the approach -- the real turn 2 -- is
+    the finisher. Measured on a 20 s budget: 15 s of NRPA against 5 s of
+    finisher, with 100% of the NRPA rollouts cut at the turn boundary.
+    """
+    solve_ms = engine.SOLVE_MS if solve_ms is None else solve_ms
+    if finisher_ms is None:
+        finisher_ms = int(solve_ms * 0.75)
+    return [
+        str(Path(reference).resolve()),
+        "--start", str(Path(start).resolve()),
+        "--approach", str(Path(prefix).resolve()),
+        "--no-ref",
+        "--target", str(target),
+        "--player", str(player),
+        "--turns", str(turns),
+        "--solve-ms", str(solve_ms),
+        "--finisher-min", str(min(finisher_ms, solve_ms)),
+    ]
+
+
+UNSUPPORTED = (
+    "the going-second SEARCH cannot solve a position it solves going first: "
+    "with the position verified correct (a board on the field, the attacker "
+    "holding six), the same hand and target reach nothing from a resumed "
+    "root on either seat at any turn depth. See ISSUES.md #4. Use "
+    "`gauntlet` to rank boards instead; it measures the same question with "
+    "machinery that works."
+)
+"""Why every number below is not to be believed yet.
+
+The POSITION is now right -- that is new, and `second_position` proves it
+by querying the core. What is still wrong is the search from it, and it is
+in the vendored solver, so this stays a refusal rather than a caveat.
+"""
+
+
+def attack(start, prefix, target, solve_ms=None, seed=0, threads=2,
+           scratch=None, binary=None, finisher_ms=None):
+    """Run ONE going-second search from a prepared position.
+
+    Shared by `going_second`, `floodgate_check` and `gauntlet.defend`, so
+    the invocation exists once. Every one of them had its own copy of the
+    broken one, and the fixes landed in different subsets of the three.
+    """
+    import subprocess
+
+    from ygorl.solver.combo_solver import Workdir
+
+    own = scratch is None
+    scratch = Path(scratch or tempfile.mkdtemp(prefix="duelroom-atk-"))
     scratch.mkdir(parents=True, exist_ok=True)
     wd = Workdir.create(scratch / "workdir")
-    sols = scratch / "sol"
-    sols.mkdir(exist_ok=True)
-
-    tpl = template_vs(scratch / "tpl.yrpX", their_deck, our_deck, seed=seed)
-    theirs = to_ydeck(their_deck)
-    hand, _ = sample_hand(theirs, seed=seed)
-
-    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
+    out = scratch / "gs"
+    out.mkdir(exist_ok=True)
+    args_ = attack_args(prefix, start, prefix, target, solve_ms=solve_ms,
+                        finisher_ms=finisher_ms)
+    cmd = [str(binary or engine.SOLVER_BIN), args_[0],
+           "--workdir", str(wd.path)]
     for d in wd.scriptdirs:
         cmd += ["--scriptdir", str(d)]
-    cmd += ["--no-ref", "--deck", str(Path(their_deck).resolve()),
-            "--hand", "|".join(map(str, hand)),
-            "--target", str(their_target),
-            "--solve-ms", str(solve_ms or engine.SOLVE_MS),
-            "--threads", "1", "--outdir", str(sols)]
-    _run_solver(cmd, f"build_start({Path(their_deck).stem}, seed {seed})")
-
-    found = sorted(sols.glob("*.yrp"))
-    if not found:
-        return None
-    line = convert_line(load_yrp(found[0]), [str(their_target)],
-                        close_turn=True)
-    base = Replay.from_yrp(found[0])
-    ext = Replay(seed=base.seed, first=base.first, rule_flags=base.rule_flags,
-                 player=base.player, shuffle_decks=base.shuffle_decks,
-                 decks=base.decks, responses=list(line.responses),
-                 seed_words=base.seed_words)
-    start = scratch / f"start_{seed}.yrpX"
-    ext.to_yrpx(start, names=("them", "us"))
-    return start
+    cmd += args_[1:] + ["--threads", str(threads), "--seed", str(seed),
+                        "--outdir", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
+    # KEEP the report. Throwing it away is why "0 of 72 hands got through"
+    # went unexplained for days: the starting-position block is the only
+    # direct evidence of what the mode is doing, and it is what finally
+    # showed the field empty on both sides.
+    log = scratch / "solver.log"
+    try:
+        log.write_text((r.stdout or "") + "\n--- stderr ---\n"
+                       + (r.stderr or ""), encoding="utf-8")
+    except OSError:
+        log = None
+    res = {"searched": searched(r.stdout or ""),
+           "through": bool(list(out.glob("*.yrp"))),
+           "returncode": r.returncode,
+           "log": str(log) if log else None,
+           "scratch": None if own else str(scratch)}
+    return res
 
 
 def going_second(their_deck, our_deck, their_target, our_target, hands=4,
-                 solve_ms=None, scratch=None):
+                 solve_ms=None, scratch=None, control=True):
     """Can our deck assemble its payoff going second into their board?
 
-    One record per hand: whether their turn-1 board was built at all,
-    whether the solver searched, and whether we got through.
-    """
-    from ygorl.solver.batch import sample_hand
-    from ygorl.solver.combo_solver import Workdir
+    One record per hand against the board, and -- unless `control` is off
+    -- one against the PAIRED CONTROL, the same position with the builder
+    passing. Without the control a stop rate has no zero: "they got
+    through 0 of 4" is only a statement about the board if they get
+    through more when there is no board, and for weeks they did not.
 
+    EVERY NUMBER HERE IS UNSUPPORTED; see `UNSUPPORTED`.
+    """
     scratch = Path(scratch or (engine.ROOT / "results" / "going_second"))
     rows = []
-    ours_deck = to_ydeck(our_deck)
     for seed in range(hands):
         sd = scratch / f"h{seed}"
-        # The dealt decklist must go into the START replay: `--deck` does
-        # not reach the going-second player (see deck_with_hand).
-        try:
-            hand_pre, _ = sample_hand(ours_deck, seed=1000 + seed, size=6)
-            dealt_pre = deck_with_hand(our_deck, hand_pre, sd / "dealt.ydk")
-            start = build_start(their_deck, dealt_pre, their_target, seed, sd,
-                                solve_ms)
-        except SolverFailed as e:
-            rows.append({"seed": seed, "their_board": None, "searched": False,
-                         "broke": False, "error": str(e)})
-            continue
-        if start is None:
-            rows.append({"seed": seed, "their_board": False,
-                         "searched": False, "broke": False})
-            continue
-        wd = Workdir.create(sd / "workdir")
-        out = sd / "gs"
-        out.mkdir(exist_ok=True)
-        # Going second draws for turn, so six cards rather than five.
-        hand, dealt = hand_pre, dealt_pre
-        args_ = going_second_args(start, dealt, hand, our_target, solve_ms)
-        cmd = [str(engine.SOLVER_BIN), args_[0], "--workdir", str(wd.path)]
-        for d in wd.scriptdirs:
-            cmd += ["--scriptdir", str(d)]
-        cmd += args_[1:]
-        cmd += ["--threads", "2", "--outdir", str(out)]
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           env=engine.env(), timeout=None)
-        wrote = list(out.glob("*.yrp"))
-        rows.append({
-            "seed": seed,
-            "their_board": True,
-            "searched": searched(r.stdout or ""),
-            "broke": bool(wrote),
-            "hand": hand,
-        })
+        row = {"seed": seed}
+        for board in ((True, False) if control else (True,)):
+            key = "board" if board else "control"
+            try:
+                pos = second_position(their_deck, our_deck, their_target,
+                                      seed, sd / key, solve_ms, board=board)
+            except (SolverFailed, RootNotPlayable) as e:
+                row[key] = {"error": str(e)}
+                continue
+            if pos is None:
+                row[key] = {"error": "their hand found no line"}
+                continue
+            st, pre, root = pos
+            res = attack(st, pre, our_target, solve_ms=solve_ms,
+                         seed=1000 + seed, scratch=sd / key / "atk")
+            res["board_cards"] = root["board_cards"]
+            res["attacker_hand"] = root["attacker_hand"]
+            row[key] = res
+        rows.append(row)
     return rows
 
 
 # --- floodgate check ------------------------------------------------------
-
-def floodgate_start(floodgate, our_deck, seed, scratch, solve_ms=None):
-    """A start replay where the opponent has set one floodgate.
-
-    The opponent's deck is 40 copies of the floodgate, so turn 1 reliably
-    ends with one set. Targeting it face-down (`@szone:fd`) rather than
-    face-up is the realistic case and the only legal one: a Continuous
-    Trap cannot activate the turn it is set, so what you actually face
-    going second is a set card that flips during your turn.
-    """
-    from ygorl.engine.duel import Deck as YDeck
-    from ygorl.engine.replay import Replay, load_yrp
-    from ygorl.solver.combo_solver import Workdir
-    from ygorl.solver.demo import convert_line
-
-    scratch = Path(scratch)
-    scratch.mkdir(parents=True, exist_ok=True)
-    wd = Workdir.create(scratch / "workdir")
-    sols = scratch / "sol"
-    sols.mkdir(exist_ok=True)
-
-    flood_deck = YDeck((int(floodgate),) * 40, (), (), f"flood-{floodgate}")
-    ydk = scratch / "flood.ydk"
-    ydk.write_text("#created by duelroom\n#main\n"
-                   + "\n".join([str(floodgate)] * 40)
-                   + "\n#extra\n!side\n")
-
-    tpl = template_vs(scratch / "tpl.yrpX", flood_deck, our_deck, seed=seed)
-    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
-    for d in wd.scriptdirs:
-        cmd += ["--scriptdir", str(d)]
-    cmd += ["--no-ref", "--deck", str(ydk.resolve()),
-            "--hand", "|".join([str(floodgate)] * 5),
-            "--target", f"{floodgate}@szone:fd",
-            "--solve-ms", str(solve_ms or engine.SOLVE_MS),
-            "--threads", "1", "--outdir", str(sols)]
-    _run_solver(cmd, f"floodgate_start({floodgate}, seed {seed})")
-
-    found = sorted(sols.glob("*.yrp"))
-    if not found:
-        return None
-    line = convert_line(load_yrp(found[0]), [f"{floodgate}@szone:fd"],
-                        close_turn=True)
-    base = Replay.from_yrp(found[0])
-    ext = Replay(seed=base.seed, first=base.first, rule_flags=base.rule_flags,
-                 player=base.player, shuffle_decks=base.shuffle_decks,
-                 decks=base.decks, responses=list(line.responses),
-                 seed_words=base.seed_words)
-    out = scratch / f"flood_{floodgate}_{seed}.yrpX"
-    ext.to_yrpx(out, names=(f"flood-{floodgate}", "us"))
-    return out
-
 
 def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
                     solve_ms=None, scratch=None):
@@ -420,46 +536,133 @@ def floodgate_check(our_deck, our_target, floodgates=None, hands=2,
 
     Locals run floodgates far more than top tables do, and this is cheap
     next to a full gauntlet.
+
+    Rewritten onto `second_position`. The old version built the start the
+    same broken way as everything else AND never got its fix: when the
+    dealt decklist was moved into the start replay for `going_second`,
+    this call site kept passing `--deck our_deck` with a sampled
+    `--hand`, so every floodgate was tested against the same hand -- the
+    one at the bottom of the decklist -- however many `hands` were asked
+    for. It sat four lines from the fix for three weeks.
+
+    EVERY NUMBER HERE IS UNSUPPORTED; see `UNSUPPORTED`.
     """
-    from ygorl.solver.batch import sample_hand
-    from ygorl.solver.combo_solver import Workdir
+    from ygorl.engine.duel import Deck as YDeck
     from .scenarios import FLOODGATES
 
     floodgates = floodgates or FLOODGATES
     scratch = Path(scratch or (engine.ROOT / "results" / "floodgate"))
-    ours = to_ydeck(our_deck)
     rows = []
     for code, name in floodgates.items():
-        solved = tested = 0
-        errors = 0
+        functioned = tested = errors = 0
+        # A deck of 40 copies, so turn 1 reliably ends with one set.
+        # Targeting it face-DOWN is the realistic case and the only legal
+        # one: a Continuous Trap cannot activate the turn it is set, so
+        # what you face going second is a set card that flips during your
+        # turn.
+        flood = YDeck((int(code),) * 40, (), (), f"flood-{code}")
         for seed in range(hands):
             sd = scratch / f"{code}_{seed}"
+            sd.mkdir(parents=True, exist_ok=True)
+            ydk = sd / "flood.ydk"
+            ydk.write_text("#created by duelroom\n#main\n"
+                           + "\n".join([str(code)] * 40)
+                           + "\n#extra\n!side\n")
             try:
-                start = floodgate_start(code, our_deck, seed, sd, solve_ms)
-            except SolverFailed:
+                pos = second_position(ydk, our_deck, f"{code}@szone:fd",
+                                      seed, sd, solve_ms)
+            except (SolverFailed, RootNotPlayable):
                 errors += 1
                 continue
-            if start is None:
+            if pos is None:
                 continue
-            wd = Workdir.create(sd / "wd2")
-            out = sd / "gs"
-            out.mkdir(exist_ok=True)
-            hand, _ = sample_hand(ours, seed=2000 + seed, size=6)
-            cmd = [str(engine.SOLVER_BIN)] + going_second_args(
-                start, our_deck, hand, our_target, solve_ms)
-            cmd = [cmd[0], cmd[1], "--workdir", str(wd.path)]
-            for d in wd.scriptdirs:
-                cmd += ["--scriptdir", str(d)]
-            cmd += going_second_args(start, our_deck, hand, our_target,
-                                     solve_ms)[1:]
-            cmd += ["--threads", "2", "--outdir", str(out)]
-            r = subprocess.run(cmd, capture_output=True, text=True,
-                               env=engine.env())
-            if not searched(r.stdout or ""):
+            st, pre, _ = pos
+            res = attack(st, pre, our_target, solve_ms=solve_ms,
+                         seed=2000 + seed, scratch=sd / "atk")
+            if not res["searched"]:
                 continue
             tested += 1
-            solved += bool(list(out.glob("*.yrp")))
+            functioned += res["through"]
         rows.append({"card": code, "name": name, "tested": tested,
-                     "functioned": solved, "errors": errors,
-                     "rate": solved / tested if tested else None})
+                     "functioned": functioned, "errors": errors,
+                     "rate": functioned / tested if tested else None})
     return rows
+
+
+def second_position(builder_deck, attacker_deck, builder_target, seed,
+                    scratch, solve_ms=None, board=True, cards=None,
+                    builder_hand=None):
+    """The whole going-second position, start and approach both.
+
+    `board=True`: the builder solves its turn 1, the turn is closed, and
+    the attacker is to move into the result. `board=False` is the PAIRED
+    CONTROL -- the same decks, the same seed and the same cards dealt to
+    the attacker, with the builder simply passing. Only the board differs
+    between the two, which is what makes a difference attributable to it.
+
+    That control replaces the deck of 40 vanilla monsters this module and
+    `gauntlet` used to build. A separate deck changes the decks, the seed
+    and the attacker's hand all at once, so a stop rate measured against
+    it was never comparable with one measured against a board.
+
+    `builder_target` is one target or a conjunction of them, and
+    `builder_hand` forces the builder's opening hand -- which is what
+    `gauntlet` needs, where the builder is you holding specific cards
+    rather than a deck sampled from a seed.
+
+    Returns (start, prefix, root_state), or None when the builder's own
+    hand found no line -- a real finding about that hand, not an error.
+    Raises `RootNotPlayable` if the position is not a turn 2 the attacker
+    can act in, so a meaningless search is never run.
+    """
+    from ygorl.engine.replay import load_yrp
+    from ygorl.solver.batch import sample_hand
+    from ygorl.solver.combo_solver import Workdir
+    from ygorl.solver.demo import convert_line
+
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    wd = Workdir.create(scratch / "workdir")
+    sols = scratch / "sol"
+    sols.mkdir(exist_ok=True)
+
+    # The builder is side a, hence engine player 0, hence the seat
+    # `--deck` and `--hand` actually reach. That is not a detail: the
+    # synthetic start substitutes them into side a and nowhere else, so
+    # building the board from any other seat silently searches a hand
+    # nobody chose. See `going_second_args` for what that cost.
+    tpl = template_vs(scratch / "tpl.yrpX", builder_deck, attacker_deck,
+                      seed=seed, shuffle=True)
+    if builder_hand is None:
+        builder_hand, _ = sample_hand(to_ydeck(builder_deck), seed=seed)
+    targets = ([str(builder_target)] if isinstance(builder_target, (str, int))
+               else [str(t) for t in builder_target])
+    if not targets:
+        raise ValueError("a board needs at least one target to build")
+    cmd = [str(engine.SOLVER_BIN), str(tpl), "--workdir", str(wd.path)]
+    for d in wd.scriptdirs:
+        cmd += ["--scriptdir", str(d)]
+    cmd += ["--no-ref", "--deck", str(Path(builder_deck).resolve()),
+            "--hand", "|".join(map(str, builder_hand))]
+    for t in targets:
+        cmd += ["--target", t]
+    cmd += ["--solve-ms", str(solve_ms or engine.SOLVE_MS),
+            "--threads", "1", "--outdir", str(sols)]
+    _run_solver(cmd, f"second_position({Path(builder_deck).stem}, seed {seed})")
+
+    found = sorted(sols.glob("*.yrp"))
+    if not found:
+        return None
+    # The header has to be the OUTPUT replay's: its responses are only
+    # valid against the decklist order it wrote, and the control has to
+    # share that header or it is not paired.
+    source = Replay.from_yrp(found[0])
+    line = convert_line(load_yrp(found[0]), targets, close_turn=True,
+                        cards=cards)
+    bare, _ = split_position(source, [], scratch / "bare")
+    responses = (list(line.responses) if board
+                 else pass_turn_responses(bare, cards=cards))
+    start, prefix = split_position(source, responses,
+                                   scratch / ("board" if board else "control"))
+    root = check_root(prefix, expect_board=board, cards=cards)
+    return start, prefix, root

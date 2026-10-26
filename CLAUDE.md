@@ -202,7 +202,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `engine.py` | `SOLVER_BIN`, `VENDOR`, `THIRD_PARTY`, `SOLVE_MS` (60 s), `DEFAULT_WORKERS` |
 | `scenarios.py` | `HANDTRAPS`, `FLOODGATES`, `BLIND_SPOTS`, `MAXX_C`, `ZONE_RANK`, `TRIVIAL_ACTIONS` |
 | `sweep.py` | `TRIAGE_MS` (15 s), `DRAWS` |
-| `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `INERT` |
+| `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 
 Three of the old table's rows named constants that do not exist, and two named

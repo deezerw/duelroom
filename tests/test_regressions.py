@@ -1475,23 +1475,23 @@ def _stub_candidates(monkeypatch, cands):
                         lambda *a, **k: list(cands))
 
 
-def _stub_defend(monkeypatch, rates):
-    """defend() keyed by candidate label, so no solver is needed."""
+def _stub_defend(monkeypatch, rates, controls=None):
+    """defend() keyed by candidate label, so no solver is needed.
+
+    `rates` is the board's stop rate, `controls` its PAIRED control's --
+    the same position with the builder passing. Each candidate carries
+    its own now; there is no separate floor.
+    """
     from skills import gauntlet
 
     def fake(our_deck, our_hand, candidate, their_decks, **kw):
         rate = rates[candidate.label]
+        ctrl = (controls or {}).get(candidate.label, 0.0)
         return {"candidate": candidate.to_json(), "rows": [],
-                "tested": 10, "stopped": int(rate * 10), "stop_rate": rate}
+                "tested": 10, "stopped": int(rate * 10), "stop_rate": rate,
+                "control_tested": 10, "control_stopped": int(ctrl * 10),
+                "control_rate": ctrl, "beats_control": rate > ctrl}
     monkeypatch.setattr(gauntlet, "defend", fake)
-
-
-def _stub_floor(monkeypatch, rate):
-    """The do-nothing zero point, also solver-free."""
-    from skills import gauntlet
-    monkeypatch.setattr(gauntlet, "floor", lambda *a, **k: {
-        "rows": [], "tested": 10, "through": int((1 - rate) * 10),
-        "stopped": int(rate * 10), "stop_rate": rate})
 
 
 def _cand(label, interruptions, code):
@@ -1501,21 +1501,24 @@ def _cand(label, interruptions, code):
                      pieces=((code, "field", False),), draws=1, solve_s=1.0)
 
 
-def test_the_do_nothing_board_is_carried_as_a_control(monkeypatch, tmp_path):
-    """Without it a stop rate has no scale: "stopped 8 of 12" says nothing
-    unless the board that builds nothing stops fewer."""
+def test_the_do_nothing_board_is_carried_as_a_candidate(monkeypatch):
+    """The `base` rung -- build nothing, keep what the hand holds -- is
+    a real comparison the heuristic score does not make, so it survives
+    the `keep` cut. It is NOT the zero point: "do nothing" held Droll and
+    Effect Veiler in the run that prompted this, two live interactions.
+    The zero point is each candidate's own paired control."""
     from skills import gauntlet
     cands = [_cand("stack:2", 5, 1), _cand("piece:9", 4, 2),
              _cand("base", 2, 3)]
     _stub_candidates(monkeypatch, cands)
-    _stub_defend(monkeypatch, {"stack:2": 0.8, "piece:9": 0.6, "base": 0.2})
-    _stub_floor(monkeypatch, 0.1)
+    _stub_defend(monkeypatch, {"stack:2": 0.8, "piece:9": 0.6, "base": 0.2},
+                 controls={"stack:2": 0.1, "piece:9": 0.1, "base": 0.1})
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
     labels = [r["candidate"]["label"] for r in rep["results"]]
-    assert "base" in labels, "the control was dropped by the keep cut"
-    assert rep["control_rate"] == 0.2
+    assert "base" in labels, "the base rung was dropped by the keep cut"
     assert rep["discriminated"] is True
+    assert rep["beats_control"] is True
 
 
 def test_identical_stop_rates_are_reported_as_no_resolution(monkeypatch):
@@ -1524,8 +1527,8 @@ def test_identical_stop_rates_are_reported_as_no_resolution(monkeypatch):
     from skills import gauntlet
     cands = [_cand("stack:2", 5, 1), _cand("base", 2, 3)]
     _stub_candidates(monkeypatch, cands)
-    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 1.0})
-    _stub_floor(monkeypatch, 0.5)
+    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 1.0},
+                 controls={"stack:2": 0.5, "base": 0.5})
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
     assert rep["discriminated"] is False
@@ -1538,52 +1541,50 @@ def test_the_opponent_gets_best_of_n_draws():
     import inspect
     from skills import gauntlet
     src = inspect.getsource(gauntlet.defend)
-    assert 'acc["through"] > 0' in src, (
+    assert 'cell["through"] > 0' in src, (
         "the opponent no longer gets the benefit of every draw")
 
 
-def test_a_board_that_only_matches_the_floor_is_not_a_result(monkeypatch):
-    """gauntlet's first real run had two boards stopping 18/18, which is
-    either two excellent boards or a task nobody could complete. The
-    `base` rung cannot answer that -- "do nothing, hold what the hand
-    holds" held Droll and Effect Veiler, two live interactions. Only a
-    board of vanilla monsters is a zero."""
+def test_an_empty_field_stopping_everything_is_not_a_ranking(monkeypatch):
+    """If the attacker cannot function against NOTHING, the ordering
+    above is not about anybody's board.
+
+    This is what actually happened, and for a reason no floor could
+    reveal: the harness never put a board on the field at all, so the
+    board and the control were the same position. Now they differ by
+    exactly the board, and a control that stops everything means the
+    attacker's own turn-2 search is the obstacle."""
     from skills import gauntlet
     cands = [_cand("stack:2", 5, 1), _cand("base", 2, 3)]
     _stub_candidates(monkeypatch, cands)
-    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 0.9})
-    _stub_floor(monkeypatch, 1.0)
+    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 1.0},
+                 controls={"stack:2": 1.0, "base": 1.0})
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
-    assert rep["beats_floor"] is False, (
-        "a board no better than 40 vanilla monsters was called a result")
-    _stub_floor(monkeypatch, 0.5)
+    assert rep["control_is_broken"] is True
+    assert rep["beats_control"] is False, (
+        "a board no better than an empty field was called a result")
+    _stub_defend(monkeypatch, {"stack:2": 1.0, "base": 0.9},
+                 controls={"stack:2": 0.5, "base": 0.5})
     rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
                         keep=2)
-    assert rep["beats_floor"] is True
+    assert rep["control_is_broken"] is False
+    assert rep["beats_control"] is True
 
 
-def test_the_floor_board_interrupts_nothing_and_can_be_summoned():
-    """Two halves, and the first version only had one.
-
-    It used Blue-Eyes White Dragon -- no effect, so it passed the
-    interruption half -- and level 8, so a hand of five of them cannot
-    normal summon one without two tributes. All three decks came back
-    "inert board not built" and the floor measured nothing, in exactly
-    the shape of a real result."""
-    from skills import db
-    from skills.gauntlet import INERT
-    from ygorl.engine.duel import default_cards
-    from ygorl.solver.blocking import card_interruptions
-
-    assert card_interruptions(INERT, default_cards()) == ()
-    row = db.connect().execute(
-        "SELECT name, type, level FROM cards WHERE id = ?", (INERT,)).fetchone()
-    assert row is not None, "the floor card is not in the card mirror"
-    assert "Normal Monster" in row["type"], row["type"]
-    assert row["level"] and row["level"] <= 4, (
-        f"{row['name']} is level {row['level']}: it cannot be normal summoned "
-        f"from a hand holding nothing else, so the floor never builds")
+def test_the_unsupported_notice_is_not_optional(monkeypatch):
+    """Every path that reports a going-second number must say it is not
+    to be believed. `rank` prints it and the record carries it, because a
+    JSON file outlives the terminal it was printed in."""
+    from skills import breaking, gauntlet
+    cands = [_cand("stack:2", 5, 1)]
+    _stub_candidates(monkeypatch, cands)
+    _stub_defend(monkeypatch, {"stack:2": 0.8}, controls={"stack:2": 0.1})
+    said = []
+    rep = gauntlet.rank("deck.ydk", [1, 2, 3, 4, 5], [("them.ydk", "1")],
+                        keep=1, log=said.append)
+    assert any("UNSUPPORTED" in m for m in said), said[:3]
+    assert rep["unsupported"] == breaking.UNSUPPORTED
 
 
 # --- sweep: where the extra draws go -------------------------------------
@@ -2055,15 +2056,35 @@ def test_a_card_not_in_the_deck_cannot_be_dealt(tmp_path):
         deck_with_hand(src, [1], tmp_path / "x.ydk")
 
 
-def test_both_going_second_callers_deal_through_the_decklist():
-    """gauntlet._attack and breaking.going_second both pass a rewritten
-    decklist, not the original, or the hand they sampled is ignored."""
+def test_the_attacker_hand_is_dealt_by_the_replay_not_by_a_flag():
+    """`--hand` does not reach the going-second player, and the fix for
+    that is no longer `deck_with_hand`.
+
+    The old fix rewrote the decklist so the core would draw the chosen
+    hand off its end. It was built on the belief that the solver was
+    resuming a duel, and it was not -- it was building a fresh one from a
+    template, where `--deck`/`--hand` reach side a and nothing else. With
+    `--start`/`--approach` the attacker's hand comes from the start
+    replay's own deal, varied by the template seed, and `check_root`
+    verifies it was actually drawn.
+    """
     import inspect
+
     from skills import breaking, gauntlet
-    for fn in (gauntlet._attack, breaking.going_second):
+
+    for fn in (breaking.going_second, gauntlet.defend):
         src = inspect.getsource(fn)
-        assert "deck_with_hand" in src, (
-            f"{fn.__name__} still deals the hand with --hand alone")
+        assert "deck_with_hand" not in src, (
+            f"{fn.__name__} still reorders a decklist to deal the hand")
+    # second_position varies the attacker's hand through the template
+    # seed, which only works because the template shuffles the other seat
+    # -- without that, player 1's hand is its decklist tail for every
+    # seed, which is how `hands=6` was one hand six times.
+    src = inspect.getsource(breaking.second_position)
+    assert "shuffle=True" in src, (
+        "the template must shuffle, or every seed deals the same hand")
+    assert "check_root(" in src, (
+        "second_position must verify the position it returns")
 
 
 def test_the_sweep_checkpoints_each_depth_round(tmp_path, monkeypatch):
@@ -2128,32 +2149,87 @@ def test_the_sweep_docstring_does_not_promise_incremental_writes():
         "the correction must precede the quoted claim, or it reads as a promise")
 
 
-def test_the_dealt_deck_goes_into_the_start_replay():
-    """Player 1's deck AND hand come from the start replay; `--deck` and
-    `--hand` do not reach them. Proven 2026-10-24: with `--deck` pointing
-    at a rewritten copy, the solver still dealt the last five entries of
-    the ORIGINAL light-and-darkness-ritual.ydk (3x Pot of Sloth, 2x Black
-    Chaos). So the reordered list must be built into the REPLAY, which
-    means one board build per hand."""
+def test_no_caller_drives_the_solver_in_synthetic_start_mode():
+    """The going-second start must be a POSITION, not a template.
+
+    `going_second_args` passed the start replay as the solver's
+    positional argument -- which is a template -- with `--deck`/`--hand`
+    beside it. That mode builds a FRESH duel: the solver prints
+    "=== synthetic start ===" and, queried at the root, BOTH players'
+    fields were empty. So no going-second number this project printed was
+    ever measured against a board, and `--player 1` searched the seat
+    `--deck` does not reach. Four separate fixes each "changed the hand"
+    and none changed the result.
+    """
     import inspect
+
+    import pytest
+
     from skills import breaking, gauntlet
 
-    for fn in (gauntlet.defend, gauntlet.floor):
-        src = inspect.getsource(fn)
-        i_deal = src.index("deck_with_hand")
-        i_start = min((src.index(x) for x in ("inert_start(", "our_board_start(")
-                       if x in src))
-        assert i_deal < i_start, (
-            f"{fn.__name__} builds the start before dealing the hand into "
-            f"the decklist, so the replay carries the original order")
-        assert "for h in range(hands)" in src
-        # the start builder must receive `dealt`, not the original path
-        assert ("inert_start(dealt" in src or "our_board_start(our_deck, dealt"
-                in src), f"{fn.__name__} passes the original deck to the start"
+    with pytest.raises(NotImplementedError):
+        breaking.going_second_args("start", "deck", (1,), "t")
 
-    gs = inspect.getsource(breaking.going_second)
-    assert "deck_with_hand" in gs and "build_start(their_deck, dealt_pre" in gs, (
-        "going_second builds its start from the undealt deck")
+    for fn in (breaking.going_second, breaking.floodgate_check,
+               gauntlet.defend):
+        src = inspect.getsource(fn)
+        assert "second_position(" in src, (
+            f"{fn.__name__} must build its position with second_position")
+        assert "going_second_args" not in src, (
+            f"{fn.__name__} still builds the synthetic-start command line")
+
+    # The supported shape, and every part of it is load-bearing: --start
+    # for the duel's parameters, --approach for the responses that reach
+    # the position, --no-ref so the goal comes from --target instead of
+    # the reference (without it the solver enters repair mode and
+    # searches nothing), --player for the seat.
+    args = breaking.attack_args("ref.yrpX", "start.yrpX", "prefix.yrpX",
+                                "12345@atk", solve_ms=1000)
+    for flag in ("--start", "--approach", "--no-ref", "--target",
+                 "--player", "--finisher-min"):
+        assert flag in args, f"attack_args dropped {flag}"
+    assert args[args.index("--player") + 1] == str(breaking.ATTACKER)
+
+
+def test_check_root_refuses_a_position_that_measures_nothing():
+    """A position with no board, or no draw for turn, must raise.
+
+    These were the two silent failures: the attacker holding five cards
+    means its turn never began, and an empty builder field means there is
+    no board under test. Both produced "the board stopped them" for
+    weeks.
+    """
+    import pytest
+
+    from skills import breaking
+
+    def fake(monkey_state):
+        return lambda path, cards=None: monkey_state
+
+    # drawn for turn, board present -> fine
+    ok = {"players": [{"field": 3, "hand": 3}, {"field": 0, "hand": 6}]}
+    # never drew for turn
+    no_draw = {"players": [{"field": 3, "hand": 3}, {"field": 0, "hand": 5}]}
+    # drew, but nothing is on the builder's field
+    no_board = {"players": [{"field": 0, "hand": 5}, {"field": 0, "hand": 6}]}
+
+    real = breaking.root_state
+    try:
+        breaking.root_state = fake(ok)
+        st = breaking.check_root("p.yrpX", expect_board=True)
+        assert st["board_cards"] == 3 and st["attacker_hand"] == 6
+
+        breaking.root_state = fake(no_draw)
+        with pytest.raises(breaking.RootNotPlayable, match="drawn for turn"):
+            breaking.check_root("p.yrpX", expect_board=True)
+
+        breaking.root_state = fake(no_board)
+        with pytest.raises(breaking.RootNotPlayable, match="EMPTY"):
+            breaking.check_root("p.yrpX", expect_board=True)
+        # the control WANTS an empty field
+        assert breaking.check_root("p.yrpX", expect_board=False)["board_cards"] == 0
+    finally:
+        breaking.root_state = real
 
 
 def test_a_false_brick_is_corrected_before_scoring(monkeypatch, tmp_path):
@@ -3300,56 +3376,6 @@ def test_draws_curve_ignores_records_without_attempts(tmp_path):
                      "solver": {}}),
     ]) + "\n")
     assert sweep.draws_curve(path) == {}
-
-
-def test_a_floor_that_stops_everything_is_flagged_not_reported(monkeypatch,
-                                                               tmp_path):
-    """A board of vanilla monsters stopping every hand is the known
-    going-second defect, not a measurement. Established 2026-10-24: the
-    mode never summons from the extra deck — kewl-tune reaches its target
-    10 of 12 hands going FIRST, and 0 of 3 going second even for the
-    CHEAPEST extra-deck monster in its deck (a level 4 Synchro), with the
-    turn-cut patch applied so rollouts run freely."""
-    from skills import breaking, gauntlet
-
-    monkeypatch.setattr(gauntlet, "inert_start",
-                        lambda *a, **k: tmp_path / "start.yrpX")
-    monkeypatch.setattr(breaking, "to_ydeck",
-                        lambda p: type("D", (), {"main": list(range(40)),
-                                                 "extra": [], "side": []})())
-    monkeypatch.setattr("ygorl.solver.batch.sample_hand",
-                        lambda deck, seed, size=5: (list(range(size)), None))
-
-    # `floor` maps `_attack` over its own pool; stubbing `_attack` is
-    # enough and needs no pool at all.
-    monkeypatch.setattr(gauntlet, "_attack",
-                        lambda args: {"searched": True, "through": False,
-                                      "returncode": 0, "log": None,
-                                      "target_mode": None})
-
-    class Serial:
-        def __init__(self, *a, **k):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def map(self, fn, it):
-            return (fn(x) for x in it)
-
-    # `floor` imports ProcessPoolExecutor inside the function, so the
-    # module attribute cannot be patched -- patch it at its source.
-    import concurrent.futures
-    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Serial)
-
-    said = []
-    r = gauntlet.floor([(tmp_path / "them.ydk", "1@atk")], hands=2, draws=1,
-                       scratch=tmp_path, log=said.append)
-    assert r["floor_is_broken"] is True, r
-    assert any("does NOTHING stopped every hand" in m for m in said), said
 
 
 def test_a_near_miss_asking_for_more_outranks_a_capped_solved_goal():

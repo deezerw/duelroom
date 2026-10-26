@@ -117,237 +117,122 @@ properly for the board library.
 
 ## P1 — a whole feature reports numbers that mean nothing
 
-### 4. `gauntlet` board ranking: the floor is not a floor — OPEN — UNSUPPORTED, both causes in pinned C++
+### 4. The going-second harness never put a board on the field — ROOT CAUSE FOUND 2026-10-26; the SEARCH is still unsupported
 
-A board holding **one vanilla Alexandrite Dragon** "stopped" 18/18 meta going-second
-hands (they searched on 6/6, so this is not the repair-mode no-op). A single vanilla
-monster cannot stop a meta deck, so the metric is not measuring board strength, and
-the four real boards that each stopped 18/18 measured nothing.
+**Every going-second number this project ever printed was measured against an empty
+field, on both sides, with the search pointed at a seat nobody controlled.** That is
+the whole explanation of the result that blocked this feature: a board holding one
+vanilla Alexandrite Dragon "stopped" 18/18 meta going-second hands because there was
+no board in front of them and no board behind them either.
 
-`rank` reports `beats_floor` and refuses to print an ordering, so no false answer
-escapes — but the feature is unusable until this is found.
+`going_second_args` passed the start replay as the solver's **positional** argument.
+That slot is a TEMPLATE, not a position. With `--deck`/`--hand` beside it the solver
+enters synthetic-start mode and builds a **fresh duel** — it prints
+`=== synthetic start ===` and names the template's contribution, which is "flags, LP,
+hand size, draw count, opponent decklist" and nothing else. The recorded line went in
+only as a reference to transplant.
 
-- **Retracted theory:** `capture_target()` at a hardcoded `r.turns == 2` is NOT the
-  cause. Any `--target` sets `target_scratch`, which builds the goal from scratch and
-  discards the captured reference (`main.cpp` ~3229, ~7123), so the goal is just
-  "their boss in a monster zone" and is reachable.
-- **Next step, now cheap:** `_attack` keeps a `solver.log` per search and returns its
-  `target board POSTED/EDITED` line. Run ONE going-second search and read what the
-  solver says about its goal, its starting position, and why it wrote nothing.
-**Status after FIVE fixes (2026-10-24): BLOCKED, and the cause is now localised to
-the solver's going-second mode itself.** Four real bugs were found and fixed on the
-way and none of them was the cause. Stopping here deliberately.
+Queried directly at the root (`breaking.root_state`, which replays the prefix and asks
+the core), the position the search actually started from was:
 
-The decisive measurement, which took five iterations to set up correctly:
+| | player 0 | player 1 |
+|---|---|---|
+| monster zones | empty | empty |
+| hand | 5 | 5 |
 
-| kewl-tune reaching `15665977@atk` | |
+And the seat: synthetic-start substitutes `--deck`/`--hand` into **side a**, i.e. engine
+player 0. `--player 1` therefore pointed the search at side b, whose deck and hand came
+from the template's own decklist order. The solver's starting-position block proves it —
+with six cards passed to `--hand`, it listed five different ones (Effect Veiler, Ghost
+Belle, Kewl Tune Reco, Ghost Belle, Kewl Tune Cue), and they are side b's list, not the
+hand anybody asked for.
+
+So all four earlier "fixes" were real bugs about the wrong thing. Each one changed which
+hand `--hand` carried, and `--hand` was never reaching the searched seat:
+
+1. `--hand` does not reach player 1 — true, and the reason is the seat, not the flag.
+2. the hand is not the tail of the `--deck` file either — true, same reason.
+3. the dealt list must go into the START replay — it changed the hand *of the seat that
+   was never searched*.
+4. `template_vs` hardcoded `shuffle_decks=False` — a real bug, and the one fix that
+   still matters: it is what makes the template seed vary the other seat's hand.
+
+**The supported shape, and it works.** `--start` plus `--approach` is how this solver is
+told to search from a position a duel has reached; it is what
+`ygorl.solver.combo_solver.SolveRequest` uses for continuations. `start` carries the
+duel's parameters with no responses, `prefix` the same header plus the responses that
+reach the position, and the finisher roots on the approach's own duel:
+
+    <reference> --start <start.yrpX> --approach <prefix.yrpX> --no-ref
+                --target <payoff> --player 1
+
+Built that way and queried at the root, the position is a real turn 2:
+
+| | board builder | attacker |
+|---|---|---|
+| monster zones | **1 card** | empty |
+| hand | 3 | **6** (five plus the draw for turn) |
+| deck | 33 | 34 |
+
+`breaking.check_root` is that check and it now runs on every position the module builds,
+refusing one where the attacker never drew or the board is absent.
+
+**The turn cuts are real and the patch fixes them.** Three hardcoded `turns >= 2` sites
+in `solver-patched/search.cpp` assume a first player's turn-1 combo. At a resumed root
+the duel is already at turn 2, so the approach root was `EXHAUSTED` after **0
+expansions**. With `patches/0001-going-second-turn-cuts.patch` applied to a separate
+binary:
+
+| | turn cuts | approach root |
+|---|---|---|
+| pinned | 100% of rollouts | EXHAUSTED, 0 expansions, 0.0 s |
+| patched | 4% of rollouts | 591 expansions, 4.5 s, budget-limited |
+
+**And it still does not solve.** This is the part that keeps the feature unsupported, and
+it is now a two-line reproduction instead of an inference from a printf. Same deck, same
+target, same budget, same patched binary, empty field in every case:
+
+| position | result |
 |---|---|
-| going FIRST (stored optimiser ledger, same target) | **10 of 12 — 83%** |
-| going SECOND into one vanilla Alexandrite Dragon, varied functional hands | **0 of 4** |
+| turn 1, player 0, approach carries no responses | **SOLVED** |
+| turn 2, player 1 — the going-second shape | nothing |
+| turn 3, player 0, both players having passed | nothing |
 
-A board holding a single vanilla monster cannot turn 83% into 0%. Every input is now
-verified correct, so what remains is the mode.
+So it is **not the seat and not the turn depth**: it is that a resumed root gets only the
+finisher's bounded-discrepancy walk, with no plan, no probe and no repertoire — the
+guidance machinery is built for the duel's start. 1306 expansions in 4.5 s is nothing for
+a line needing ten correct decisions. Confirmed from the other side too: both attacker
+hands that reached nothing going second **solve in 30 s going first**, with six cards.
 
-What was PROVEN and fixed along the way (each real, none the cause):
+Retired beliefs, all of them stated here because each one cost time:
 
-1. `--hand` does not reach player 1 — the report listed cards nobody passed, and two
-   template seeds dealt the same five.
-2. The hand is not the tail of the `--deck` file either.
-3. The dealt list must go into the START replay, not `--deck` — that path does reach
-   player 1 (fixed; it changed the hand).
-4. `template_vs` hardcoded `shuffle_decks=False`, so player 1's hand was simply its
-   decklist tail, identical for every seed — for kewl-tune, four handtraps and a
-   Synchro spell that cannot assemble its payoff at any budget. Fixed: `shuffle=True`
-   for the opposing seat, and `defend`/`floor` vary the seed per hand. **Verified in
-   the run: four different functional hands, including Kewl Tune Synchro, Cue and
-   Rotary.** Still 0 of 4 through.
-5. `--turns` is not involved: `--turns 3` changes nothing, 100% of rollouts still cut.
-6. The template preserves decklist order exactly — it is the solver's OUTPUT replay
-   that reorders, and its responses are only valid against that order, so the order
-   cannot be substituted back.
+- ~~"the mode never summons from the extra deck"~~ — the evidence was the solver's own
+  hint line on `hindsight: 0 substitute goal(s) kept`. Hindsight only counts extra-deck
+  summons *in rollouts that survive*, and 100% of them were being turn-cut, so the
+  counter was reporting the turn cuts, not an extra-deck defect.
+- ~~"`!! REQUESTED but INERT` is consistent with it"~~ — that line named `reenter 0.50`,
+  a ladder-dependent heuristic, and has nothing to do with summoning.
+- ~~"the floor is not a floor"~~ — the floor was fine; there was simply no board in
+  front of it, and no board in front of the real candidates either, so all of them
+  measured the same empty position.
 
-**What this is NOT:** hands, decks, decklist order, turn limits, target posting
-(`target_scratch` builds the goal from `--target` and discards the captured
-reference), or the repair-mode no-op (`searched` is true throughout).
+**What changed in the code.** `going_second_args` raises instead of returning a command
+line, because the broken one had been copied into three call sites and the fixes landed
+in different subsets of the three. `breaking.second_position` is the single builder, and
+it takes `board=False` for the **paired control**: the same decks, the same seed and the
+same cards dealt to the attacker, with the builder passing. That replaces the deck of 40
+vanilla monsters, which changed the decks, the seed and the attacker's hand all at once —
+so a difference against it was never attributable to the board. `gauntlet.floor` is gone;
+each candidate carries its own control.
 
-**Localised to the vendored C++ (2026-10-24), and deliberately NOT changed.**
-`turn_cuts` does not mean "budget exhausted" — the solver's own comment says it
-separates "decision budget too short" from **"the line overflows turn 1"**. Three
-sites in `solver-patched/search.cpp` cut on a **hardcoded** `turns >= 2`:
+`floodgate_check` is rewritten onto the same builder. It had never received fix (3) at
+all: it still passed `--deck our_deck` with a sampled `--hand`, four lines from the call
+site that was fixed, so every floodgate was tested against one hand however many were
+asked for.
 
-| line | comment |
-|---|---|
-| 2751 | "Past the end of turn 1 the board is frozen: continuing the rollout into the opponent's turn can no longer reach anything." |
-| 3269 | same shape |
-| 4726 | `if(turns >= 2) { ++stats.turn_cuts; return Adv::Dead; }` |
-
-Every *other* cut site uses the configurable `total_turns >= cfg.max_turns + 1`.
-So the search carries a baked-in assumption that it is a **first player's turn-1
-combo**, which is exactly what a going-second search is not — and 100% of rollouts
-dying by `turn_cut` is consistent with it.
-
-**PROVEN by experiment, and it is a real bug — but it is not the whole blocker.**
-
-Built a patched solver ALONGSIDE the pinned one (separate object, separate binary,
-source restored, `bin/combosolver` and `obj/solver/search.o` verified byte-identical
-by md5 afterwards), with those four cuts respecting `cfg.max_turns`. The cut profile
-changes completely:
-
-| solver | turn cuts |
-|---|---|
-| pinned | `turn 40334` — **100% of rollouts** |
-| patched | `turn 16` — **0% of rollouts** |
-
-So the hardcoded cuts WERE killing every going-second rollout, and respecting
-`cfg.max_turns` fixes that. The patch is saved, reviewed and **not applied**, at
-`patches/0001-going-second-turn-cuts.patch`.
-
-**A second, independent blocker — now identified: the going-second mode never summons
-from the extra deck.** With the turn cuts patched and the search running freely:
-
-    NRPA : 38871 rollouts  165189 states  38332 adaptations   best 0/1
-    hindsight: 0 substitute goal(s) kept  <-- NONE: no extra-deck monster summoned
-
-Established by asking for the CHEAPEST extra-deck monster kewl-tune owns — Kewl Tune
-Track Maker, a **level 4** Synchro — instead of the derived level-5 target:
-
-| target | through |
-|---|---|
-| level 4 Synchro (cheapest in the deck) | **0 of 3** |
-| level 5, the derived target | **0 of 3** |
-
-So it is not a hard-target problem. The deck reaches its target in 10 of 12 hands
-going FIRST and cannot summon **any** extra-deck monster going second, with 15 cards
-sitting in its extra deck (`EXTRA=15` in the starting position). Consistent with the
-solver's own `!! REQUESTED but INERT here (dependency absent in this mode)`.
-
-**Conclusion: the going-second formulation is not viable on this pinned solver.** Two
-independent defects, both solver-side — the turn cuts (patched, proven) and no
-extra-deck summoning (identified, not patchable from this codebase). `gauntlet`'s
-board ranking and `second` stay UNSUPPORTED, and this is no longer an open question
-about where the problem is.
-
-**The code now says so instead of reporting a number.** `floor` returns
-`floor_is_broken` when a vanilla board stops every hand, and both `floor` and `rank`
-print the cause and refuse — so a 100% stop rate can never again be read as a strong
-board.
-
-**Why the patch is not applied:** the solver is pinned (`combo_solver e0c7221802a2`),
-CLAUDE.md says "treat an update as a migration; otherwise results silently change
-meaning", and promoting it re-gates every measurement in this session. It also would
-not make the feature work, because of the second blocker above. The feature stays
-UNSUPPORTED and the patch waits for a session where the re-gate can be watched.
-
-- **For a session with someone watching:** patch those three sites to respect
-  `cfg.max_turns` (or the rollout's starting turn), rebuild via
-  `tools/build_combo_solver.sh`, re-run `daemon.py gate snake_eye`, and re-measure.
-  `_attack` keeps a `solver.log` per search as the evidence.
-- **Until then treat `gauntlet`'s board ranking and `second` as UNSUPPORTED.** `rank`
-  refuses to print an ordering when nothing beats the floor, so no false answer
-  escapes — believe that refusal.
-
-### 5. The board library was built single-draw and pair-capped — RE-RUN IN PROGRESS
-
-**Per-deck results so far, paired against the old single-draw library (40 hands each,
-identical hands):**
-
-| deck | better | worse | same | sign test |
-|---|---|---|---|---|
-| elfnote | **33** | 1 | 6 | p < 0.0001 |
-| despia | **7** | 0 | 33 | p = 0.016 |
-| fiendsmith | 12 | **9** | 19 | p = 0.66 |
-| branded | — | — | — | noise (see #32) |
-
-So the multi-draw library is a large gain on elfnote, a clear one on despia, and
-**indistinguishable on fiendsmith** — the same deck-dependence the `draws` ladder was
-built to report, now confirmed on four decks.
-
-**The 9 worse hands on fiendsmith were a real defect, now FIXED.** More draws alone
-cannot produce a worse board; what can is the goal restructure replacing upstream's
-prefix stacks with stacks built only from pieces that solved **individually**.
-
-The monotonicity argument behind that was half right. It says an *unsatisfiable*
-`{base, B}` makes `{base, A, B}` unsatisfiable — but a piece missing the **15 s
-triage** budget is a false negative, not a proof of unsatisfiability. So any pair
-needing a piece that misses triage was never requested at all.
-
-`combinations_to_try` now also builds stacks from pieces that at least **placed a
-card** (`best_placed > 0`), ranked behind the all-solved combinations — evidence
-first, maybes second. A piece that placed **nothing** stays excluded, which is the
-sound half of the argument.
-
-Still worth measuring per deck before promoting the library wholesale: fiendsmith
-needs re-running to confirm the 9 regressions are gone.
-
-(original note) 
-
-`results/boards.jsonl` (280 records) predates both the climb and the multi-draw
-sweep, so every stored board is a floor. `targets`, `threats`, `matrix`, `second` and
-the optimiser's payoff target all read it. One elfnote hand: library says 4
-interruptions, 32 draws at a quarter of the budget found 10 distinct boards topping
-out at 5 int / 4 neg.
-
-- **Fix:** re-run with `skills/sweep.py` and promote.
-
-### 6. `export` keeps whichever list was scraped first — FIXED (best_list)
-
-`daemon.py cmd_export` selects with `ORDER BY d.id LIMIT 1` — not best-placing, not
-most representative. That is how `branded.ydk` became a Branded/Blitzclique hybrid
-with one Fallen of Albaz and **no Branded Fusion**, averaging 1.6 interruptions over
-its 31 solved hands of 40 (1.2 if the 9 with no line count as zero). It is one of
-the three opponents `gauntlet` weights by default, and a gauntlet of weak lists
-flatters every board.
-
-- **My own measurement error, corrected 2026-10-24.** I reported this deck at
-  "1.0 interruptions over 40 hands" all session, in ISSUES, CLAUDE.md and several
-  commit messages. That figure came from my iteration-1 script scoring unsolved
-  hands as **-1 interruptions**: (49 - 9)/40 = 1.00 exactly. Counting a brick as
-  minus one interruption is meaningless. The real figures are 1.6 over solved
-  hands and 1.2 counting bricks as zero. The qualitative point stands on the
-  decklist itself — no Branded Fusion — not on the number I attached to it.
-- Found because `boards` printed 1.6 for the same deck. Two views disagreeing is
-  what surfaced it, which is the fifth time that has worked tonight. `boards` now
-  states its denominator: "per SOLVED hand; hands with no line are not in this
-  library" — a bare mean invited reading it as per-hand.
-### 7. `draws` had no per-deck calibration — FIXED
-
-Four draws bought +0.10 mean interruptions on despia for 2.6x the solver time (one
-hand of ten improved); the same machinery beat the stored library outright on an
-elfnote hand. Two decks, opposite answers, so `sweep.DRAWS` cannot have one right
-value. The budget had `ladder`; draws had nothing.
-
-`sweep.draws_curve` and the `draws [deck]` command now report it, **at no solver
-cost** — every record stores each attempt with its draw index, so the running best
-over the order the solves actually ran is exact after the fact.
-
-First real answer, on the active deck (40 hands, 540 solves, mean best 3.83):
-
-    hands already at their best board by end of draw
-       draw  0   24/40      draw  6   31/40
-       draw  2   27/40      draw  8   35/40
-       draw  5   28/40      draw 10   40/40
-    solves after the best was already found: 285 (53%)
-
-So 60% of hands peak in the breadth round and the rest keep improving all the way to
-draw 10 — **this deck earns its draw budget**, unlike despia where almost nothing
-moved. That is the per-deck answer the single `DRAWS` constant could not express, and
-the command says which case it is looking at.
-
-### 8. Coverage gaps the reports do not refuse over — FIXED
-
-- `locals.toml` covers **58%** of the stated meta; no deck exists for azamina, doomz,
-  invoked, mitsurugi or rogue. Every weighted ranking inherits that.
-- The handtrap matrix is **partial**: 7 of ~10 decks. `doctor` said so; the matrix
-  output did not, because its own threshold was `_n < 5` and 7 clears it. **FIXED:**
-  `matrix` now compares against the decks that actually exist — the same standard
-  `doctor` uses — and prints the share ("PARTIAL: 7 of ~10 decks, 70% of the field")
-  plus the note that every ranking shown is a ranking over those 7. Two views judging
-  the same file by different standards is how a caveat goes missing from the one that
-  drives a decision, and this view decides which handtraps to main deck.
-- The active deck is `blue-eyes-branded-test`, an untracked file with "test" in its
-  name. If that is the tournament list it should be tracked and named as such.
-
----
+**The feature that replaced it.** `gauntlet` now ranks boards with
+`gauntlet.rank_boards`, which asks the same question of `--fire` — machinery that works
+and is already measured over 40 hands per cell. See #69.
 
 ## P2b — found on the 2026-10-24 02:00 pass
 

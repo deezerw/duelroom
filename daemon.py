@@ -1674,29 +1674,42 @@ def cmd_second(conn, args):
     print(f"{ours.stem} going second into {theirs.stem}")
     print(f"  their board target: {their_target}")
     print(f"  our payoff target : {our_target}\n")
+    print(f"  ! UNSUPPORTED: {breaking.UNSUPPORTED}\n")
     rows = breaking.going_second(theirs, ours, their_target, our_target,
                                  hands=hands)
-    failed = [r for r in rows if r["their_board"] is None]
-    built = sum(1 for r in rows if r["their_board"])
-    searched = sum(r["searched"] for r in rows)
-    through = sum(r["broke"] for r in rows)
+
+    def describe(cell):
+        if cell is None:
+            return "not run"
+        if cell.get("error"):
+            return f"NOT MEASURED — {cell['error'][:60]}"
+        if not cell.get("searched"):
+            return "NO SEARCH (misconfigured)"
+        return "got through" if cell["through"] else "stopped"
+
+    through = ctrl_through = measured = 0
     for r in rows:
-        if r["their_board"] is None:
-            state = f"SOLVER FAILED — {r.get('error','')[:70]}"
-        elif not r["their_board"]:
-            state = "they bricked"
-        elif not r["searched"]:
-            state = "NO SEARCH (misconfigured)"
-        else:
-            state = "got through" if r["broke"] else "stopped"
-        print(f"  hand {r['seed']}: {state}")
-    print(f"\n  their board built {built}/{len(rows)}, "
-          f"we searched {searched}, got through {through}")
-    if failed:
-        print(f"  ! {len(failed)} hand(s) the SOLVER failed on — not deck weakness,")
-        print("    and excluded from the counts above")
-    if searched < built:
-        print("  ! some hands never entered a search — see breaking.searched()")
+        board, ctrl = r.get("board"), r.get("control")
+        bits = f"  hand {r['seed']}: vs their board {describe(board)}"
+        if board and not board.get("error"):
+            bits += (f"  (board {board.get('board_cards')} card(s), we hold "
+                     f"{board.get('attacker_hand')})")
+        print(bits)
+        print(f"            vs an empty field  {describe(ctrl)}")
+        if board and not board.get("error") and board.get("searched"):
+            measured += 1
+            through += bool(board["through"])
+            if ctrl and ctrl.get("searched"):
+                ctrl_through += bool(ctrl["through"])
+    print(f"\n  measured on {measured}/{len(rows)} hand(s): got through their "
+          f"board {through}, through an empty field {ctrl_through}")
+    # The paired control is the only thing that gives the first number a
+    # scale. Same decks, same seed, same cards dealt to us -- only the
+    # board differs -- so if an empty field stops as many hands, the
+    # obstacle is our own turn-2 search and not their board.
+    if measured and ctrl_through <= through:
+        print("  ! an EMPTY FIELD stopped at least as many hands as their")
+        print("    board, so nothing here is a measurement OF the board.")
 
 
 def cmd_floodgates(conn, args):
