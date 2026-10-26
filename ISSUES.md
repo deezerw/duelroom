@@ -2263,3 +2263,145 @@ result already on record — **48 distinct swaps across 3 cut slots, none
 beating the current list**. The honest reading is not "the list is
 optimal" but "the meta data cannot evaluate this list", and the two look
 identical in the output.
+
+---
+
+# Bug-fix pass, 2026-10-26
+
+Six defects, found by running commands across every deck and reading the
+output rather than by reading code — the method this file keeps
+recommending. All fixed, each with a regression test. 332 tests pass; the
+four guards are clean.
+
+### 62. The test suite ran itself recursively, and a broken import was the only brake — FIXED
+
+`venv/bin/pytest tests/ -q`, the command BACKLOG.md and the
+`test_regressions.py` docstring both give, aborted at collection:
+`No module named 'daemon'`. Only `python -m pytest` worked, because that
+form puts the cwd on `sys.path`. `test_regressions.py` and `test_web.py`
+each did the insert themselves; `test_cli.py` did not, so one missing line
+aborted the whole run. Fixed with `tests/conftest.py`.
+
+Fixing it uncovered what it had been hiding: `cmd_doctor`'s GUARDS block
+shells out to `venv/bin/pytest tests/ -q`, and `test_cli.py` calls
+`cmd_doctor`. doctor → pytest → doctor → pytest. The inner run had always
+died instantly on the ImportError, so the recursion stopped one level deep
+and doctor simply reported **FAIL regression tests** — its own headline
+guard, failing, for as long as the tests have existed. With collection
+fixed the loop ran: the suite hung past 600 s and the 15-minute load
+average reached 13.8 before the timeout killed the tree. `cmd_doctor` now
+skips the guard that IS pytest when `PYTEST_CURRENT_TEST` is set.
+
+### 63. `draws` printed the opposite of its own data — FIXED
+
+The command exists to answer one question per deck: are extra draws worth
+2.6x the solver time. `at_draw[k]` counted only the hands that still had an
+attempt at draw k, so hands that stop early (patience) left the denominator
+instead of carrying forward as finished. branded read
+`draw 0 40/40 ... draw 13 31/31`, and `cmd_draws` compared the **rendered
+strings** `"40/40"` and `"31/31"`, found them unequal, and concluded *later
+draws kept improving boards, so draws is earning its budget on this deck.*
+
+Recomputed cumulatively from the same records: all 31 of branded's solved
+hands reached their eventual best board in the breadth round, and 553 of
+its 655 solves (84%) bought nothing. With a moving denominator the two
+strings almost never match, so the "earning its budget" branch was close to
+unconditional.
+
+Two more defects inflating the same count: only `interruptions` was
+compared, so a 3 int / 1 neg → 3 int / 2 neg gain counted as having peaked
+at draw 0; and hands that never solved have best (0, 0), which equals their
+running best at every draw, so all 9 of branded's unsolved hands of 40
+counted as "already at their best board". Now excluded and reported
+separately, mean labelled per SOLVED hand.
+
+The corrected verdicts reproduce the independent sign test in CLAUDE.md:
+despia and elfnote better, branded no different.
+
+### 64. `rescore` described edits that were never tested, and counted 12 of them twice — FIXED
+
+Candidates were named by parsing the trial FILENAME. Trial names gained the
+cut partway through the project — `<deck>_r<round>_<add>` became
+`<deck>_r<round>_<cut>_<add>` — so the older half of every stored run has no
+cut in its name and rendered as a bare `+Called by the Grave`: an addition
+with nothing removed, which at 45 main cards is not a legal list and was
+never what ran.
+
+The decklists settle it. `blue-eyes-branded-test_r0_24224830.ydk` and
+`..._r0_30576089_24224830.ydk` are byte-identical and both cut 30576089.
+All 12 old-style trials are the same swap as a new-style one, summaries
+matching to four decimals — the solver being deterministic, so this is two
+names for one experiment. The table showed them as two independent agreeing
+rows. 49 rows → 37.
+
+`optimizer.trial_change` now takes the cut and add from the trial's own
+`.ydk`; `_merge_duplicate_lists` collapses identical decklists and keeps
+disagreeing ones as flagged separate rows.
+
+### 65. The #1 ranking guard went into `optimize` and not into `rescore` — FIXED
+
+Both commands print an ordering from the same stored summaries under the
+same objective. Only one checked for degenerate terms. On the stored
+kewl-tune run — the run #1 measured — brick rate (0.17), solve rate (0.83)
+and handtrap survival (0.00) are each one value across all 10 trials, so
+the order rests entirely on combo length at weight -0.05 and window
+recovery at 0.5. Its top row beat the current list by 0.006 and `rescore`
+closed by recommending it.
+
+`degenerate_terms` now accepts plain summaries as well as Candidates, so
+there is one implementation rather than two. `rescore` refuses on the same
+`len(varying) <= 1` threshold and otherwise names the constant terms above
+the table.
+
+**Not changed, because it redefines the rule rather than enforcing it:**
+the threshold counts any 2 moving terms as enough, so kewl-tune discloses
+but does not refuse — even though the three HEAVY terms (-2.0, +1.0, +1.5)
+are the dead ones and only the tiebreaks move. Worth a decision.
+
+### 66. `report` crashed on 7 of 12 decks — FIXED
+
+The headline command was only ever walked with no arguments, i.e. only
+against the active deck, which happened to miss both crashes in it.
+
+**ValueError on 6 decks.** `identify_archetype` gained a fourth field and
+`cmd_report` still unpacked three:
+
+    for alt, ov, n_ in (r.get("archetype_alts") or [])
+
+so every deck with an alternative archetype guess raised. The entry
+directly above this one added that field and argued it was safe because
+"seven consumers read `[0]`, `[1]` and `[2]` by index (the #58 lesson,
+applied deliberately this time; a test pins that compatibility)". The test
+pinned the consumers that index and missed the one that **unpacks** — which
+is #58 recurring in the same function, two entries after it was declared
+learned. The fix indexes; the docstring, which had said three fields for as
+long as there were four, is corrected.
+
+**UnboundLocalError on Blitzclique.** `blind` was bound inside `if live:`
+but read from the UNMEASURED loop, so a deck with no live handtrap and at
+least one unmeasured one crashed.
+
+**The blind-spot note printed twice or never.** It sat inside the
+unmeasured loop: branded printed the Maxx "C" note once per unmeasured row,
+and the six decks whose handtraps were all live printed it zero times — so
+the note explaining that a 94%-converted survival is not a pass never
+appeared on any deck whose numbers most invited that misreading.
+
+The dispatcher catches all three, prints a traceback and exits 0, which is
+how they survived. An AST scan for the same scoping shape across `skills/`,
+`daemon.py` and `web/` found no other instance.
+
+### 67. `report` named one card as the worst matchup when three tied — FIXED
+
+branded folds to Infinite Impermanence, Ash Blossom and Effect Veiler, all
+at 0%. `min` returned whichever the stored record listed first — a card
+chosen by JSON key order, printed as the answer. Ties are named as ties.
+
+### Audited clean in the same pass
+
+- Every read-only deck-taking CLI command (`mydeck`, `hand`, `check`,
+  `ydke`, `report`, `drill`, `rescore`, `flex`, `drift`) against all 12
+  deck files: 108 invocations, 0 raised.
+- Every web route, static and per-deck, for all 12 decks: 80 GETs, no 5xx.
+- `hand`'s hypergeometric odds against a hand calculation: 31.0% / 36.3%
+  for 3 copies in 44 cards at 5 and 6 drawn, both exact.
