@@ -1491,11 +1491,11 @@ def cmd_gauntlet(conn, args):
     # the difference would be.
     base_row = next((r for r in scored
                      if r["candidate"]["label"] == "base"), None)
-    if base_row is not None and base_row is not best:
+    gap = (base_row["through"] - best["through"]) if base_row else None
+    if gap is not None and round(gap, 4) > 0:
         print(f"  building nothing and holding your traps lets "
               f"{base_row['through']:.0%} through, so the board is worth "
-              f"{base_row['through'] - best['through']:+.0%} on what was "
-              f"measured")
+              f"{gap:+.0%} on what was measured")
     elif base_row is not None:
         print("  ! holding your traps and building NOTHING scores as well as "
               "the best board.")
