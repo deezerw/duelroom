@@ -381,6 +381,10 @@ def check_root(prefix_path, expect_board, cards=None):
     field is the whole point.
     """
     st = root_state(prefix_path, cards=cards)
+    if len(st["players"]) < 2:
+        raise RootNotPlayable(
+            f"{Path(prefix_path).name}: the core reported "
+            f"{len(st['players'])} player(s), not 2")
     me = st["players"][ATTACKER]
     builder = st["players"][1 - ATTACKER]
     hand = me.get("hand") or 0
@@ -457,7 +461,10 @@ def attack(start, prefix, target, solve_ms=None, seed=0, threads=2,
 
     from ygorl.solver.combo_solver import Workdir
 
-    own = scratch is None
+    # The scratch directory is always REPORTED, never silently dropped:
+    # it holds the solver.log, which is the only direct evidence of what
+    # the mode did, and an unreported mkdtemp is the leak `sweep._solve_one`
+    # and `gauntlet._one_draw` both had to be fixed for.
     scratch = Path(scratch or tempfile.mkdtemp(prefix="duelroom-atk-"))
     scratch.mkdir(parents=True, exist_ok=True)
     wd = Workdir.create(scratch / "workdir")
@@ -486,7 +493,7 @@ def attack(start, prefix, target, solve_ms=None, seed=0, threads=2,
            "through": bool(list(out.glob("*.yrp"))),
            "returncode": r.returncode,
            "log": str(log) if log else None,
-           "scratch": None if own else str(scratch)}
+           "scratch": str(scratch)}
     return res
 
 
