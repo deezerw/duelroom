@@ -4530,3 +4530,84 @@ def test_identify_archetype_tuple_stays_index_compatible():
     arch, overlap, n_core, n_lists = got[0]
     assert isinstance(arch, str) and 0 <= overlap <= 1
     assert n_core >= 3 and n_lists >= ms.MIN_LISTS_FOR_ID
+
+
+# --- ISSUES #68: the recovery metric ------------------------------------
+
+def test_fire_spare_spec_is_a_bare_code():
+    """A zoned spare spec aborts the WHOLE fire test, silently.
+
+    Goal targets carry a zone ("94145021@hand"); `--fire-spare` resolves
+    through the solver's `ResolveCard`, which has no zone grammar, and a
+    failure returns from `RunFireTest` before the first window. Measured
+    on a stored kewl-tune line: 4 windows and a verdict with a bare code,
+    ZERO with the zoned form -- and every hand trap then reports "no
+    legal window in this line", which reads as a perfectly safe line.
+    """
+    from skills.handlab import spare_spec
+
+    assert spare_spec("94145021@hand") == "94145021"
+    assert spare_spec("15665977@atk") == "15665977"
+    assert spare_spec("15665977") == "15665977"
+    assert spare_spec(" 15665977@grave ") == "15665977"
+    assert spare_spec("@hand") is None
+
+
+def test_analyse_offers_no_spare_by_default():
+    """Offering a spare costs more information than it buys.
+
+    Measured on one stored line at one budget: with no spare, 3 of 4
+    windows converted the WHOLE board (best 5/5) and the fourth graded
+    4/5; with one spare, all 4 converted the reduced board at best 4/5 --
+    including the three that had just managed all of it. `converted` went
+    up and the report said less. The default must therefore be off, and
+    the parameter must still exist so the other question can be asked.
+    """
+    import inspect
+
+    from skills import handlab
+
+    sig = inspect.signature(handlab.analyse)
+    assert "spare" in sig.parameters, "the spare question must stay askable"
+    assert sig.parameters["spare"].default is None, (
+        "a spare must be opt-in: it makes the solver settle for the cheap "
+        "goal in every window and throws the per-window grade away")
+
+
+def test_parse_windows_keeps_the_recovery_grade():
+    """"best 4/5" is the graded recovery and was parsed, then discarded.
+
+    `_ROLLOUTS` has always captured the pair; nothing read it, so a
+    window keeping four of five board cards and one keeping none both
+    printed "NO RECOVERY FOUND".
+    """
+    from skills.handlab import parse_windows, recovery_grade
+
+    log = (
+        "  window  0 (dec.   4, summon  1, over Kewl Tune Reco): pas "
+        "convertie  [494 rollouts, best 4/5]  manque : Zalen the Shackled "
+        "Dragon\n"
+        "  window  1 (dec.  16, summon  2, over Kewl Tune Rotary): "
+        "CONVERTIE (board COMPLET)  [251 rollouts, best 5/5]\n"
+        "  2 window(s) where the threat is live\n")
+    rows, declared = parse_windows(log)
+    assert declared == 2 and len(rows) == 2
+    assert rows[0]["kept"] == 4 and rows[0]["of"] == 5
+    assert rows[0]["survived"] is False
+    assert rows[1]["kept"] == 5 and rows[1]["of"] == 5
+    assert rows[0]["missing"] == ["Zalen the Shackled Dragon"]
+    assert recovery_grade(rows) == (9, 10)
+
+
+def test_recovery_grade_ignores_ungraded_windows():
+    """An ungraded window is left out of both totals, never counted zero.
+
+    A window the solver did not search has no grade; scoring it as 0 of 0
+    kept would drag the share down with a measurement that was not made.
+    """
+    from skills.handlab import recovery_grade
+
+    assert recovery_grade([{"kept": 2, "of": 4}, {"kept": None, "of": None}]) \
+        == (2, 4)
+    assert recovery_grade([{"kept": None, "of": None}]) == (None, None)
+    assert recovery_grade([]) == (None, None)

@@ -276,6 +276,13 @@ def _print_pilot(r):
                      f"{h['partial']} only by giving up "
                      f"{r.get('spare_name') or 'a piece'})")
         print(f"\n  {h['name']}: live at {w} point(s), {bits}")
+        # The GRADE, not the verdict. "0 recovered" over windows that each
+        # kept four of five board cards is a different hand to hold from
+        # one that kept none, and the solver graded every window.
+        if h.get("of"):
+            print(f"      of the board it asked back for, you keep "
+                  f"{h['kept']}/{h['of']} card(s) "
+                  f"({h['kept_share']*100:.0f}%) across those points")
         if h["blind_spot"]:
             print(f"      note: {h['blind_spot']}")
         if h["parse_error"]:
@@ -286,7 +293,9 @@ def _print_pilot(r):
             print(f"      when it lands and you play on, you still reach: {got}")
         for d in h["detail"]:
             mark = "survives" if d["survived"] else "NO RECOVERY FOUND"
-            print(f"      on {d['over'] or '?'}  ->  {mark}")
+            grade = (f"  [kept {d['kept']}/{d['of']}]"
+                     if d.get("of") and not d["survived"] else "")
+            print(f"      on {d['over'] or '?'}  ->  {mark}{grade}")
             if d["missing"] and not d["survived"]:
                 print(f"         would have needed: {', '.join(d['missing'])}")
             if d["answers"]:

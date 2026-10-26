@@ -139,6 +139,15 @@ def parse_windows(log_text):
             "after_summons": int(sm.group("n")) if sm else None,
             "survived": survived,
             "rollouts": int(roll.group("n")) if roll else None,
+            # HOW MUCH OF THE BOARD came back, not just whether all of it
+            # did: the solver prints "best 4/5" beside every window, and
+            # that is the graded recovery this report used to throw away.
+            # `_ROLLOUTS` has always captured the pair; nothing read it.
+            # A window that keeps 4 of 5 and one that keeps 0 of 5 both
+            # read "NO RECOVERY FOUND" without it, and they are not the
+            # same hand to hold.
+            "kept": int(roll.group("a")) if roll and roll.group("a") else None,
+            "of": int(roll.group("b")) if roll and roll.group("b") else None,
             "missing": ([x.strip() for x in miss.group("cards").split(",")]
                         if miss else []),
             "answers": [],
@@ -320,9 +329,50 @@ def exposure(rows):
     return lost, offered
 
 
+def recovery_grade(rows):
+    """How much of the board survives, over the windows that graded. (kept, of).
+
+    `survived` is all-or-nothing, and that is the wrong shape for the
+    question a pilot actually has: the hand trap has landed, what do I
+    still have? The solver answers it per window and prints the answer --
+    "best 4/5" -- and a window keeping four of five board cards reads
+    identically to one keeping none in a converted/not count. They are
+    not the same hand to hold.
+
+    Windows with no grade (nothing was searched there) are left out of
+    both totals rather than counted as zero, so the share is over what
+    was measured.
+    """
+    kept = sum(r["kept"] for r in rows if r.get("kept") is not None)
+    of = sum(r["of"] for r in rows
+             if r.get("kept") is not None and r.get("of"))
+    return (kept, of) if of else (None, None)
+
+
+def spare_spec(target):
+    """A goal target as ``--fire-spare`` can resolve it: a BARE CODE.
+
+    Goal targets carry a zone -- the base rung is things like
+    "94145021@hand" -- and `--fire-spare` resolves through the solver's
+    `ResolveCard`, which has no zone grammar. (`--target` uses
+    `ResolveCardZone`; they are different functions one letter apart in
+    spirit.) Handed a zoned spec the solver prints
+
+        !! --fire-spare: no card contains "94145021@hand"
+
+    and RETURNS FROM THE WHOLE FIRE TEST before the first window, so
+    every hand trap comes back "no legal window in this line" -- which
+    reads as the safest possible line rather than as a crash. Measured on
+    a stored kewl-tune line: 4 windows and a verdict with no spare, 4
+    with a bare code, ZERO with the zoned form.
+    """
+    text = str(target).strip()
+    return text.split("@", 1)[0].strip() or None
+
+
 def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
             handtraps=None, fill_seed=0, pieces=4, log=None, candidates=1,
-            threads=None):
+            threads=None, spare=None):
     """The whole report for one chosen opening hand.
 
     Returns a dict with the filled hand, the end board, the readable
@@ -400,16 +450,36 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         out["reading"] = read_board(conn, rec)
         out["candidates"] = []
 
-        # The goal the climb settled on, so the LAST piece it added can be
-        # offered as expendable. Without a spare the fire test asks only
-        # "can you rebuild this exact board", and a line that keeps two
-        # of three interrupters reads identically to one that keeps none.
+        # The goal the climb settled on. Its tail is the cheapest end of
+        # the ladder -- `solve_for_hand` adds the best-ranked piece first
+        # -- so the last target is what a spare would give up.
         blocking = (rec.get("solver") or {}).get("blocking", {})
         attempts = blocking.get("attempts") or []
-        chosen = attempts[blocking.get("chosen", 0)] if attempts else {}
-        goal = [t for t in (chosen.get("targets") or [])]
-        spare = goal[-1] if len(goal) > 1 else None
+        k = blocking.get("chosen")
+        if not isinstance(k, int) or not 0 <= k < len(attempts):
+            k = 0          # multi-draw records carry no `chosen` at all
+        chosen_goal = attempts[k] if attempts else {}
+        goal = list(chosen_goal.get("targets") or [])
         out["goal"] = goal
+        # NO SPARE BY DEFAULT, reversing an earlier decision here, because
+        # offering one makes the solver settle for the cheaper goal in
+        # EVERY window and throws the grade away. Measured on one stored
+        # kewl-tune line, same budget:
+        #
+        #   no spare : 3 of 4 windows CONVERTIE (board COMPLET), best 5/5,
+        #              and the 4th graded "best 4/5, manque : Zalen"
+        #   1 spare  : 4 of 4 "CONVERTED (board WITHOUT the sacrificed
+        #              card)", best 4/5 -- in all four, including the
+        #              three that had just managed the whole board
+        #
+        # So the spare bought one window and cost the knowledge that
+        # three were full recoveries. `converted` goes up, the report
+        # says less. The question it answers -- how much can you keep --
+        # is better answered by the per-window grade, which costs
+        # nothing. Pass `spare=` to ask the old question deliberately.
+        if spare is True:       # "the cheapest piece", named by the ladder
+            spare = goal[-1] if len(goal) > 1 else None
+        spare = spare_spec(spare) if spare else None
         out["spare"] = spare
         out["spare_name"] = (_name(conn, int(spare))
                              if spare and str(spare).isdigit() else spare)
@@ -446,6 +516,13 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                             f"solver reported {declared} windows, parsed "
                             f"{len(detail)}")
                     row["detail"] = detail
+                    # The graded recovery, summed over the windows that
+                    # graded: board cards kept against board cards asked
+                    # for. This is what "where it breaks" is really
+                    # reporting, and it is a share rather than a verdict.
+                    kept, of = recovery_grade(detail)
+                    row["kept"], row["of"] = kept, of
+                    row["kept_share"] = (kept / of) if of else None
                     v = parse_verdict(logf.read_text())
                     if v:
                         row["full"] = v["full"]
