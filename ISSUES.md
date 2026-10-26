@@ -2290,3 +2290,77 @@ chosen by JSON key order, printed as the answer. Ties are named as ties.
 - Every web route, static and per-deck, for all 12 decks: 80 GETs, no 5xx.
 - `hand`'s hypergeometric odds against a hand calculation: 31.0% / 36.3%
   for 3 copies in 44 cards at 5 and 6 drawn, both exact.
+
+## 68. The recovery metric either aborted or overstated itself — FIXED 2026-10-26
+
+`handlab.analyse` asks "where does this line break" by firing each hand trap at every
+legal window and seeing whether the board comes back. Two defects in how it asked,
+both proven against the solver on a stored kewl-tune line.
+
+**A zoned `--fire-spare` spec aborted the whole fire test.** The spare came straight off
+the goal conjunction, and those targets carry a zone — the base rung is things like
+`94145021@hand`. `--fire-spare` resolves through the solver's `ResolveCard`, which has no
+zone grammar (`--target` uses `ResolveCardZone`; they are different functions), and on
+failure `RunFireTest` **returns before the first window**:
+
+| `--fire-spare` | windows | verdict |
+|---|---|---|
+| none | 4 | 3 of 4 converted, 3 full board |
+| `15665977` | 4 | 4 of 4 converted, 0 full board |
+| `15665977@atk` | **0** | **none** |
+
+Every hand trap then reported "no legal window in this line" — which reads as the safest
+possible line, not as a crash. `spare_spec` strips the zone.
+
+**Offering a spare at all costs more than it buys.** Same line, same budget:
+
+- no spare: three windows `CONVERTIE (board COMPLET)` at `best 5/5`, and the fourth
+  graded `best 4/5, manque : Zalen the Shackled Dragon`
+- one spare: all four `CONVERTED (board WITHOUT the sacrificed card(s))` at `best 4/5`,
+  including the three that had just rebuilt the whole board
+
+`converted` went up and the report said less. The spare is now opt-in (`spare=`),
+reversing the earlier default here.
+
+**The replacement was free and already in the log.** The solver prints `best 4/5` beside
+every window and `_ROLLOUTS` has always captured the pair — nothing read it, so a window
+keeping four of five board cards and one keeping none both printed "NO RECOVERY FOUND".
+`parse_windows` keeps `kept`/`of`, `recovery_grade` sums them over the windows that
+graded, and the CLI and the web hand lab both show the share. `report`'s per-window
+column comes from the funnel, which is binary and never sees the grade; it is now
+labelled as the floor of it rather than a rival reading.
+
+Also: `analyse` shadowed its own `chosen` parameter with the chosen goal, and indexed
+`attempts[blocking["chosen"]]` without checking — multi-draw records carry no `chosen`
+key at all.
+
+## 69. `gauntlet` ranks boards again, on measured data — FIXED 2026-10-26
+
+The going-second ranking cannot work on this solver (#4). The same question is
+answerable with machinery that does: a board is a set of interruptions, and `--fire`
+already measures over **forty hands per cell** whether a deck's own turn-1 line still
+reaches its payoff with a given card played at every legal window.
+`results/handtrap_matrix_40h.jsonl` holds 7 decks x 7 cards, so ranking a board costs no
+solver time at all.
+
+Per piece, P(their line gets through it) is `1 - window_rate x (1 - survival)` — the
+same expectation `weighted_handtrap_ranking` scores a maining decision on, so a card
+that is never live stops nothing. Per board it is the product, weighted by `locals.toml`.
+
+Three limits the command states on every run, because each is a way to misread it:
+
+- `--fire` plays a card from the opponent's **hand**, so only pieces the board holds in
+  hand are measured. A field negate is not something anyone can activate from hand and
+  no flag on this solver plays one, so those pieces are counted and **named**, never
+  folded in with a weight.
+- the matrix holds only `scenarios.HANDTRAPS`, so a held piece outside it is eligible
+  but unscored, and is listed apart from the measured ones.
+- the per-board figure multiplies its pieces, which assumes independence. A hand trap
+  landing shortens the line the next one faces, so it is a **lower bound** on the board.
+
+First run (kewl-tune, `random:7`): Ash in hand lets 0% of branded and despia through and
+71% of sky-striker. All three candidate boards scored identically, because they differ
+only in field pieces — and the command says so instead of printing an ordering. That is
+the honest state of this method: it separates boards by what they **hold**, not by what
+they **built**. Extending it to field pieces needs a different primitive; `--no-activate`
+(forbid activating a card of theirs) is the candidate and is not built.
