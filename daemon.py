@@ -1341,17 +1341,18 @@ def cmd_optimize(conn, args):
 
 
 def cmd_gauntlet(conn, args):
-    """Rank one hand's end boards by what they actually stop."""
+    """Rank one hand's end boards by what the meta plays THROUGH."""
     if not args:
-        print("usage: gauntlet <deck> <hand | random[:seed]> [hands] [boards]"
-              " [solve_s] [opponents]")
+        print("usage: gauntlet <deck> <hand | random[:seed]> [boards] "
+              "[draws] [solve_s]")
         print("  finds the distinct end boards this hand can reach, then")
-        print("  deals each opposing deck going-second hands at every one")
-        print("  hands     going-second hands PER opposing deck (default 4)")
-        print("  boards    candidate boards to test (default 3, + a control)")
+        print("  ranks them by what each one STOPS, from the measured")
+        print("  handtrap matrix — no going-second search (see below)")
+        print("  boards    candidate boards to rank (default 3)")
+        print("  draws     solver draws per goal (default "
+              f"{gauntlet.DRAWS}; the search is randomised)")
         print("  solve_s   per-search budget. Cheap is WRONG, not fast — see")
         print("            engine.SOLVE_MS. For smoke-testing, not measuring.")
-        print("  opponents how many opposing decks, by locals weight (default 3)")
         return
     deck_path = _resolve_deck(args[0], conn)
     if not deck_path:
@@ -1366,97 +1367,120 @@ def cmd_gauntlet(conn, args):
     except ValueError as e:
         print(f"bad hand: {e}")
         return
-    hands = int(args[2]) if len(args) > 2 else 4
-    boards = int(args[3]) if len(args) > 3 else 3
+    boards = int(args[2]) if len(args) > 2 else 3
+    draws = int(args[3]) if len(args) > 3 else gauntlet.DRAWS
     solve_ms = int(float(args[4]) * 1000) if len(args) > 4 else None
-    # Hands per deck and number of decks were ONE argument in the first
-    # version, so asking for more hands silently widened the gauntlet and
-    # vice versa -- and the test's resolution depends on the first while
-    # its coverage depends on the second.
-    n_opp = int(args[5]) if len(args) > 5 else 3
 
-    # The opponents, weighted by YOUR room rather than global meta share --
-    # the same rule every other weighted ranking in this project follows.
-    others = [p for p in sorted(DECKS.glob("*.ydk")) if p != deck_path]
-    others.sort(key=lambda p: -config.weight_for(p.stem))
-    opponents = []
-    for p in others[:n_opp]:
-        target = scenarios.ensure_target(p)
-        if not target:
-            print(f"  no payoff target for {p.stem} — skipped")
-            continue
-        opponents.append((p, target))
-    if not opponents:
-        print("no opposing decks with a payoff target — run `targets` first")
+    path = _latest_matrix()
+    if not path:
+        print("no handtrap matrix yet — run `matrix` (scenarios.run_matrix) "
+              "first; this ranking is read from it")
         return
+    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    m = scenarios.handtrap_matrix(recs)
+    if not m:
+        print(f"{path.name} holds no usable records")
+        return
+    weights = config.weights()
+    share, missing = scenarios.covered_share(m, weights)
 
     print(f"{deck_path.stem}, hand: "
           + ", ".join(handlab._name(conn, c) for c in hand))
-    print(f"  opponents: " + ", ".join(f"{p.stem} -> {t}"
-                                       for p, t in opponents) + "\n")
+    print(f"  ranked against {path.name}: {len(m)} deck(s), "
+          f"{share:.0%} of your stated meta by weight")
+    if missing:
+        print("  ! not measured: "
+              + ", ".join(f"{d} {w:.0%}" for d, w in missing[:4]))
     if solve_ms:
         print(f"  ! budget overridden to {solve_ms/1000:.0f}s per search — "
-              f"a cheap run is a wrong run, not a fast one\n")
-    rep = gauntlet.rank(deck_path, hand, opponents, keep=boards,
-                        hands=hands, solve_ms=solve_ms, log=print)
-    if not rep["results"]:
+              f"a cheap run is a wrong run, not a fast one")
+    print()
+
+    cands = gauntlet.candidate_boards(deck_path, hand, keep=boards,
+                                      draws=draws, solve_ms=solve_ms,
+                                      log=print)
+    if not cands:
         print("\nno end board was reached at all — this hand is a brick")
         return
 
-    print("\n  stops  board")
-    for r in rep["results"]:
+    print("\nranking the boards by what gets through them")
+    rows = gauntlet.rank_boards(cands, m, weights, log=print)
+
+    print("\n  through  board")
+    for r in rows:
         c = r["candidate"]
-        rate = ("  n/a " if r["stop_rate"] is None
-                else f"{r['stopped']}/{r['tested']}")
-        tag = "  (control: do nothing)" if r.get("control") else ""
-        print(f"  {rate:>6s}  {c['interruptions']} int / {c['negates']} neg"
-              f"  [{c['label']}]{tag}")
-        for row in r["rows"]:
-            if row.get("hand") is None:
-                print(f"            ! {row['deck']}: {row['error']}")
-    fr = rep.get("floor_rate")
-    if fr is not None:
-        f = rep["floor"]
-        print(f"  {f['stopped']}/{f['tested']}  FLOOR — a board that does "
-              f"nothing (40 vanilla monsters, one summoned)")
-    # A stop rate only means something above the floor. Equal to it means
-    # the opponents' own turn-2 task was the obstacle, not your board.
-    if fr is not None and not rep.get("beats_floor"):
-        print("\n  ! no board beat the FLOOR. Whatever stopped those hands, it")
-        print("    was not your board — the opposing decks could not assemble")
-        print("    their payoff going second even against a vanilla monster.")
-        print("    Calibrate the attacker side (budget, or their targets)")
-        print("    before reading anything into the ordering above.")
+        thr = ("    n/a" if r["through"] is None
+               else f"  {r['through']:5.0%}")
+        print(f"  {thr}  {c['interruptions']} int / {c['negates']} neg"
+              f"  [{c['label']}]")
+        # Three classes, kept apart on purpose. "Held in hand" is what
+        # the fire test reproduces exactly; a held card with no matrix
+        # cell is eligible but unmeasured; a field or graveyard piece is
+        # not something anyone can activate from hand, so no flag on this
+        # solver plays it. Printing the first two together read as a
+        # board fully measured when half of it was not scored at all.
+        no_cell = set()
+        for cell in r["per_deck"].values():
+            no_cell.update(cell.get("no_cell") or ())
+        held = [handlab._name(conn, p[0]) for p in r["measured"]
+                if p[0] not in no_cell]
+        unmeas = [handlab._name(conn, c) for c in sorted(no_cell)]
+        rest = [f"{handlab._name(conn, p[0])} ({p[1]})" for p in r["untested"]]
+        print(f"            measured (held in hand): "
+              + (", ".join(held) or "nothing"))
+        if unmeas:
+            print(f"            held but NOT in the matrix: "
+                  + ", ".join(unmeas))
+        if rest:
+            print(f"            NOT measurable by firing: " + ", ".join(rest))
+        for dname, cell in sorted(r["per_deck"].items(),
+                                  key=lambda kv: (kv[1]["through"] is None,
+                                                  kv[1]["through"] or 0)):
+            if cell["through"] is None:
+                continue
+            bits = ", ".join(
+                f"{handlab._name(conn, d['code'])} {d['through']:.0%}"
+                for d in cell["pieces"] if d["through"] is not None)
+            print(f"              vs {dname:24s} {cell['through']:5.0%}"
+                  + (f"   ({bits})" if bits else ""))
+
+    scored = [r for r in rows if r["through"] is not None]
+    if not scored:
+        print("\n  ! NOTHING MEASURABLE. Every interruption on every one of")
+        print("    these boards sits on the field or in the graveyard, and")
+        print("    `--fire` plays a card from the opponent's HAND — so this")
+        print("    method cannot see any of them. The ordering above is not")
+        print("    a ranking; it is the heuristic score in a different column.")
         return
-    # No separation means the test had no resolution, not that the boards
-    # are equal. Say so before anyone reads an ordering into it.
-    if not rep.get("discriminated"):
-        print("\n  ! every board stopped the SAME number of hands — this test")
-        print("    did not discriminate. Raise `hands`, or the opposing decks")
-        print("    cannot threaten any of these boards.")
-        return
-    best = rep["results"][0]
-    print(f"\n  best board: {best['candidate']['label']}, stopping "
-          f"{best['stopped']}/{best['tested']} going-second hands")
-    if rep.get("control_rate") is not None:
-        print(f"  passing with this hand stops {rep['control_rate']:.0%}, "
-              f"a board that does nothing {rep['floor_rate']:.0%}"
-              f" — the gap above those is what the board is worth")
-    # The heuristic score and the measured one disagreeing is the whole
-    # reason this command exists, so say when it happens.
-    by_score = max(rep["results"],
-                   key=lambda r: (r["candidate"]["interruptions"],
-                                  r["candidate"]["negates"]))
+    best = scored[0]
+    print(f"\n  best board: [{best['candidate']['label']}], "
+          f"{best['through']:.0%} of the weighted meta plays through it")
+    if len({round(r["through"], 4) for r in scored}) == 1:
+        print("  ! every scored board came out the SAME. They hold the same")
+        print("    measurable pieces, so this method cannot separate them —")
+        print("    the difference between them is in the pieces it cannot see.")
+    by_score = max(scored, key=lambda r: (r["candidate"]["interruptions"],
+                                          r["candidate"]["negates"]))
     if by_score is not best:
-        print(f"  NOTE: the old interruption count would have picked "
-              f"{by_score['candidate']['label']} "
-              f"({by_score['candidate']['interruptions']} int), which stops "
-              f"{by_score['stopped']}/{by_score['tested']}")
-    if best["tested"] and best["tested"] < 6:
-        print(f"  ! {best['tested']} tested hands is too few to separate "
-              f"boards — raise `hands` before believing this ordering")
-    path = gauntlet.save(rep, ROOT / "results" /
-                         f"gauntlet_{deck_path.stem}.json")
+        print(f"  ! the heuristic score prefers [{by_score['candidate']['label']}]"
+              f" ({by_score['candidate']['interruptions']} int), which lets "
+              f"{by_score['through']:.0%} through. Counting interruptions and")
+        print(f"    measuring them disagree here, which is why this exists.")
+    untested_n = len(best["untested"]) + len(
+        {c for cell in best["per_deck"].values()
+         for c in (cell.get("no_cell") or ())})
+    if untested_n:
+        print(f"  ! {untested_n} piece(s) of the winning board were not "
+              f"measured. The percentage is what gets through the pieces it")
+        print(f"    could see, NOT through the board.")
+    print("  ! the per-board figure multiplies its pieces, which assumes they")
+    print("    are independent. They are not — a handtrap landing shortens "
+          "the line")
+    print("    the next one faces — so it is a lower bound on the board.")
+    path = gauntlet.save({"deck": deck_path.stem, "hand": list(hand),
+                          "matrix": str(path.name), "coverage": share,
+                          "results": rows},
+                         ROOT / "results" / f"gauntlet_{deck_path.stem}.json")
     print(f"  written to {path}")
 
 

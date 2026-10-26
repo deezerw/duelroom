@@ -641,3 +641,152 @@ def save(report, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=1))
     return path
+
+
+# --- ranking a board by what the meta plays THROUGH ----------------------
+#
+# `rank` above asks the question directly -- deal the meta a going-second
+# hand and see whether it still functions -- and the pinned solver cannot
+# answer it. Established 2026-10-26 with the harness finally correct
+# (`breaking.split_position`, a verified board on the field, the attacker
+# holding six): the same hand and target that SOLVE from an ordinary turn
+# 1 reach nothing from a resumed root, on either seat and at any turn
+# depth. ISSUES.md #4 has the three-case proof. So the going-second
+# ranking stays unsupported.
+#
+# This is the same question asked of machinery that works. A board is a
+# set of interruptions; `--fire` already measures, over forty hands per
+# cell, whether a deck's own turn-1 line still reaches its payoff when a
+# given card is played at every legal window of it. That is "does this
+# interruption stop that deck", which is what a board is for. The matrix
+# is already computed (`scenarios.run_matrix`, results/handtrap_matrix_*)
+# so ranking a board costs no solver time at all.
+#
+# WHAT IT DOES NOT SEE, stated here because the number must never be read
+# as the whole board: `--fire` plays a card from the opponent's HAND, so
+# only the pieces your board holds in hand are measured this way. A
+# field negate -- Apollousa, a big Synchro -- is not a card anyone can
+# activate from hand, and no flag on this solver plays one for you. Those
+# pieces are counted and named separately, never folded into the score,
+# because a weight chosen here would be exactly the invented number this
+# project keeps having to retract.
+
+MEASURABLE = "hand"
+"""The only `where` a fire test reproduces: the card is held and used.
+
+`board_interruptions` labels every piece field / set / hand / grave. A
+piece in HAND is the fire test's own situation, so its measured survival
+transfers exactly. The others are a different situation and are reported
+untested rather than approximated.
+"""
+
+
+def split_pieces(pieces):
+    """(measured, untested) from a candidate's (code, where, negate) list.
+
+    Returns two lists of (code, where, negate). `untested` is not a
+    failure -- it is the part of the board this method structurally
+    cannot see, and the caller must print it beside the score.
+    """
+    measured = [tuple(p) for p in pieces if p[1] == MEASURABLE]
+    untested = [tuple(p) for p in pieces if p[1] != MEASURABLE]
+    return measured, untested
+
+
+def piece_through(cell):
+    """P(their line gets through ONE piece), from its matrix cell.
+
+    `1 - window_rate * (1 - survival)`: the card has to have a legal
+    window AND the line has to fail through it, which is the same
+    expectation `scenarios.weighted_handtrap_ranking` scores a maining
+    decision on. A card that is never live does not stop anything, and
+    scoring its stop-rate alone would rank it as if it did.
+
+    None when the cell carries no survival -- the card was never tested
+    against this deck, which is not the same as it doing nothing.
+    """
+    if not cell:
+        return None
+    surv = cell.get("survival")
+    if surv is None:
+        return None
+    return 1.0 - (cell.get("window_rate") or 0.0) * (1.0 - surv)
+
+
+def board_vs_deck(measured, cells):
+    """One (board, deck) cell: per-piece detail and the board's share.
+
+    `through` multiplies the pieces, which ASSUMES THEY ARE INDEPENDENT
+    and they are not -- a handtrap landing changes the line the next one
+    faces, usually making it shorter and easier to interrupt again. The
+    product is therefore an upper bound on getting through, i.e. a lower
+    bound on the board. It is reported with the per-piece numbers beside
+    it so the reader can see what it is made of, and `tested` says how
+    many pieces it actually rests on.
+    """
+    detail, through = [], 1.0
+    tested = 0
+    for code, where, negate in measured:
+        cell = (cells or {}).get(code) or (cells or {}).get(str(code))
+        p = piece_through(cell)
+        detail.append({"code": code, "where": where, "negate": bool(negate),
+                       "through": p,
+                       "survival": (cell or {}).get("survival"),
+                       "window_rate": (cell or {}).get("window_rate"),
+                       "tested_hands": (cell or {}).get("tested")})
+        if p is not None:
+            through *= p
+            tested += 1
+    return {"through": through if tested else None, "tested_pieces": tested,
+            # Pieces that COULD be fired but have no cell against this
+            # deck: the matrix only holds `scenarios.HANDTRAPS`, so a
+            # board holding anything else is scored over fewer pieces
+            # than it has. Named, because "measured" was printing them.
+            "no_cell": [d["code"] for d in detail if d["through"] is None],
+            "pieces": detail}
+
+
+def rank_boards(candidates, matrix, weights=None, log=None):
+    """Rank candidate end boards by how little of the meta plays through.
+
+    `matrix` is `scenarios.handtrap_matrix`'s output, `weights` the
+    locals.toml share per archetype. A board that blanks a deck nobody in
+    your room plays is worth nothing, which is the whole reason that file
+    exists -- so the headline is the weighted figure, and each deck's own
+    number is kept so a single matchup can be read directly.
+
+    Like `weighted_handtrap_ranking`, the weighted mean divides by the
+    weight of the decks the board was actually measured against, not by
+    the whole stated meta, and `coverage` says what that was.
+    """
+    say = log or (lambda m: None)
+    weights = weights or {}
+    rows = []
+    for cand in candidates:
+        measured, untested = split_pieces(cand.pieces)
+        per_deck, wsum, wtot = {}, 0.0, 0.0
+        for deck, data in (matrix or {}).items():
+            res = board_vs_deck(measured, data.get("cells"))
+            per_deck[deck] = res
+            w = weights.get(deck, 0.0)
+            if w and res["through"] is not None:
+                wsum += w * res["through"]
+                wtot += w
+        rows.append({
+            "candidate": cand.to_json(),
+            "measured": [list(p) for p in measured],
+            "untested": [list(p) for p in untested],
+            "per_deck": per_deck,
+            # None, not 1.0: a board with nothing measurable has no score,
+            # and a 1.0 would rank it as the worst board rather than the
+            # unmeasured one.
+            "through": (wsum / wtot) if wtot else None,
+            "coverage": wtot,
+        })
+        say(f"  {cand.interruptions} int / {cand.negates} neg [{cand.label}]: "
+            f"{len(measured)} piece(s) measurable, {len(untested)} not")
+    # Least gets through first; an unscored board goes last rather than
+    # sorting as if it were perfect.
+    rows.sort(key=lambda r: (r["through"] is None,
+                             r["through"] if r["through"] is not None else 1.0))
+    return rows

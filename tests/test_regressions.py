@@ -4611,3 +4611,85 @@ def test_recovery_grade_ignores_ungraded_windows():
         == (2, 4)
     assert recovery_grade([{"kept": None, "of": None}]) == (None, None)
     assert recovery_grade([]) == (None, None)
+
+
+# --- ISSUES #69: ranking a board by what gets through it ----------------
+
+def test_split_pieces_only_calls_hand_pieces_measurable():
+    """`--fire` plays a card from the opponent's HAND and nothing else.
+
+    A board's field negate is not a card anyone can activate from hand,
+    and no flag on this solver plays one for you, so it cannot be scored
+    this way. Folding it in with a weight would be exactly the invented
+    number this project keeps retracting.
+    """
+    from skills.gauntlet import split_pieces
+
+    pieces = [(14558127, "hand", True), (12345678, "field", True),
+              (23456789, "set", False), (34567890, "grave", False)]
+    measured, untested = split_pieces(pieces)
+    assert measured == [(14558127, "hand", True)]
+    assert [p[1] for p in untested] == ["field", "set", "grave"]
+
+
+def test_piece_through_needs_a_window_and_a_failure():
+    """A card that is never live stops nothing, however good its survival.
+
+    Same expectation `weighted_handtrap_ranking` scores a maining
+    decision on: `1 - window_rate * (1 - survival)`.
+    """
+    from skills.gauntlet import piece_through
+
+    # always live, never played through -> nothing gets through it
+    assert piece_through({"survival": 0.0, "window_rate": 1.0}) == 0.0
+    # always live, always played through -> everything does
+    assert piece_through({"survival": 1.0, "window_rate": 1.0}) == 1.0
+    # never live -> everything gets through, whatever the survival
+    assert piece_through({"survival": 0.0, "window_rate": 0.0}) == 1.0
+    # half the hands give it a window, and it stops the line in those
+    assert piece_through({"survival": 0.0, "window_rate": 0.5}) == 0.5
+    # untested is not zero
+    assert piece_through({"survival": None, "window_rate": 1.0}) is None
+    assert piece_through(None) is None
+
+
+def test_board_vs_deck_scores_only_the_pieces_it_measured():
+    """An untested piece must not be counted as stopping everything.
+
+    It is dropped from the product and named in `no_cell`, so a board
+    scored over one of its three pieces cannot read as a full board.
+    """
+    from skills.gauntlet import board_vs_deck
+
+    cells = {14558127: {"survival": 0.0, "window_rate": 1.0, "tested": 30}}
+    res = board_vs_deck([(14558127, "hand", True), (999, "hand", False)],
+                        cells)
+    assert res["through"] == 0.0 and res["tested_pieces"] == 1
+    assert res["no_cell"] == [999]
+    # nothing measurable at all is None, never 1.0: a board with no
+    # measured piece must sort as unscored, not as the worst board.
+    assert board_vs_deck([(999, "hand", False)], cells)["through"] is None
+    assert board_vs_deck([], cells)["through"] is None
+
+
+def test_rank_boards_sorts_unscored_last():
+    """A board with no measurable piece is unknown, not perfect."""
+    from skills.gauntlet import Candidate, rank_boards
+
+    def cand(label, pieces, ints):
+        return Candidate(targets=(), label=label, interruptions=ints,
+                         negates=0, pieces=tuple(pieces), draws=1,
+                         solve_s=0.0)
+
+    matrix = {"despia": {"cells": {14558127: {"survival": 0.0,
+                                              "window_rate": 1.0,
+                                              "tested": 29}}}}
+    weights = {"despia": 1.0}
+    rows = rank_boards([cand("nothing", [(777, "field", True)], 9),
+                        cand("ash", [(14558127, "hand", True)], 1)],
+                       matrix, weights)
+    assert [r["candidate"]["label"] for r in rows] == ["ash", "nothing"], (
+        "the board with nine unmeasurable interruptions must not outrank "
+        "a measured one by default")
+    assert rows[0]["through"] == 0.0 and rows[1]["through"] is None
+    assert rows[1]["coverage"] == 0.0
