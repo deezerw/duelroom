@@ -3036,6 +3036,102 @@ def test_draws_curve_recovers_the_per_draw_payoff(tmp_path):
     assert row["wasted"] == 1, row["wasted"]
 
 
+def test_draws_curve_denominator_does_not_move_when_hands_stop_early(tmp_path):
+    """A hand that stops early has not stopped being at its best board.
+
+    `at_draw[k]` counted only the hands that still had an attempt at draw
+    k, so on branded -- where patience stops 31 of 40 hands after the
+    breadth round -- the stored sweep read "draw 0 40/40 ... draw 13
+    31/31". `cmd_draws` then compared those two RENDERED STRINGS, found
+    them different, and printed "later draws kept improving boards, so
+    draws is earning its budget on this deck". Every hand had in fact
+    peaked in the breadth round and 553 of the deck's 655 solves bought
+    nothing -- the verdict was exactly backwards, on the one question the
+    command exists to answer.
+
+    Two hands here: both peak at draw 0, but only one is still being
+    solved at draw 1. The curve must stay 2/2.
+    """
+    import json as _json
+    from skills import sweep
+
+    def rec(hand, attempts):
+        return _json.dumps({
+            "status": "solved", "deck": {"name": "d"}, "hand_index": hand,
+            "lines": [{"board": {}}],
+            "solver": {"blocking": {"attempts": attempts}}})
+
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join([
+        rec(0, [{"draw": 0, "label": "a", "status": "solved",
+                 "interruptions": 3, "negates": 1}]),
+        rec(1, [{"draw": 0, "label": "a", "status": "solved",
+                 "interruptions": 2, "negates": 0},
+                {"draw": 1, "label": "a", "status": "solved",
+                 "interruptions": 2, "negates": 0}]),
+    ]) + "\n")
+
+    row = sweep.draws_curve(path)["d"]
+    assert row["at_draw"][0] == "2/2", row["at_draw"]
+    assert row["at_draw"][1] == "2/2", row["at_draw"]
+    counts = list(row["peaked"].values())
+    assert counts[0] == counts[-1], (
+        f"{counts} -- a flat curve must read as flat, or `draws` reports "
+        "that later draws earned their budget when they bought nothing")
+
+
+def test_draws_curve_excludes_hands_that_never_solved(tmp_path):
+    """A hand with no line has best (0, 0), which equals its running best
+    at every draw -- so it used to count as "already at its best board"
+    from draw 0, padding the exact number that decides whether extra
+    draws are worth 2.6x the CPU. Branded's 9 unsolved hands of 40 were
+    all in that count. Same split `boards` makes after the same bug."""
+    import json as _json
+    from skills import sweep
+
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join([
+        _json.dumps({"status": "solved", "deck": {"name": "d"},
+                     "hand_index": 0, "lines": [{"board": {}}],
+                     "solver": {"blocking": {"attempts": [
+                         {"draw": 0, "label": "a", "status": "solved",
+                          "interruptions": 4, "negates": 2}]}}}),
+        _json.dumps({"status": "unsolved", "deck": {"name": "d"},
+                     "hand_index": 1, "lines": [],
+                     "solver": {"blocking": {"attempts": [
+                         {"draw": 0, "label": "a", "status": "unsolved"},
+                         {"draw": 1, "label": "a", "status": "unsolved"}]}}}),
+    ]) + "\n")
+
+    row = sweep.draws_curve(path)["d"]
+    assert row["hands"] == 2 and row["unsolved"] == 1
+    assert row["at_draw"][0] == "1/1", row["at_draw"]
+    assert row["mean_best_solved"] == 4.0, row["mean_best_solved"]
+    assert row["mean_best"] == 2.0, row["mean_best"]
+
+
+def test_draws_curve_counts_a_negate_only_gain_as_a_later_peak(tmp_path):
+    """Only `interruptions` was compared, so a hand going from 3 int / 1
+    neg to 3 int / 2 neg on a later draw counted as having peaked at draw
+    0. The full tuple decides board quality everywhere else here."""
+    import json as _json
+    from skills import sweep
+
+    path = tmp_path / "s.jsonl"
+    path.write_text(_json.dumps({
+        "status": "solved", "deck": {"name": "d"}, "hand_index": 0,
+        "lines": [{"board": {}}],
+        "solver": {"blocking": {"attempts": [
+            {"draw": 0, "label": "a", "status": "solved",
+             "interruptions": 3, "negates": 1},
+            {"draw": 1, "label": "a", "status": "solved",
+             "interruptions": 3, "negates": 2}]}}}) + "\n")
+
+    row = sweep.draws_curve(path)["d"]
+    assert row["at_draw"][0] == "0/1", row["at_draw"]
+    assert row["at_draw"][1] == "1/1", row["at_draw"]
+
+
 def test_draws_curve_ignores_records_without_attempts(tmp_path):
     import json as _json
     from skills import sweep

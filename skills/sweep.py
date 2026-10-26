@@ -759,9 +759,30 @@ def draws_curve(jsonl_path, deck_name=None):
     draw index, so the running best over the order the solves were RUN is
     exact and recoverable after the fact.
 
-    Returns {deck: {"hands", "best", "at_draw", "wasted", "solves"}} where
-    `at_draw[k]` is how many hands had already reached their eventual best
-    board by the end of draw k.
+    Three things this got wrong before, all of which made the per-deck
+    answer unreadable on the deck where it mattered:
+
+    1. The count was per-draw, not cumulative, over whichever hands still
+       had an attempt at that draw. Hands that stop early (patience) drop
+       out of the denominator rather than carrying forward as finished,
+       so branded read "draw 0 40/40 ... draw 13 31/31" -- a curve that
+       looks like it is losing ground while in fact every hand had
+       already peaked in the breadth round. `at_draw[k]` is now "by the
+       end of draw k" over a denominator that does not move.
+    2. Only `interruptions` was compared, so a hand that went from
+       (3 int, 1 neg) to (3 int, 2 neg) on a later draw counted as having
+       peaked at draw 0. The full tuple decides, as it does everywhere
+       else here.
+    3. Hands that never solved anything have best (0, 0), which equalled
+       their running best at every draw, so they were counted as
+       "already at their best board" from draw 0 -- padding the exact
+       figure that says whether draws are worth their CPU. They are now
+       excluded and reported as `unsolved`, the same split `boards` makes.
+
+    Returns {deck: {"hands", "unsolved", "best", "mean_best",
+    "mean_best_solved", "at_draw", "peaked", "draw_keys", "wasted",
+    "solves"}}, where `at_draw[k]` is the "n/total" string and `peaked[k]`
+    the same count as an int, over hands that solved at least once.
     """
     out = {}
     for raw in Path(jsonl_path).read_text().splitlines():
@@ -780,29 +801,42 @@ def draws_curve(jsonl_path, deck_name=None):
         if not atts:
             continue
         row = out.setdefault(name, {"hands": 0, "solves": 0, "best": [],
-                                    "at_draw": {}, "wasted": 0})
+                                    "unsolved": 0, "_peak": [],
+                                    "_solved_best": [], "_draws": set(),
+                                    "wasted": 0})
         row["hands"] += 1
         row["solves"] += len(atts)
         # The order they ran: breadth (draw 0) first, then the depth rounds.
         order = sorted(atts, key=lambda a: (a.get("draw", 0),
                                             a.get("label", "")))
-        best, first_at = (0, 0), None
-        by_draw = {}
+        row["_draws"].update(a.get("draw", 0) for a in order)
+        best, first_at, peak_draw = (0, 0), None, None
         for i, a in enumerate(order, 1):
             if a.get("status") == "solved":
                 k = (a.get("interruptions") or 0, a.get("negates") or 0)
                 if k > best:
-                    best, first_at = k, i
-            by_draw[a.get("draw", 0)] = best[0]
+                    best, first_at, peak_draw = k, i, a.get("draw", 0)
         row["best"].append(best[0])
         row["wasted"] += len(order) - (first_at or len(order))
-        for k, v in by_draw.items():
-            row["at_draw"].setdefault(k, []).append(v == best[0])
+        if peak_draw is None:
+            row["unsolved"] += 1
+        else:
+            row["_peak"].append(peak_draw)
+            row["_solved_best"].append(best[0])
     for row in out.values():
         row["mean_best"] = (round(sum(row["best"]) / len(row["best"]), 2)
                             if row["best"] else 0.0)
-        row["at_draw"] = {k: f"{sum(v)}/{len(v)}"
-                          for k, v in sorted(row["at_draw"].items())}
+        solved_best = row.pop("_solved_best")
+        row["mean_best_solved"] = (round(sum(solved_best) / len(solved_best), 2)
+                                   if solved_best else 0.0)
+        keys = sorted(row.pop("_draws"))
+        peaks = row.pop("_peak")
+        # Cumulative: a hand that peaked at draw j has peaked at every
+        # draw from j on, whether or not it was still being solved then.
+        row["peaked"] = {k: sum(1 for j in peaks if j <= k) for k in keys}
+        row["draw_keys"] = keys
+        row["at_draw"] = {k: f"{v}/{len(peaks)}"
+                          for k, v in row["peaked"].items()}
         row["wasted_share"] = (round(row["wasted"] / row["solves"], 3)
                                if row["solves"] else 0.0)
     return out

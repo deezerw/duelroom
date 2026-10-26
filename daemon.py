@@ -1534,20 +1534,36 @@ def cmd_draws(conn, args):
         if curve:
             print(f"  from {src.name}\n")
             for deck, row in sorted(curve.items()):
+                solved = row["hands"] - row["unsolved"]
                 print(f"  {deck}")
                 print(f"    {row['hands']} hands, {row['solves']} solves, "
-                      f"mean best {row['mean_best']} interruptions")
-                print(f"    hands already at their best board by end of draw:")
+                      f"mean best {row['mean_best_solved']} interruptions "
+                      f"per SOLVED hand")
+                if row["unsolved"]:
+                    print(f"    {row['unsolved']} hand(s) never solved at all — "
+                          f"excluded below, and {row['mean_best']} counting "
+                          f"them as zero")
+                print(f"    hands at their best board by end of draw "
+                      f"(of {solved} that solved):")
                 for k, v in row["at_draw"].items():
                     print(f"       draw {k:>2}  {v}")
                 print(f"    solves after the best was already found: "
                       f"{row['wasted']} ({row['wasted_share']:.0%})")
-                last = list(row["at_draw"].values())
-                if last and last[0] == last[-1]:
+                # On the COUNTS, never on the rendered "n/total" strings. The
+                # denominator used to move -- hands that stop early dropped out
+                # of it rather than carrying forward -- so branded compared
+                # "40/40" against "31/31", called them different, and reported
+                # that later draws kept improving when in fact every hand had
+                # peaked in the breadth round and 372 of its 655 solves bought
+                # nothing.
+                counts = list(row["peaked"].values())
+                if counts and counts[0] == counts[-1]:
                     print(f"    -> every hand peaked in the breadth round. "
                           f"draws=1 would have given the same boards here.")
                 else:
-                    print(f"    -> later draws kept improving boards, so draws "
+                    gained = counts[-1] - counts[0] if counts else 0
+                    print(f"    -> {gained} more hand(s) reached their best "
+                          f"board after draw {row['draw_keys'][0]}, so draws "
                           f"is earning its budget on this deck.")
                 print()
             return
