@@ -33,19 +33,26 @@ Work queue for the autonomous loop. **Read this first every iteration.**
       draws 1..4 and store it beside the budget ladder.
 
 
-- [ ] FIX the going-second formulation, or `gauntlet` cannot rank anything. Floor
-      measured 2026-10-22: one vanilla Alexandrite Dragon "stopped" 18/18 meta
-      going-second hands (searched on 6/6, so not the repair-mode no-op).
-      RETRACTED first theory: `capture_target()` at a hardcoded `r.turns == 2` is
-      NOT the cause -- any `--target` sets `target_scratch`, which builds the goal
-      from scratch and throws the captured reference away (main.cpp ~7123, ~3229),
-      so the goal is simply "their boss in a monster zone" and is reachable.
-      Cause unknown. Next step is now possible: `_attack` keeps each solver.log and
-      returns its `target board POSTED/EDITED` line, so run ONE going-second search
-      and read what the solver says about its goal, its starting position and why it
-      wrote nothing. Candidates left: `--turns 2` not giving player 1 a full turn,
-      and the start replay's player-1 deck not lining up with `--deck`.
-      Everything `gauntlet` reports is on hold until this.
+- [x] DONE 2026-10-26 — FIX the going-second formulation. Root cause found and it was
+      the harness, not the solver's seat logic: the start replay went in as the
+      POSITIONAL argument (a template), so the solver built a FRESH duel with both
+      fields empty, and `--deck`/`--hand` reach side a while `--player 1` searched
+      side b. Rebuilt on `--start`/`--approach` with `check_root` verifying the
+      position. The SEARCH from a resumed root is still the blocker and is now a
+      two-line repro (turn 1 player 0 solves; turn 2 player 1 and turn 3 player 0 do
+      not), so `second`/`rank` stay unsupported and say so. `gauntlet` now ranks with
+      `rank_boards` off the measured handtrap matrix. ISSUES.md #4 and #69.
+
+- [ ] EXTEND the board ranking to FIELD pieces. `rank_boards` only measures what a
+      board holds in HAND, because `--fire` plays a card from the opponent's hand —
+      so three candidate boards differing only in their field negates all scored
+      identically on the first run, and the command had to say it could not separate
+      them. The candidate primitive is `--no-activate <their card[@zone]>`: a negate
+      on your board is "the opponent loses one activation of your choosing", so
+      forbidding each activation of their line in turn measures which of their cards
+      are critical. That profile is per DECK, not per board, so it is computed once
+      and reused — and it is the same shape as the handtrap matrix. Cost is one solve
+      per (deck, hand, candidate activation); launch it as a background sweep.
 
 - [ ] `--max-rollouts` instead of a wall-clock budget. A 60 s budget does less work
       when the box is busy, so two sweeps are not comparable unless the machine was
@@ -61,8 +68,11 @@ Work queue for the autonomous loop. **Read this first every iteration.**
       distinct boards topping out at 5 int / 4 neg. `targets`, `threats`, `second`,
       `matrix` and `optimize` all read this file.
 
-- [ ] Point `gauntlet` at the real thing: the default budget (60 s), more than 2
-      hands, and opponents that are not `branded.ydk`. The smoke run used 20 s.
+- [x] DROPPED 2026-10-26 — "point `gauntlet` at the real thing" assumed the
+      going-second path. It no longer uses one: `rank_boards` reads the measured
+      matrix, so the budget and the hand count that matter are the MATRIX's (40
+      hands per cell), not the gauntlet's. `branded.ydk` being a weak list still
+      matters there and is the `export` item below.
 
 - [ ] `export` picks whichever list was scraped FIRST (`ORDER BY d.id LIMIT 1`), not
       a representative or best-placing one. That is how `branded.ydk` ended up a

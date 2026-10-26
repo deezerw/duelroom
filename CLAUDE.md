@@ -454,24 +454,35 @@ Honest gaps, so nobody mistakes a limit for a result:
   going-second runs, roughly ten minutes apiece.
 - **The floodgate check is implemented but not run at scale**, and two of its five
   floodgates were the wrong card until 2026-10-25 (see ISSUES.md #43).
-- **`gauntlet`'s board ranking and `second` are UNSUPPORTED.** The going-second metric
-  does not measure board strength. Decisive measurement 2026-10-24: kewl-tune reaches
-  its target `15665977@atk` in 10 of 12 hands going FIRST (stored optimiser ledger),
-  and 0 of 4 going second into a board holding one vanilla Alexandrite Dragon with
-  varied functional hands. A single vanilla monster cannot turn 83% into 0%.
-  Five real bugs were found and fixed chasing this and none was the cause: `--hand`
-  never reaches player 1; the `--deck` file's order does not either; the dealt list
-  has to go into the START replay; `template_vs` hardcoded `shuffle_decks=False` so
-  player 1's hand was its decklist tail for every seed (fixed — hands now vary and
-  are functional, still 0 of 4); and `--turns` is not involved. Every observable input
-  is now correct, so what remains is the solver's own `--player 1` search, which needs
-  reading from `main.cpp`. `_attack` keeps a `solver.log` per search as the evidence.
-  `rank` refuses to print an ordering when nothing beats the floor — believe it.
+- **`second` and `gauntlet.rank` are UNSUPPORTED, and the reason changed on
+  2026-10-26.** The harness was never putting a board on the field: the start replay
+  went in as the solver's POSITIONAL argument, which is a template, and with
+  `--deck`/`--hand` beside it the solver builds a FRESH duel (`=== synthetic start
+  ===`). Queried at the root, both players' zones were empty and both held five cards
+  — so one vanilla Alexandrite Dragon "stopped" 18/18 hands because nothing was in
+  front of them. `--deck`/`--hand` also reach side a only, so `--player 1` searched a
+  seat nobody controlled. That is why four fixes each changed the hand and none
+  changed the result. Full account in ISSUES.md #4.
+  The harness is now correct: `breaking.second_position` builds the position with
+  `--start` plus `--approach`, and `breaking.check_root` replays the prefix and asks
+  the core — verified, the builder has a board and the attacker holds six cards.
+  What is still broken is the SEARCH from it, and that is a two-line repro: same deck,
+  target, budget and binary, empty field throughout, **turn 1 as player 0 SOLVES while
+  turn 2 as player 1 and turn 3 as player 0 reach nothing**. Not the seat and not the
+  turn — a resumed root gets only the finisher's unguided walk, with no plan, probe or
+  repertoire. Both attacker hands solve in 30 s going first.
+  Also measured: the hardcoded `turns >= 2` cuts are real (the approach root was
+  EXHAUSTED after 0 expansions; `patches/0001-going-second-turn-cuts.patch` takes the
+  cuts from 100% of rollouts to 4% and the root to 591 expansions) and the patch is
+  still NOT applied, because it does not make the feature work.
+  Both commands print the refusal on every call and the record carries it.
+  **The replacement is `gauntlet.rank_boards`** — the same question asked of `--fire`,
+  which is already measured over 40 hands per cell. See ISSUES.md #69.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
   limitation the handtrap matrix has, generalised from a card to a board. It is not a
   life-point check and there is no OTK test; breaking a board is not expressible as a
-  solver goal (`--board-remove` relaxes the goal, see `breaking.going_second_args`).
+  solver goal (`--board-remove` relaxes the goal rather than demanding destruction).
   The opponents come from `assets/decks/`, and `export` writes whichever scraped list
   happened to be stored first (`ORDER BY d.id LIMIT 1`), not a representative one:
   `branded.ydk` is a Branded/Blitzclique hybrid with one Fallen of Albaz and no
