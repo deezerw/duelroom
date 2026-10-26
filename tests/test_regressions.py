@@ -3074,6 +3074,58 @@ def _optimizer_scratch(tmp_path, trials):
     return base_main
 
 
+def test_degenerate_terms_accepts_plain_summaries(tmp_path):
+    """`rescore` ranks the same trials as `optimize` and had no
+    degeneracy check at all -- the guard from ISSUES #1 went into one of
+    the two commands that print an ordering. Rather than a second copy of
+    the rule, `degenerate_terms` takes summary dicts as well as
+    Candidates."""
+    from skills import optimizer
+
+    summaries = [
+        {"best_line_rate": 0.83, "brick_rate": 0.17,
+         "hand_trap_survival": 0.0, "combo_actions": {"mean": 4.1},
+         "window_recovery": {"ash": 0.43}},
+        {"best_line_rate": 0.83, "brick_rate": 0.17,
+         "hand_trap_survival": 0.0, "combo_actions": {"mean": 4.5},
+         "window_recovery": {"ash": 0.48}},
+    ]
+    const, vary = optimizer.degenerate_terms(summaries)
+    assert set(const) == {"solve rate", "brick rate", "handtrap survival"}
+    assert set(vary) == {"combo length", "window recovery"}
+
+
+def test_rescore_refuses_to_order_when_nothing_moved(tmp_path, monkeypatch,
+                                                     capsys):
+    """One moving term is a tiebreak, not a measurement, and `optimize`
+    already refuses to print an order in that state. `rescore` printed
+    one regardless, from the same stored data, and named a "best stored
+    swap" under it."""
+    import daemon
+    from skills import db, optimizer
+
+    summary = {"brick_rate": 0.2, "best_line_rate": 0.8,
+               "hand_trap_survival": 0.0, "combo_actions": {"mean": 8.0},
+               "window_recovery": {"ash": 0.3}, "hands": 10}
+    _optimizer_scratch(tmp_path, [
+        ("d_r0_1005_2000", 1005, 2000,
+         dict(summary, combo_actions={"mean": 9.0})),
+        ("d_r0_1006_2001", 1006, 2001,
+         dict(summary, combo_actions={"mean": 7.0})),
+    ])
+    rows = optimizer.rescore("d", scratch=tmp_path)
+
+    monkeypatch.setattr(daemon, "_resolve_deck", lambda *a, **k: tmp_path / "d.ydk")
+    monkeypatch.setattr(optimizer, "rescore", lambda *a, **k: rows)
+    daemon.cmd_rescore(db.connect(), ["d"])
+    out = capsys.readouterr().out
+
+    assert "NO RANKING" in out, out
+    assert "combo length" in out
+    assert "Best stored swap" not in out, (
+        "naming a best swap under the refusal undoes the refusal")
+
+
 def test_rescore_reads_the_change_from_the_decklist_not_the_filename(tmp_path):
     """Trial names gained the cut partway through the project, so the
     older half of every stored run is named `<deck>_r<round>_<add>` with

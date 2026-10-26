@@ -1502,6 +1502,33 @@ def cmd_rescore(conn, args):
     print(f"  weights: brick {obj.brick}, solve {obj.solve_rate}, "
           f"survival {obj.survival}, actions {obj.actions}, "
           f"recovery {obj.recovery}\n")
+
+    # Same check `optimize` makes, on the same data, through the same
+    # function. `rescore` prints the same kind of ordering and had no
+    # check at all -- the guard was added to one of the two commands that
+    # rank trials. Measured on the stored kewl-tune run: brick rate,
+    # solve rate and handtrap survival are each ONE value across all 10
+    # trials, so the ordering there rests entirely on combo length
+    # (weight -0.05) and window recovery (0.5), and its top swap beats
+    # the current list by 0.006.
+    constant, varying = optimizer.degenerate_terms(
+        [r["summary"] for r in rows])
+    if len(varying) <= 1:
+        only = varying[0] if varying else "nothing"
+        print(f"  !! NO RANKING. {len(constant)} of 5 objective terms did "
+              f"not vary over {len(rows)} stored trial(s):")
+        print(f"     {', '.join(constant)}")
+        print(f"     Only {only} moved, and that is a tiebreak, not a "
+              f"measurement.")
+        print(f"     Re-run `optimize` at more hands. Trials below are "
+              f"listed by name, NOT ranked:\n")
+        rows = sorted(rows, key=lambda r: _trial_change_text(conn, r))
+    elif constant:
+        print(f"  ! {len(constant)} of 5 terms did not vary at all: "
+              f"{', '.join(constant)}.")
+        print(f"    The order below is decided by the {len(varying)} that "
+              f"did ({', '.join(varying)}).\n")
+
     print(f"  {'score':>7} {'brick':>6} {'solve':>6} {'surv':>5} "
           f"{'combo':>6} {'recov':>6}  change")
     for r in rows:
@@ -1514,12 +1541,16 @@ def cmd_rescore(conn, args):
               f"{(r['best_line_rate'] or 0):6.2f} {(r['survival'] or 0):5.2f} "
               f"{(r['combo_mean'] or 0):6.2f} {r['window_recovery']:6.3f}  "
               f"{shown}")
-    if rows[0]["label"] == "base":
+    if len(varying) <= 1:
+        pass          # refused above; naming a "best" would undo the refusal
+    elif rows[0]["label"] == "base":
         print("\n  Your current list scores highest — none of the tested swaps "
               "improved it.")
     else:
-        print(f"\n  Best stored swap: {rows[0]['label']}. Re-run `optimize` at "
-              f"more hands before acting on it.")
+        # Was printing the raw trial label ("kewl-tune_r0_49036338") while
+        # the table above rendered the same row as a readable swap.
+        print(f"\n  Best stored swap: {_trial_change_text(conn, rows[0])}. "
+              f"Re-run `optimize` at more hands before acting on it.")
     print("  Weights are judgement calls. Pass a recovery weight to see how "
           "the order moves.")
 

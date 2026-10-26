@@ -448,17 +448,21 @@ def degenerate_terms(history):
     alone would otherwise have passed this check unnoticed.
     """
     keys = {
-        "solve rate": lambda c: (c.summary or {}).get("best_line_rate"),
-        "brick rate": lambda c: (c.summary or {}).get("brick_rate"),
-        "handtrap survival": lambda c: (c.summary or {}).get("hand_trap_survival"),
-        "combo length": lambda c: ((c.summary or {}).get("combo_actions")
-                                   or {}).get("mean"),
-        "window recovery": lambda c: round(
-            mean_window_recovery(c.summary or {}), 6),
+        "solve rate": lambda s: s.get("best_line_rate"),
+        "brick rate": lambda s: s.get("brick_rate"),
+        "handtrap survival": lambda s: s.get("hand_trap_survival"),
+        "combo length": lambda s: (s.get("combo_actions") or {}).get("mean"),
+        "window recovery": lambda s: round(mean_window_recovery(s), 6),
     }
+    # Takes Candidates (from a live `hill_climb`) or plain summary dicts
+    # (from a stored run being rescored). `rescore` prints the same kind
+    # of ordering from the same data and so needs the same check, and
+    # a second copy of this rule is how the ban-list bug got two homes.
+    summaries = [(c if isinstance(c, dict) else (c.summary or {}) or {})
+                 for c in history]
     constant, varying = [], []
     for name, get in keys.items():
-        vals = {get(c) for c in history}
+        vals = {get(s) for s in summaries}
         (varying if len(vals) > 1 else constant).append(name)
     return constant, varying
 
@@ -669,6 +673,7 @@ def rescore(deck_name, objective=None, scratch=None):
             "window_recovery": round(mean_window_recovery(s), 4),
             "hands": s.get("hands"),
             "measured": 1,
+            "summary": s,
         }
         row.update(trial_change(label, deck_name, scratch)
                    or {"cut": None, "add": None, "list_hash": None})
