@@ -34,6 +34,28 @@ A/B on held-out hands, same targets, same budget: arm `base` vs arm
 `--adapt <corpus>`. **Build the loop only if `adapt` solves more hands or solves them
 faster.** If it doesn't, write the numbers down here and redesign.
 
+### Result (2026-10-31): the gate FAILED, so the loop is NOT built on `--adapt`
+
+Deck `blue-eyes-branded-test`, corpus = solved lines from `results/sweep_active.jsonl`
+hands 0-31, held-out hands re-solved with the hand's own sweep targets, `--threads 1`,
+8 in parallel, solver seeds 1-3.
+
+| test | base | adapt | note |
+|---|---|---|---|
+| 10 s, 128-line corpus (4/hand), 8 hands x 2 seeds | 14/16 | 16/16 | adapt took ~20 s MORE wall time |
+| 10 s, 32-line corpus (1/hand), 8 hands x 3 seeds | 22/24 (8.5 s wall) | 23/24 (12.5 s) | base at **20 s: 24/24** (10.6 s) |
+| 60 s, one EXTRA monster target per goal, 8 hands x 3 | 10/24 (base +5 s) | 11/24 | same hands fail in both arms |
+
+The mechanism is live: the adapted policy reproduces 90.2% of the corpus's decisions
+(the solver's own "family ceiling" line), and one held-out hand that base bricked at
+10 s solved in 2.6 s of search. But loading the corpus costs ~9 s per 128 lines,
+single-threaded, before the first rollout. **At equal wall time, plain extra search
+time is as good or better.** On hard goals, the hands that fail fail in both arms.
+Things NOT yet tried, each a cheap A/B on the same harness: `--options <n>` macros
+mined from the corpus, a per-hand corpus (only lines from hands sharing the starter),
+and `--ctx-shrink`. The harness is `tools/experiments/adapt_ab*.py`
+(`venv/bin/python tools/experiments/adapt_ab_equal_time.py <outdir> 10000`).
+
 ## The loop (one "generation")
 
 1. **Deal** N fresh hands (new seeds each generation, never benchmark seeds).
