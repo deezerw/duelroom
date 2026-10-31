@@ -4867,3 +4867,21 @@ def test_trainer_plan_aims_where_a_better_board_might_be():
     labels = {frozenset(t): (lbl, d) for t, lbl, d in out2}
     assert labels.get(frozenset({"B", "P3"})) == ("piece:3", 1), out2
     assert labels.get(frozenset({"B", "P1"})) == ("piece:1", 1), out2
+
+
+def test_trainer_score_ignores_hand_cards_the_combo_never_touched():
+    """A hand trap you opened with and kept is the same card whatever line
+    you play, so it is not part of the line's score. One the combo added
+    to your hand is."""
+    from skills.trainer import line_key
+
+    ASH = 14558127                       # interrupts from the hand
+    board = {"players": [{"mzone": [], "szone": [], "hand": [ASH],
+                          "grave": [], "banished": []}, {}]}
+    line = {"board": board, "actions": [1, 2, 3]}
+    assert line_key(line, opening=[ASH])[1:3] == [0, 0], "held from the opening: not counted"
+    assert line_key(line, opening=[])[1] == 1, "added by the combo: counted"
+    # two copies at the end, one opened with: the second was obtained
+    board["players"][0]["hand"] = [ASH, ASH]
+    assert line_key(line, opening=[ASH, 99999999])[1] == 1
+    assert line_key(line, opening=[ASH])[3] == -3, "fewer actions still breaks ties"

@@ -413,7 +413,10 @@ All five stages are implemented. Standing cautions, in the order they will bite:
 (the same hand seeds `sweep` uses) is played generation after generation; each attempt
 is aimed where a better board might be (breadth pieces → unasked stacks from the pieces
 that solved → near misses biggest-first → the best goal at a fresh seed), and each
-hand's **best line ever found** is kept and watchable on the playmat. The learning curve
+hand's **best line ever found** is kept and watchable on the playmat. A line's score
+is `[on field, interruptions, negates, -actions]`, where a card in hand counts ONLY if
+the combo put it there -- hand traps held from the opening hand are excluded
+(`trainer.line_key`; stored bests are re-scored at every session start). The learning curve
 is the pool's mean best on-field interruptions per generation, so it can only rise or
 stay flat. Bests are seeded from this exact deck's stored results (matched by card list,
 not file name; `trainer_hands.deck_hash`). Stop = a request honoured between

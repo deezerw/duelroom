@@ -89,23 +89,45 @@ def clear_stop(name):
 
 # --- scoring -----------------------------------------------------------------
 
-def line_key(line, cards=None):
+def line_key(line, opening, cards=None):
     """[on_field, interruptions, negates, -actions] for one solved line.
 
     On-field first, as `drill.lines_from` ranks: interruptions held in
     hand are real but they are not a line you can practise -- you hold
     them whatever you drew. Fewer actions breaks ties: the same board in
     fewer steps is the better thing to learn.
+
+    `interruptions` and `negates` count a card in hand ONLY if the combo
+    put it there. A hand trap you opened with and never touched is the
+    same card whatever line you play, so counting it rated "hold Ash and
+    do nothing" as a board -- and ranked the hands with no engine, which
+    are the hands full of hand traps, above the ones that combo. Every
+    copy still held from `opening` is left out; a copy beyond what you
+    opened with was searched or added, so it counts. A copy played and
+    then returned to hand is indistinguishable from one never played,
+    and is left out too: the cautious reading. Graveyard pieces count --
+    the combo is what sent them there.
     """
+    from collections import Counter
+
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import board_interruptions
 
     from .drill import _on_field
 
     cards = cards or default_cards()
-    score = board_interruptions(line.get("board") or {}, cards)
-    return [_on_field(line), score.interruptions, score.negates,
-            -len(line.get("actions") or [])]
+    board = line.get("board") or {}
+    score = board_interruptions(board, cards)
+    end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
+    held = Counter(opening) & end_hand          # copies never part of the line
+    n = neg = 0
+    for code, where, negate in score.pieces:
+        if where == "hand" and held[code] > 0:
+            held[code] -= 1
+            continue
+        n += 1
+        neg += int(bool(negate))
+    return [_on_field(line), n, neg, -len(line.get("actions") or [])]
 
 
 def _compact(record, line):
@@ -175,7 +197,8 @@ def bootstrap(conn, dh, name, deck_path, say=print):
             row = pool.get(rec.get("hand_seed"))
             if row is None:
                 continue
-            best = max(((line_key(ln, cards), ln) for ln in rec["lines"]),
+            best = max(((line_key(ln, json.loads(row["hand"]), cards), ln)
+                        for ln in rec["lines"]),
                        key=lambda t: t[0])
             have = json.loads(row["best_key"]) if row["best_key"] else None
             if have is None or best[0] > have:
@@ -189,6 +212,34 @@ def bootstrap(conn, dh, name, deck_path, say=print):
                 taken += 1
     say(f"bootstrap: {taken} personal best(s) taken from stored results")
     return taken
+
+
+def rescore_bests(conn, dh, say=print):
+    """Re-score every stored best with the current `line_key`.
+
+    Idempotent, and run at the start of every training session, so a
+    change to the scoring can never leave old keys being compared with
+    new ones. Only the best line per hand is stored, so this re-ranks
+    the bests -- it cannot discover that an earlier, discarded line now
+    outranks one.
+    """
+    from ygorl.engine.duel import default_cards
+
+    cards, changed = default_cards(), 0
+    rows = conn.execute("SELECT * FROM trainer_hands WHERE deck_hash=? "
+                        "AND best_record IS NOT NULL", (dh,)).fetchall()
+    with conn:
+        for r in rows:
+            line = json.loads(r["best_record"])["lines"][0]
+            key = line_key(line, json.loads(r["hand"]), cards)
+            if key != json.loads(r["best_key"]):
+                conn.execute("UPDATE trainer_hands SET best_key=? WHERE "
+                             "deck_hash=? AND hand_index=?",
+                             (json.dumps(key), dh, r["hand_index"]))
+                changed += 1
+    if changed:
+        say(f"rescored {changed} stored best(s) with the current scoring")
+    return changed
 
 
 # --- choosing where to aim -----------------------------------------------------
@@ -306,6 +357,7 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
     cards = default_cards()
     best = {h["hand_index"]: (json.loads(h["best_key"]) if h["best_key"] else None)
             for h in hands}
+    opening = {h["hand_index"]: json.loads(h["hand"]) for h in hands}
     improved = done = 0
     for res in sweep._map_solves(batch, workers):
         done += 1
@@ -313,7 +365,7 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
         key, line = None, None
         if res.get("record"):
             line = res["record"]["lines"][0]
-            key = line_key(line, cards)
+            key = line_key(line, opening[i], cards)
         better = key is not None and (best[i] is None or key > best[i])
         with conn:
             conn.execute(
@@ -353,6 +405,7 @@ def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
     engine.require()
     engine.preflight([Path(deck_path)])
     dh = ensure_pool(conn, deck_path, name, hands)
+    rescore_bests(conn, dh, say)
     clear_stop(name)
     with conn:   # an interrupted generation never finished: drop its row
         conn.execute("DELETE FROM trainer_gens WHERE deck_hash=? AND finished IS NULL",
