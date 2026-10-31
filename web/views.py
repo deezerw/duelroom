@@ -123,7 +123,7 @@ def deck(name):
         # feature being broken. Those jobs live on the setup page, which
         # also gives `images` its scope options.
         runnable=[(k, v[1], v[2]) for k, v in jobs.KINDS.items()
-                  if k not in jobs.DECKLESS],
+                  if k not in jobs.DECKLESS and k not in jobs.OWN_PAGE],
     )
 
 
@@ -456,7 +456,7 @@ def job_cancel(job_id):
 @login_required
 def run_job(name, kind):
     c = conn()
-    if kind not in jobs.KINDS or kind in jobs.DECKLESS:
+    if kind not in jobs.KINDS or kind in jobs.DECKLESS or kind in jobs.OWN_PAGE:
         flash("Unknown job type")
         return redirect(url_for("views.deck", name=name))
     path = deck_path(name)

@@ -48,6 +48,11 @@ KINDS = {
 # Jobs that are about the installation rather than about one deck.
 DECKLESS = ("meta", "images")
 
+# Jobs started from their own page, because they need input the generic
+# "run" button cannot give: a pilot run without chosen cards is a job
+# that fails on its first line.
+OWN_PAGE = ("pilot", "train")
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
