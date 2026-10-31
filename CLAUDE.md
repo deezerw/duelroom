@@ -158,6 +158,7 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/engine.py       ygorl + the C++ combo solver; workers, budgets
   │  skills/gate.py         Validation gate, budget ladder, result loading
   │  skills/handlab.py      Solve ONE chosen hand, in full detail
+  │  skills/playback.py     A solved line as playmat frames (core snapshots)
   │
   ├─ asking questions ──────────────────────────────────────────────────────
   │  skills/sweep.py        The board library: multi-draw ladder, triaged budget
@@ -383,7 +384,7 @@ stage is complete and verified.
 3. ~~Validation gate, scale, storage~~ — **done** (`gate.py`; gate passed, board library built)
 4. ~~Scenario suite~~ — **done** (`scenarios.py`, `breaking.py`)
 5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
-6. `STAGE6.md` — Watch a combo line on a real playmat (`playback.py`, `web/`)
+6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
 7. `STAGE7.md` — The deck trainer: play over and over, learn from its own lines
    (`trainer.py`, the solver's `--adapt` corpus)
 
