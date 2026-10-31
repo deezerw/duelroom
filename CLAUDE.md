@@ -128,8 +128,8 @@ Two observations remove the need for an opponent AI entirely:
    yourself a going-second hand and search for a break. The decks "duel" in the only
    sense that matters, with no opponent AI anywhere.
 
-**Bot-vs-bot is deferred, not rejected.** It is the natural Stage 6 once the solver is
-trusted, and the design deliberately leaves room for it: `engine.py` already drives both
+**Bot-vs-bot is deferred, not rejected.** It comes after Stages 6-7 (the playmat viewer and the deck
+trainer) once the solver is trusted, and the design deliberately leaves room for it: `engine.py` already drives both
 seats, and a solver good enough to pilot your deck is most of a solver good enough to
 pilot the opponent's. What it would add is interaction the solitaire model cannot see —
 chain fights, grind games, decisions made with incomplete information. What it costs is
@@ -383,6 +383,9 @@ stage is complete and verified.
 3. ~~Validation gate, scale, storage~~ — **done** (`gate.py`; gate passed, board library built)
 4. ~~Scenario suite~~ — **done** (`scenarios.py`, `breaking.py`)
 5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
+6. `STAGE6.md` — Watch a combo line on a real playmat (`playback.py`, `web/`)
+7. `STAGE7.md` — The deck trainer: play over and over, learn from its own lines
+   (`trainer.py`, the solver's `--adapt` corpus)
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
@@ -490,5 +493,5 @@ Honest gaps, so nobody mistakes a limit for a result:
   (1.2 if the 9 with no line count as zero). A gauntlet of weak
   lists flatters every board.
 
-**Deferred:** a Stage 6 bot-vs-bot arena, once Stages 1–5 are trusted. Not planned in
-detail yet — see "Why No Duel AI (Yet)" above for the trade.
+**Deferred:** a bot-vs-bot arena (now after Stage 7), blocked on the turn-2 resume
+problem above. See "Why No Duel AI (Yet)" for the trade.
