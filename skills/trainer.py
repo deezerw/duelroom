@@ -1,0 +1,414 @@
+"""The deck trainer: play every hand over and over, keep the best line ever found.
+
+The "AI that learns the deck" this project can honestly build. Two things
+it is NOT, both measured before this was written (STAGE7.md has the
+numbers):
+
+- **Not a neural network.** ygorl's PPO and behaviour-cloning runs on a
+  CPU learned nothing usable for a combo deck: the reward has to travel
+  back through ~1,000 decisions, and an hour buys ~1,300 games.
+- **Not a smarter solver.** The combo solver can warm-start its move
+  policy from a corpus of past lines (`--adapt`). It works -- the policy
+  reproduces 90% of the corpus -- but loading the corpus costs about what
+  it saves: at equal wall time, plain extra budget did as well.
+
+What DOES improve with repetition is the board. The solver is a
+randomized search that stops at the first line meeting its targets, so
+any one attempt is one sample, and the best board a hand can reach is
+usually not the one a single attempt returns (CLAUDE.md: elfnote went
+from 3.73 to 4.80 interruptions a hand with more draws). The trainer
+turns that into memory: a fixed pool of hands, a few attempts per hand
+per GENERATION, each aimed where the evidence says a better board might
+be, and the best line ever found kept per hand -- watchable on the
+playmat. The learning curve is the pool's mean best board per generation.
+
+Where each generation aims, in order:
+
+1. A hand never attempted gets the breadth goals -- its base plus each
+   interrupter piece -- exactly as `sweep` asks them.
+2. Bigger stacks built from the pieces that solved (`combinations_to_try`):
+   the boards nobody has asked this hand for yet.
+3. Near misses: goals that failed but placed some of their cards, biggest
+   first. A miss at one seed is a sample, not a proof.
+4. The current best goal again, at a fresh seed: the same goal can end on
+   a better board, because everything beyond the targets is incidental.
+
+Every attempt's solver seed comes from (hand seed, goal, draw number) and
+the draw number counts that goal's previous attempts, so a rerun of the
+same history does the same work, and every new attempt is a new sample.
+"""
+
+import hashlib
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from . import engine, sweep
+
+STATE = engine.ROOT / "results" / "trainer"
+HANDS = 24          # the pool; the learning curve is measured over it
+PER_HAND = 3        # solves per hand per generation, after the first
+PIECES = 4          # interrupter pieces asked about, as sweep does
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def deck_hash(deck_path):
+    """What makes two decks the same deck: the cards, not the file name."""
+    from ygorl.cards.ydk import load_ydk
+    d = load_ydk(Path(deck_path))
+    blob = ",".join(map(str, sorted(d.main))) + "|" + ",".join(map(str, sorted(d.extra)))
+    return hashlib.sha1(blob.encode()).hexdigest()[:16]
+
+
+# --- stopping ----------------------------------------------------------------
+#
+# A running job cannot be cancelled from the web UI -- killing a solver
+# mid-run leaves partial records that read as complete (web/jobs.py). So
+# the trainer is told to stop and does so between generations, where
+# everything it has is already committed.
+
+def stop_path(name):
+    return STATE / f"{name}.stop"
+
+
+def request_stop(name):
+    STATE.mkdir(parents=True, exist_ok=True)
+    stop_path(name).write_text(_now())
+
+
+def stop_requested(name):
+    return stop_path(name).exists()
+
+
+def clear_stop(name):
+    stop_path(name).unlink(missing_ok=True)
+
+
+# --- scoring -----------------------------------------------------------------
+
+def line_key(line, cards=None):
+    """[on_field, interruptions, negates, -actions] for one solved line.
+
+    On-field first, as `drill.lines_from` ranks: interruptions held in
+    hand are real but they are not a line you can practise -- you hold
+    them whatever you drew. Fewer actions breaks ties: the same board in
+    fewer steps is the better thing to learn.
+    """
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import board_interruptions
+
+    from .drill import _on_field
+
+    cards = cards or default_cards()
+    score = board_interruptions(line.get("board") or {}, cards)
+    return [_on_field(line), score.interruptions, score.negates,
+            -len(line.get("actions") or [])]
+
+
+def _compact(record, line):
+    """The smallest record `playback` can replay: start + the one line."""
+    keep = {k: line[k] for k in ("responses", "actions", "board") if k in line}
+    return {"start": record.get("start") or {}, "lines": [keep]}
+
+
+# --- the pool ----------------------------------------------------------------
+
+def ensure_pool(conn, deck_path, name, hands=HANDS):
+    """The pool's hands, created on first use. Same seeds as `sweep`,
+    so a deck's stored sweep results are the trainer's starting point."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.solver.batch import hand_seed, sample_hand
+
+    dh = deck_hash(deck_path)
+    deck = load_ydk(Path(deck_path))
+    with conn:
+        for i in range(hands):
+            hs = hand_seed(0, name, i)
+            hand, _ = sample_hand(deck, hs)
+            conn.execute(
+                "INSERT OR IGNORE INTO trainer_hands "
+                "(deck_hash, deck, hand_index, hand_seed, hand) "
+                "VALUES (?,?,?,?,?)", (dh, name, i, str(hs), json.dumps(list(hand))))
+    return dh
+
+
+def _set_best(conn, dh, hand_index, key, goal, compact, gen, source):
+    conn.execute(
+        "UPDATE trainer_hands SET best_key=?, best_goal=?, best_record=?, "
+        "best_gen=?, best_source=?, best_at=? "
+        "WHERE deck_hash=? AND hand_index=?",
+        (json.dumps(key), json.dumps(list(goal)), json.dumps(compact), gen,
+         source, _now(), dh, hand_index))
+
+
+def bootstrap(conn, dh, name, deck_path, say=print):
+    """Seed personal bests from lines already solved for THIS deck.
+
+    Only records whose deck holds exactly the same cards and whose hand
+    seed is in the pool -- a record from an older version of the list is
+    another deck's answer.
+    """
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+
+    deck = load_ydk(Path(deck_path))
+    want = (sorted(deck.main), sorted(deck.extra))
+    pool = {int(r["hand_seed"]): r for r in conn.execute(
+        "SELECT * FROM trainer_hands WHERE deck_hash=?", (dh,))}
+    cards = default_cards()
+    taken = 0
+    for path in sorted((engine.ROOT / "results").glob("*.jsonl")):
+        if path.name.startswith("optimize_"):
+            continue        # candidate decks, never this one
+        for raw in path.read_text().splitlines():
+            if not raw.strip() or f'"{name}"' not in raw:
+                continue
+            rec = json.loads(raw)
+            d = rec.get("deck")
+            if (not isinstance(d, dict) or d.get("name") != name
+                    or rec.get("status") != "solved" or not rec.get("lines")
+                    or (sorted(d.get("main") or []), sorted(d.get("extra") or [])) != want):
+                continue
+            row = pool.get(rec.get("hand_seed"))
+            if row is None:
+                continue
+            best = max(((line_key(ln, cards), ln) for ln in rec["lines"]),
+                       key=lambda t: t[0])
+            have = json.loads(row["best_key"]) if row["best_key"] else None
+            if have is None or best[0] > have:
+                with conn:
+                    _set_best(conn, dh, row["hand_index"], best[0],
+                              rec.get("targets") or [], _compact(rec, best[1]),
+                              0, path.name)
+                pool[rec["hand_seed"]] = conn.execute(
+                    "SELECT * FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
+                    (dh, row["hand_index"])).fetchone()
+                taken += 1
+    say(f"bootstrap: {taken} personal best(s) taken from stored results")
+    return taken
+
+
+# --- choosing where to aim -----------------------------------------------------
+
+def _attempts(conn, dh, hand_index):
+    return [{"label": r["label"], "targets": json.loads(r["targets"]),
+             "status": r["status"], "best_placed": r["best_placed"],
+             "key": [r["on_field"], r["interruptions"], r["negates"]]}
+            for r in conn.execute(
+                "SELECT * FROM trainer_attempts WHERE deck_hash=? AND hand_index=? "
+                "ORDER BY rowid", (dh, hand_index))]
+
+
+def plan(attempts, breadth, best_goal, per_hand=PER_HAND):
+    """[(targets, label, draw)] for one hand's next generation.
+
+    Pure: history in, goals out, so the scheduling is testable without
+    an hour of solver. `breadth` is the hand's piece goals (computed by
+    the caller from the deck), used only while the hand has no history.
+    """
+    def draws(targets):
+        k = frozenset(targets)
+        return sum(1 for a in attempts if frozenset(a["targets"]) == k)
+
+    if not attempts:
+        return [(list(t), lbl, 0) for t, lbl in breadth]
+
+    out, seen = [], set()
+
+    first_label = {}
+    for a in attempts:
+        first_label.setdefault(frozenset(a["targets"]), a["label"])
+
+    def add(targets, label):
+        k = frozenset(targets)
+        if k in seen or len(out) >= per_hand:
+            return
+        seen.add(k)
+        # A goal tried before keeps its FIRST label. `combinations_to_try`
+        # finds the solved pieces by their "piece:" label, so a piece that
+        # only solves on a retry would otherwise never be stacked.
+        out.append((list(targets), first_label.get(k, label), draws(targets)))
+
+    # 2. stacks nobody has asked this hand for
+    for targets, label in sweep.combinations_to_try(attempts, max_new=per_hand):
+        add(targets, label)
+
+    # 3. near misses, biggest goal first, least-retried first
+    misses = {}
+    for a in attempts:
+        if a["status"] == "solved":
+            continue
+        placed = a.get("best_placed")
+        if isinstance(placed, int) and placed > 0:
+            k = frozenset(a["targets"])
+            if k not in misses or placed > misses[k][1]:
+                misses[k] = (a, placed)
+    solved = {frozenset(a["targets"]) for a in attempts if a["status"] == "solved"}
+    for a, placed in sorted(misses.values(),
+                            key=lambda t: (-len(t[0]["targets"]), -t[1],
+                                           draws(t[0]["targets"]))):
+        if frozenset(a["targets"]) not in solved:
+            add(a["targets"], a["label"])
+
+    # 4. the best goal again, then the biggest solved goals
+    if best_goal:
+        add(best_goal, "best")   # labelled "best" only if never tried by name
+    for a in sorted((a for a in attempts if a["status"] == "solved"),
+                    key=lambda a: (-len(a["targets"]), draws(a["targets"]))):
+        add(a["targets"], "redraw")
+    return out
+
+
+# --- one generation ------------------------------------------------------------
+
+def _record_gen(conn, dh, name, gen, started, solves, improved, solve_ms):
+    rows = conn.execute("SELECT best_key FROM trainer_hands WHERE deck_hash=?",
+                        (dh,)).fetchall()
+    keys = [json.loads(r["best_key"]) if r["best_key"] else None for r in rows]
+    solved = [k for k in keys if k]
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO trainer_gens (deck_hash, deck, gen, started, "
+            "finished, solves, improved, pool, solved_hands, mean_on_field, "
+            "mean_interruptions, solve_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            # Unsolved hands count as ZERO, not as missing: a pool mean
+            # over solved hands only rises when a hand stops solving.
+            (dh, name, gen, started, _now(), solves, improved, len(rows),
+             len(solved), sum(k[0] for k in solved) / max(1, len(rows)),
+             sum(k[1] for k in solved) / max(1, len(rows)), solve_ms))
+
+
+def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
+                   solve_ms=None, workers=None, say=print):
+    from ygorl.engine.duel import default_cards
+
+    solve_ms = solve_ms or engine.SOLVE_MS
+    workers = workers or engine.DEFAULT_WORKERS
+    started = _now()
+    hands = conn.execute(
+        "SELECT * FROM trainer_hands WHERE deck_hash=? ORDER BY hand_index",
+        (dh,)).fetchall()
+    batch = []
+    for h in hands:
+        hand = json.loads(h["hand"])
+        hist = _attempts(conn, dh, h["hand_index"])
+        breadth = [] if hist else sweep._breadth_goals(deck_path, hand, PIECES)
+        best_goal = json.loads(h["best_goal"]) if h["best_goal"] else None
+        for targets, label, draw in plan(hist, breadth, best_goal, per_hand):
+            batch.append((str(deck_path), name, h["hand_index"], int(h["hand_seed"]),
+                          hand, targets, label, solve_ms, draw))
+    say(f"generation {gen}: {len(batch)} solve(s) over {len(hands)} hand(s), "
+        f"{solve_ms // 1000}s each on {workers} worker(s)")
+
+    cards = default_cards()
+    best = {h["hand_index"]: (json.loads(h["best_key"]) if h["best_key"] else None)
+            for h in hands}
+    improved = done = 0
+    for res in sweep._map_solves(batch, workers):
+        done += 1
+        a, i = res["attempt"], res["hand_index"]
+        key, line = None, None
+        if res.get("record"):
+            line = res["record"]["lines"][0]
+            key = line_key(line, cards)
+        better = key is not None and (best[i] is None or key > best[i])
+        with conn:
+            conn.execute(
+                "INSERT INTO trainer_attempts (deck_hash, hand_index, gen, targets, "
+                "label, draw, solver_seed, status, wall_s, best_placed, on_field, "
+                "interruptions, negates, improved, at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (dh, i, gen, json.dumps(a["targets"]), a["label"], a["draw"],
+                 a.get("solver_seed"), a["status"], a.get("wall_s"),
+                 a.get("best_placed"), key[0] if key else None,
+                 key[1] if key else None, key[2] if key else None,
+                 int(better), _now()))
+            if better:
+                _set_best(conn, dh, i, key, a["targets"],
+                          _compact(res["record"], line), gen, "trainer")
+        if better:
+            improved += 1
+            was = f"{best[i][0]} on field" if best[i] else "no line"
+            say(f"  hand {i}: NEW BEST {key[0]} on field, {key[1]} interruption(s) "
+                f"(was {was}) via {a['label']}")
+            best[i] = key
+        say(f"progress {done}/{len(batch)}  hand {i} {a['label']}: {a['status']}")
+    _record_gen(conn, dh, name, gen, started, len(batch), improved, solve_ms)
+    g = curve(conn, dh)[-1]
+    say(f"generation {gen} done: {improved} improvement(s); pool mean "
+        f"{g['mean_on_field']:.2f} on field, {g['solved_hands']}/{g['pool']} solved")
+    return improved
+
+
+def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
+          per_hand=PER_HAND, solve_ms=None, workers=None, say=print):
+    """Run generations until `generations` are done, `hours` pass, or a
+    stop is requested. Resumable: every attempt is committed as it lands,
+    and a killed generation is simply started again under a new number."""
+    import time
+
+    engine.require()
+    engine.preflight([Path(deck_path)])
+    dh = ensure_pool(conn, deck_path, name, hands)
+    clear_stop(name)
+    with conn:   # an interrupted generation never finished: drop its row
+        conn.execute("DELETE FROM trainer_gens WHERE deck_hash=? AND finished IS NULL",
+                     (dh,))
+    if not curve(conn, dh):
+        bootstrap(conn, dh, name, deck_path, say)
+        _record_gen(conn, dh, name, 0, _now(), 0, 0, solve_ms or engine.SOLVE_MS)
+        say("generation 0 = the starting point (stored results only)")
+    deadline = time.monotonic() + hours * 3600 if hours else None
+    ran = 0
+    while True:
+        if generations is not None and ran >= generations:
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            say("time limit reached")
+            break
+        if stop_requested(name):
+            say("stop requested -- ending after the last full generation")
+            break
+        gen = curve(conn, dh)[-1]["gen"] + 1
+        run_generation(conn, deck_path, name, dh, gen, per_hand, solve_ms,
+                       workers, say)
+        ran += 1
+    clear_stop(name)
+    return ran
+
+
+# --- reading it back -----------------------------------------------------------
+
+def curve(conn, dh):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM trainer_gens WHERE deck_hash=? AND finished IS NOT NULL "
+        "ORDER BY gen", (dh,))]
+
+
+def hands_table(conn, dh):
+    from . import card_db
+    out = []
+    for h in conn.execute(
+            "SELECT h.*, (SELECT COUNT(*) FROM trainer_attempts a WHERE "
+            "a.deck_hash=h.deck_hash AND a.hand_index=h.hand_index) AS tries "
+            "FROM trainer_hands h WHERE deck_hash=? ORDER BY hand_index", (dh,)):
+        key = json.loads(h["best_key"]) if h["best_key"] else None
+        names = [(card_db.resolve(conn, c) or {"name": str(c)})["name"]
+                 for c in json.loads(h["hand"])]
+        out.append({"i": h["hand_index"], "hand": names, "key": key,
+                    "on_field": key[0] if key else None,
+                    "interruptions": key[1] if key else None,
+                    "actions": -key[3] if key else None,
+                    "gen": h["best_gen"], "source": h["best_source"],
+                    "tries": h["tries"], "watchable": bool(h["best_record"])})
+    return out
+
+
+def best_record(conn, dh, hand_index):
+    row = conn.execute(
+        "SELECT best_record FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
+        (dh, hand_index)).fetchone()
+    return json.loads(row["best_record"]) if row and row["best_record"] else None

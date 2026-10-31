@@ -4825,3 +4825,45 @@ def test_playback_last_frame_is_the_records_end_board():
         for side in f["board"]:
             for code in (*side["hand"], *side["gy"]):
                 assert str(code) in out["names"]
+
+
+def test_trainer_plan_aims_where_a_better_board_might_be():
+    """The trainer's scheduling, without an hour of solver.
+
+    No history -> the breadth goals. With history -> new stacks from the
+    pieces that solved, then near misses biggest-first, then the best
+    goal again, each at the NEXT draw number so every attempt is a new
+    sample, and a re-tried goal keeps its first label.
+    """
+    from skills.trainer import plan
+
+    breadth = [(("B", "P1"), "piece:1"), (("B", "P2"), "piece:2"),
+               (("B", "P3"), "piece:3"), (("B",), "base")]
+    assert plan([], breadth, None) == [(["B", "P1"], "piece:1", 0),
+                                        (["B", "P2"], "piece:2", 0),
+                                        (["B", "P3"], "piece:3", 0),
+                                        (["B"], "base", 0)]
+
+    hist = [{"label": "piece:1", "targets": ["B", "P1"], "status": "solved", "best_placed": 2},
+            {"label": "piece:2", "targets": ["B", "P2"], "status": "solved", "best_placed": 2},
+            {"label": "piece:3", "targets": ["B", "P3"], "status": "unsolved", "best_placed": 1},
+            {"label": "base", "targets": ["B"], "status": "solved", "best_placed": 1}]
+    out = plan(hist, breadth, ["B", "P1"], per_hand=4)
+    goals = [frozenset(t) for t, _, _ in out]
+    # All-solved stacks first (they have evidence), then mixtures with the
+    # near miss -- `sweep.combinations_to_try`'s order, not a new one.
+    assert goals[0] == frozenset({"B", "P1", "P2"}), out
+    assert frozenset({"B", "P1", "P2", "P3"}) in goals, "the stack with the near miss is asked for"
+    # nothing already tried comes back at draw 0
+    for t, lbl, d in out:
+        tried = sum(1 for a in hist if frozenset(a["targets"]) == frozenset(t))
+        assert d == tried
+
+    # Once the stacks are asked, the near miss and the best goal are retried
+    # under their ORIGINAL labels.
+    hist2 = hist + [{"label": lbl, "targets": t, "status": "unsolved", "best_placed": 0}
+                    for t, lbl, _ in out]
+    out2 = plan(hist2, breadth, ["B", "P1"], per_hand=3)
+    labels = {frozenset(t): (lbl, d) for t, lbl, d in out2}
+    assert labels.get(frozenset({"B", "P3"})) == ("piece:3", 1), out2
+    assert labels.get(frozenset({"B", "P1"})) == ("piece:1", 1), out2

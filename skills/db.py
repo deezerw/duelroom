@@ -179,6 +179,59 @@ CREATE TABLE IF NOT EXISTS meta (
     key    TEXT PRIMARY KEY,
     value  TEXT
 );
+
+-- The deck trainer (skills/trainer.py). Keyed by deck_hash, not name:
+-- an edited deck is a different deck, and its old bests are not its own.
+CREATE TABLE IF NOT EXISTS trainer_hands (
+    deck_hash   TEXT NOT NULL,
+    deck        TEXT NOT NULL,
+    hand_index  INTEGER NOT NULL,
+    hand_seed   TEXT NOT NULL,          -- a u64: too big for SQLite INTEGER
+    hand        TEXT NOT NULL,          -- JSON passcodes
+    best_key    TEXT,                   -- JSON [on_field, interruptions, negates, -actions]
+    best_goal   TEXT,                   -- JSON targets of the best line
+    best_record TEXT,                   -- JSON {start, lines:[best line]}: replayable
+    best_gen    INTEGER,
+    best_source TEXT,                   -- 'trainer' or the results file it came from
+    best_at     TEXT,
+    PRIMARY KEY (deck_hash, hand_index)
+);
+
+CREATE TABLE IF NOT EXISTS trainer_attempts (
+    deck_hash     TEXT NOT NULL,
+    hand_index    INTEGER NOT NULL,
+    gen           INTEGER NOT NULL,
+    targets       TEXT NOT NULL,        -- JSON
+    label         TEXT NOT NULL,
+    draw          INTEGER NOT NULL,
+    solver_seed   INTEGER,
+    status        TEXT NOT NULL,
+    wall_s        REAL,
+    best_placed   INTEGER,
+    on_field      INTEGER,
+    interruptions INTEGER,
+    negates       INTEGER,
+    improved      INTEGER NOT NULL DEFAULT 0,
+    at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trainer_attempts
+    ON trainer_attempts(deck_hash, hand_index);
+
+CREATE TABLE IF NOT EXISTS trainer_gens (
+    deck_hash          TEXT NOT NULL,
+    deck               TEXT NOT NULL,
+    gen                INTEGER NOT NULL,
+    started            TEXT NOT NULL,
+    finished           TEXT,
+    solves             INTEGER,
+    improved           INTEGER,
+    pool               INTEGER,
+    solved_hands       INTEGER,
+    mean_on_field      REAL,
+    mean_interruptions REAL,
+    solve_ms           INTEGER,
+    PRIMARY KEY (deck_hash, gen)
+);
 """
 
 
