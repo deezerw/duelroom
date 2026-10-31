@@ -388,8 +388,7 @@ stage is complete and verified.
 4. ~~Scenario suite~~ — **done** (`scenarios.py`, `breaking.py`)
 5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
 6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
-7. `STAGE7.md` — The deck trainer: play over and over, learn from its own lines
-   (`trainer.py`, the solver's `--adapt` corpus)
+7. ~~Deck trainer~~ — **done** (`trainer.py`, `/train`; best-line trainer, see below)
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
@@ -407,6 +406,27 @@ All five stages are implemented. Standing cautions, in the order they will bite:
   rules behaviour for every deck.
 - **Measure the solver budget per deck with `daemon.py ladder`.** Never assume one; a
   cheap run is a wrong run, not a fast one.
+
+## The deck trainer (Stage 7) — what "learning" means here
+
+`daemon.py train <deck> [hours] [hands]` or the **train** page. A fixed pool of hands
+(the same hand seeds `sweep` uses) is played generation after generation; each attempt
+is aimed where a better board might be (breadth pieces → unasked stacks from the pieces
+that solved → near misses biggest-first → the best goal at a fresh seed), and each
+hand's **best line ever found** is kept and watchable on the playmat. The learning curve
+is the pool's mean best on-field interruptions per generation, so it can only rise or
+stay flat. Bests are seeded from this exact deck's stored results (matched by card list,
+not file name; `trainer_hands.deck_hash`). Stop = a request honoured between
+generations; every attempt is committed as it lands, so a killed run resumes with no
+repeated (hand, goal, draw).
+
+**The solver does not get smarter; the deck's known lines do.** Measured before
+building, 2026-10-31: the combo solver's own policy warm-start from a corpus of past
+lines (`--adapt`) is live (90% corpus agreement) but at EQUAL wall time no better than
+plain extra budget (10 s: 22/24 base, 23/24 adapt, 24/24 base at 20 s; hard goals
+10/24 vs 11/24). Harness: `tools/experiments/adapt_ab*.py`. Untried: `--options`
+macros, a per-starter corpus, `--ctx-shrink`. ygorl's PPO/BC on CPU learned nothing
+usable for combo decks (upstream's own measurement).
 
 ## Known limitations
 
