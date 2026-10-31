@@ -43,6 +43,9 @@ KINDS = {
                               str(p.get("solve_s", 60)), str(p.get("fire_s", 30)),
                               p.get("traps", "all"), str(p.get("lines", 1))],
                 "solve one chosen hand", "~5 min"),
+    "train":   (lambda d, p: ["train", d, str(p.get("hours", 8)),
+                              str(p.get("hands", 24))],
+                "deck trainer", "hours, stoppable"),
 }
 
 # Jobs that are about the installation rather than about one deck.

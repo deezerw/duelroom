@@ -9,6 +9,7 @@
     {%- if archetype %} · <b>{{ archetype[0] }}</b>{% endif %}</div>
   <div class="acts">
     <a class="btn primary" href="{{ url_for('views.pilot', name=name) }}">Pilot a hand</a>
+    <a class="btn" href="{{ url_for('views.train_view', name=name) }}">Train</a>
     <a class="btn" href="{{ url_for('views.report', name=name) }}">Report</a>
     <a class="btn" href="{{ url_for('views.build', name=name) }}">Edit</a>
     <a class="btn" href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a>

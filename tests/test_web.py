@@ -1027,3 +1027,38 @@ def test_watch_pilot_without_a_stored_line_says_why(loggedin, tmp_path, monkeypa
     r = loggedin.get("/watch/pilot/kewl-tune/0123456789abcdef")
     assert r.status_code == 200 and "const DATA" in r.get_data(as_text=True)
     assert loggedin.get("/watch/pilot/kewl-tune/0123456789abcdef?line=nope").status_code == 404
+
+
+def test_train_page_start_and_stop(loggedin, monkeypatch):
+    """The trainer page renders, starts a job, and stops without killing.
+
+    `jobs.enqueue` is stubbed: these tests run against the real database,
+    and the live worker would claim a real train job and start solving.
+    """
+    from skills import trainer
+    from web import jobs as J
+
+    assert loggedin.get("/train/kewl-tune").status_code == 200
+    assert loggedin.get("/train/no-such-deck").status_code == 302
+
+    seen = {}
+    monkeypatch.setattr(J, "enqueue", lambda c, kind, deck=None, **p:
+                        seen.update(kind=kind, deck=deck, **p) or 999999)
+    monkeypatch.setattr("web.views._training_job", lambda c, name: None)
+    r = loggedin.post("/train/kewl-tune/start", data={"hours": "500", "hands": "2"})
+    assert r.status_code == 302
+    # clamped, never trusted: 72 h at most, a pool of at least 4
+    assert seen == {"kind": "train", "deck": "kewl-tune", "hours": 72, "hands": 4}
+
+    try:
+        assert loggedin.post("/train/kewl-tune/stop").status_code == 302
+        assert trainer.stop_requested("kewl-tune")
+    finally:
+        trainer.clear_stop("kewl-tune")
+    # A job kind with its own page never gets the generic run button.
+    assert loggedin.post("/deck/kewl-tune/run/train").status_code == 302
+    assert "train" in J.OWN_PAGE and "pilot" in J.OWN_PAGE
+
+
+def test_watch_train_without_a_best_line_is_404(loggedin):
+    assert loggedin.get("/watch/train/kewl-tune/9999").status_code == 404

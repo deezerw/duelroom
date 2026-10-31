@@ -11,8 +11,9 @@ from werkzeug.utils import secure_filename
 
 import json
 
-from skills import (builder, card_db, carddb, config, db, drill, gate,
+from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
+                    trainer,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -417,6 +418,90 @@ def watch_drill(name):
     return _watch(f"{name} · line {i + 1}",
                   f"{n} interruption(s) · " + " · ".join(hand),
                   rec.get("start") or {}, line.get("responses") or [], [])
+
+
+# --- the deck trainer (STAGE7) ----------------------------------------------
+
+def _training_job(c, name):
+    """The queued or running train job for this deck, if any."""
+    return c.execute(
+        "SELECT * FROM jobs WHERE kind='train' AND deck=? "
+        "AND state IN ('queued','running') ORDER BY id LIMIT 1", (name,)).fetchone()
+
+
+@bp.route("/train")
+@bp.route("/train/<name>")
+@login_required
+def train_view(name=None):
+    c = conn()
+    name = name or db.get_meta(c, "active_deck")
+    path = deck_path(name) if name else None
+    if not path or not path.exists():
+        flash("No deck selected.")
+        return redirect(url_for("views.index"))
+    dh = trainer.deck_hash(path)
+    gens = trainer.curve(c, dh)
+    hands = sorted(trainer.hands_table(c, dh),
+                   key=lambda h: (-(h["on_field"] or -1), -(h["interruptions"] or 0)))
+    job = _training_job(c, name)
+    return render_template(
+        "train.html", name=name, gens=gens, hands=hands, job=job,
+        stopping=trainer.stop_requested(name), running=jobs.active(c),
+        default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
+        solve_s=engine.SOLVE_MS // 1000)
+
+
+@bp.route("/train/<name>/start", methods=["POST"])
+@login_required
+def train_start(name):
+    c = conn()
+    if not deck_path(name):
+        abort(404)
+    if _training_job(c, name):
+        flash("This deck is already training.")
+        return redirect(url_for("views.train_view", name=name))
+    hours = min(max(request.form.get("hours", type=float) or 8, 0.25), 72)
+    hands = min(max(request.form.get("hands", type=int) or trainer.HANDS, 4), 80)
+    job_id = jobs.enqueue(c, "train", deck=name, hours=hours, hands=hands)
+    flash(f"Training queued as job {job_id}.")
+    return redirect(url_for("views.train_view", name=name))
+
+
+@bp.route("/train/<name>/stop", methods=["POST"])
+@login_required
+def train_stop(name):
+    c = conn()
+    if not deck_path(name):
+        abort(404)
+    job = _training_job(c, name)
+    if job and job["state"] == "queued":
+        jobs.cancel(c, job["id"])
+        flash("Queued training cancelled.")
+    else:
+        trainer.request_stop(name)
+        flash("The trainer will stop after its current generation — every "
+              "line it has found is already saved.")
+    return redirect(url_for("views.train_view", name=name))
+
+
+@bp.route("/watch/train/<name>/<int:i>")
+@login_required
+def watch_train(name, i):
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    dh = trainer.deck_hash(path)
+    rec = trainer.best_record(c, dh, i)
+    row = next((h for h in trainer.hands_table(c, dh) if h["i"] == i), None)
+    if not rec or not row:
+        abort(404)
+    found = (f"found in generation {row['gen']}" if row["source"] == "trainer"
+             else f"from {row['source']}")
+    return _watch(f"{name} · hand {i + 1} · best line",
+                  f"{row['on_field']} on field, {row['interruptions']} interruption(s), "
+                  f"{row['actions']} actions · {found} · " + " · ".join(row["hand"]),
+                  rec["start"], rec["lines"][0].get("responses") or [], [])
 
 
 @bp.route("/jobs")

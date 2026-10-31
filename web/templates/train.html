@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}train {{ name }} · duelroom{% endblock %}
+{% block body %}
+<style>
+  .chart{position:relative}
+  .chart svg{display:block;width:100%;height:auto;overflow:visible}
+  .chart .tip{position:absolute;pointer-events:none;background:#0d0f15;border:1px solid var(--line);
+              border-radius:6px;padding:6px 9px;font-size:12px;white-space:nowrap;display:none;z-index:5}
+  .charts{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+  @media (max-width:760px){.charts{grid-template-columns:1fr}}
+  .ctitle{font-size:12.5px;color:var(--dim);margin:0 0 6px}
+  .hands td{vertical-align:top} .hands .btn{white-space:nowrap}
+  @media (max-width:760px){
+    .hands thead{display:none}
+    .hands tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px;
+              border-bottom:1px solid var(--line)}
+    .hands td{display:block;padding:0;border:none}
+    .hands td:first-child{grid-column:1 / -1}
+    .hands td.tries,.hands td.found{display:none}
+  }
+  .hands .cards{color:var(--dim);font-size:12.5px}
+  .startform{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+  .startform label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  .startform input{width:90px;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+                   border-radius:6px;padding:6px 8px;font:inherit}
+</style>
+
+<div class="page-head">
+  <h1>Train</h1>
+  <div class="sub"><b>{{ name }}</b> — plays a fixed pool of hands over and over,
+    aims each attempt where a better board might be, and keeps every hand's
+    best line ever found.</div>
+</div>
+
+<div class="panel">
+  {% if job and job.state == 'running' %}
+    <p style="margin:0 0 10px"><b>Training now</b> (job
+      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>).
+      {% if stopping %}Stopping after the current generation.{% endif %}</p>
+    {% if not stopping %}
+    <form method="post" action="{{ url_for('views.train_stop', name=name) }}" style="margin:0">
+      <button>Stop after this generation</button>
+    </form>
+    {% endif %}
+  {% elif job %}
+    <p style="margin:0 0 10px">Queued as job
+      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>
+      {% if running %}— job {{ running.id }} ({{ running.kind }}) runs first{% endif %}.</p>
+    <form method="post" action="{{ url_for('views.train_stop', name=name) }}" style="margin:0">
+      <button>Cancel</button>
+    </form>
+  {% else %}
+    <form class="startform" method="post" action="{{ url_for('views.train_start', name=name) }}">
+      <label>hours <input type="number" name="hours" value="8" min="0.25" max="72" step="0.25"></label>
+      <label>hands in the pool <input type="number" name="hands" value="{{ default_hands }}" min="4" max="80"></label>
+      <button class="primary">Start training</button>
+    </form>
+    <details class="note"><summary>what one generation costs</summary>
+      Each generation gives every hand {{ per_hand }} solves at the full
+      {{ solve_s }}s budget (the first gives each hand one solve per
+      interrupter piece instead), six at a time. With {{ default_hands }}
+      hands that is roughly 10–15 minutes a generation, so a night is
+      30–50 generations. It runs on the job worker, so other analyses
+      queue behind it, and you can stop it from here at any time without
+      losing anything it has found.
+    </details>
+  {% endif %}
+</div>
+
+{% if gens %}
+{% set last = gens[-1] %}
+<div class="sec"><h2>Learning curve</h2>
+  <span class="hint">over the same {{ last.pool }} hands every generation · generation 0 is
+    what stored results already had</span></div>
+<div class="panel">
+  <div class="charts">
+    <div class="chart" id="c-board">
+      <p class="ctitle">Mean best board — interruptions on the field per hand (unsolved hands count 0)</p>
+    </div>
+    <div class="chart" id="c-imp">
+      <p class="ctitle">Hands that found a better line, per generation</p>
+    </div>
+  </div>
+  <details class="note"><summary>what this curve is, and is not</summary>
+    Each point is the pool's mean of every hand's best line SO FAR, so it can
+    only rise or stay flat — that is what "keeps the best" means, not
+    evidence of anything else. It rises when the search finds a board it had
+    not found before. When it flattens, the remaining hands are at the best
+    this solver finds at this budget, which is not proof they cannot do
+    better. The solver itself does not get smarter; the deck's known lines do.
+  </details>
+</div>
+
+<div class="sec"><h2>Generations</h2></div>
+<div class="panel" style="padding:0;overflow-x:auto">
+  <table>
+    <thead><tr><th>gen</th><th>solves</th><th>improved</th><th>solved hands</th>
+      <th>mean on field</th><th>mean interruptions</th><th>finished</th></tr></thead>
+    <tbody>
+    {% for g in gens|reverse %}
+      <tr><td class="mono">{{ g.gen }}</td><td class="mono">{{ g.solves }}</td>
+        <td class="mono">{{ g.improved }}</td>
+        <td class="mono">{{ g.solved_hands }}/{{ g.pool }}</td>
+        <td class="mono">{{ '%.2f'|format(g.mean_on_field) }}</td>
+        <td class="mono">{{ '%.2f'|format(g.mean_interruptions) }}</td>
+        <td class="muted">{{ (g.finished or '')[:16]|replace('T', ' ') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if hands %}
+<div class="sec"><h2>Best line per hand</h2>
+  <span class="hint">best boards first · watch any of them play out</span></div>
+<div class="panel" style="padding:0;overflow-x:auto">
+  <table class="hands">
+    <thead><tr><th>hand</th><th>best board</th><th>tries</th><th>found</th><th></th></tr></thead>
+    <tbody>
+    {% for h in hands %}
+      <tr>
+        <td><span class="mono muted">#{{ h.i + 1 }}</span>
+          <div class="cards">{{ h.hand|join(' · ') }}</div></td>
+        <td>{% if h.key %}<span class="big" style="font-size:17px">{{ h.on_field }}</span>
+            <span class="muted">on field · {{ h.interruptions }} total · {{ h.actions }} actions</span>
+          {% else %}<span class="muted">no line yet</span>{% endif %}</td>
+        <td class="mono tries">{{ h.tries }}</td>
+        <td class="muted found">{% if h.source == 'trainer' %}gen {{ h.gen }}{% elif h.source %}stored{% endif %}</td>
+        <td>{% if h.watchable %}<a class="btn sm primary"
+             href="{{ url_for('views.watch_train', name=name, i=h.i) }}">▶ Watch</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif not gens %}
+  <div class="panel"><p class="muted" style="margin:0">Never trained. Starting
+    seeds each hand's best from this exact deck's stored line searches, then
+    keeps improving on them.</p></div>
+{% endif %}
+
+{% if gens %}
+<script>
+(function(){
+const G = {{ gens|tojson }};
+const NS = "http://www.w3.org/2000/svg";
+const ACC = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7aa2f7";
+function svg(tag, attrs){ const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+// One chart, one measure, one axis. The improvement counts are a different
+// scale, so they get their own chart beside it rather than a second axis.
+function chart(host, xs, ys, kind, fmt, tipText, whole){
+  const el = document.getElementById(host);
+  // Drawn at the container's own pixel width, so text stays 10px whether
+  // the chart is half a desktop or a whole phone.
+  const W = Math.max(240, el.clientWidth), H = 200, L = 36, R = 10, T = 10, B = 26;
+  const s = svg("svg", {viewBox: `0 0 ${W} ${H}`, role: "img"});
+  const n = xs.length;
+  // Counts get whole-number ticks: a 0.25 "improvements" gridline is noise.
+  const step = whole ? Math.max(1, Math.ceil(Math.max(1, ...ys) / 4)) : null;
+  const ymax = whole ? step * 4 : Math.max(1, ...ys) * 1.15;
+  const x = i => kind === "bar" ? L + (i + .5) * (W - L - R) / n
+                                : L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1));
+  const y = v => T + (H - T - B) * (1 - v / ymax);
+  for (let k = 0; k <= 4; k++){
+    const v = whole ? step * k : ymax * k / 4, yy = y(v);
+    s.appendChild(svg("line", {x1: L, x2: W - R, y1: yy, y2: yy, stroke: "#ffffff14"}));
+    const t = svg("text", {x: L - 6, y: yy + 4, "text-anchor": "end", "font-size": 10, fill: "#9aa3b8"});
+    t.textContent = fmt(v); s.appendChild(t);
+  }
+  const every = Math.max(1, Math.ceil(n / 10));
+  xs.forEach((g, i) => { if (i % every && i !== n - 1) return;
+    const t = svg("text", {x: x(i), y: H - 8, "text-anchor": "middle", "font-size": 10, fill: "#9aa3b8"});
+    t.textContent = g; s.appendChild(t); });
+  const marks = [];
+  if (kind === "line"){
+    s.appendChild(svg("path", {d: ys.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join(""),
+      fill: "none", stroke: ACC, "stroke-width": 2, "stroke-linejoin": "round"}));
+    ys.forEach((v, i) => marks.push(s.appendChild(svg("circle",
+      {cx: x(i), cy: y(v), r: 4, fill: ACC, stroke: "#1a1d26", "stroke-width": 2}))));
+  } else {
+    const bw = Math.max(3, (W - L - R) / n - 2);   // 2px surface gap between bars
+    ys.forEach((v, i) => { const h = Math.max(0, y(0) - y(v));
+      marks.push(s.appendChild(svg("rect", {x: x(i) - bw / 2, y: y(v), width: bw,
+        height: h, rx: Math.min(4, bw / 2), fill: ACC}))); });
+  }
+  el.appendChild(s);
+  // Hover: nearest generation, bigger than the mark.
+  const tip = document.createElement("div"); tip.className = "tip"; el.appendChild(tip);
+  s.addEventListener("mousemove", e => {
+    const r = s.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+    let best = 0; xs.forEach((_, i) => { if (Math.abs(x(i) - px) < Math.abs(x(best) - px)) best = i; });
+    marks.forEach((m, i) => m.setAttribute("opacity", i === best ? 1 : .55));
+    tip.textContent = tipText(best); tip.style.display = "block";
+    const tx = x(best) * r.width / W, ty = y(ys[best]) * r.height / H;
+    tip.style.left = Math.min(r.width - tip.offsetWidth, Math.max(0, tx - tip.offsetWidth / 2)) + "px";
+    tip.style.top = (el.querySelector(".ctitle").offsetHeight + ty - tip.offsetHeight - 10) + "px";
+  });
+  s.addEventListener("mouseleave", () => { tip.style.display = "none";
+    marks.forEach(m => m.setAttribute("opacity", 1)); });
+}
+const xs = G.map(g => g.gen);
+chart("c-board", xs, G.map(g => g.mean_on_field), "line", v => v.toFixed(1),
+      i => `gen ${G[i].gen}: ${G[i].mean_on_field.toFixed(2)} on field, ` +
+           `${G[i].solved_hands}/${G[i].pool} hands solved`, false);
+chart("c-imp", xs, G.map(g => g.improved), "bar", v => Math.round(v),
+      i => `gen ${G[i].gen}: ${G[i].improved} better line(s) from ${G[i].solves} solves`, true);
+})();
+</script>
+{% endif %}
+{% endblock %}
