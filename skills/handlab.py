@@ -469,6 +469,10 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
             return out
 
         out["steps"] = steps(conn, rec)
+        # The raw line, so the report can be WATCHED (skills/playback.py).
+        # Steps and the end board are both derived from it, and neither
+        # can be turned back into it.
+        out["replay"] = replay_of(rec)
         out["board"] = _board(conn, rec)
         out["reading"] = read_board(conn, rec)
         out["candidates"] = []
@@ -529,7 +533,8 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
                    "recovered_board": _board(conn, j) if j.get("lines") else [],
                    "recovered_reading": (read_board(conn, j)
                                          if j.get("lines") else None),
-                   "recovered_steps": (steps(conn, j) if j.get("lines") else [])}
+                   "recovered_steps": (steps(conn, j) if j.get("lines") else []),
+                   "replay": replay_of(j)}
             logf = Path(job.scratch) / f"fire_{code}" / "solver.log"
             if logf.exists():
                 try:
@@ -574,6 +579,16 @@ def analyse(conn, deck_path, chosen, solve_ms=None, fire_ms=30_000,
         return out
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+def replay_of(record):
+    """What `playback.frames` needs to replay a record's lines, or None."""
+    start = record.get("start") or {}
+    lines = record.get("lines") or []
+    if not lines or not (start.get("decks") or {}).get("a"):
+        return None
+    return {"start": start,
+            "lines": [ln.get("responses") or [] for ln in lines]}
 
 
 def _board(conn, record, line_index=0):
@@ -755,6 +770,7 @@ def load(path):
                 t["stale"] = t.get("code") in stale
     r.setdefault("unplaced", [])
     r.setdefault("legacy", False)
+    r["id"] = path.stem      # what a link back to this report names it by
     return r
 
 

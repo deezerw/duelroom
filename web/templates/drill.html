@@ -20,7 +20,8 @@
     <div><span class="big">{{ l.on_field }}</span>
       <span class="muted">on field{% if l.interrupts != l.on_field %},
         {{ l.interrupts }} counting cards held in hand{% endif %}</span></div>
-    <div class="muted">{{ l.actions }} actions</div>
+    <div class="muted">{{ l.actions }} actions ·
+      <a class="btn primary" href="{{ url_for('views.watch_drill', name=name, src=source, i=l.i) }}">▶ Watch</a></div>
   </div>
   <p class="muted" style="margin:10px 0 2px">opening hand</p>
   <div class="grid">{% for c in l.hand %}<div>{{ c }}</div>{% endfor %}</div>

@@ -4,6 +4,7 @@ machine: a session cookie clash between stockroom and flipper, an open
 redirect in both, and a brute-forced qBittorrent WebUI."""
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -984,3 +985,45 @@ def test_deckless_jobs_live_on_the_setup_page(client):
     for kind in jobs.DECKLESS:
         assert kind in offered, \
             f"{kind} is deckless and has no button on the setup page either"
+
+
+def test_watch_drill_plays_a_stored_line_and_refuses_paths(loggedin):
+    """The playmat for a drill line: served from a results file named
+    bare, never a path, and every frame drawn from the replay."""
+    from skills import drill
+    root = Path(__file__).resolve().parent.parent
+    src = next((p for p in sorted((root / "results").glob("*.jsonl"))
+                if drill.lines_from(p, "kewl-tune")), None)
+    if src is None:
+        pytest.skip("no stored kewl-tune lines")
+    r = loggedin.get(f"/watch/drill/kewl-tune?src={src.name}&i=0")
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert "const DATA" in html and '"frames"' in html
+    for bad in ("../CLAUDE.md", "/etc/passwd", "x.jsonl/../y.jsonl"):
+        assert loggedin.get(f"/watch/drill/kewl-tune?src={bad}&i=0").status_code == 404
+    assert loggedin.get(f"/watch/drill/kewl-tune?src={src.name}&i=9999").status_code == 404
+    assert loggedin.get(f"/watch/drill/no-such-deck?src={src.name}&i=0").status_code == 404
+
+
+def test_watch_pilot_without_a_stored_line_says_why(loggedin, tmp_path, monkeypatch):
+    """A report from before lines were stored cannot be watched. It must
+    say so, not 500 and not silently show nothing."""
+    from skills import handlab
+    rep = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "pilot_report.json").read_text())
+    rep.pop("replay", None)
+    (tmp_path / "kewl-tune").mkdir()
+    (tmp_path / "kewl-tune" / "0123456789abcdef.json").write_text(json.dumps(rep))
+    monkeypatch.setattr(handlab, "REPORTS", tmp_path)
+    r = loggedin.get("/watch/pilot/kewl-tune/0123456789abcdef")
+    assert r.status_code == 302 and "/pilot/kewl-tune/r/0123456789abcdef" in r.headers["Location"]
+
+    # With the line stored, the same report plays.
+    rec = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "solved_line.json").read_text())
+    rep["replay"] = handlab.replay_of(rec)
+    (tmp_path / "kewl-tune" / "0123456789abcdef.json").write_text(json.dumps(rep))
+    r = loggedin.get("/watch/pilot/kewl-tune/0123456789abcdef")
+    assert r.status_code == 200 and "const DATA" in r.get_data(as_text=True)
+    assert loggedin.get("/watch/pilot/kewl-tune/0123456789abcdef?line=nope").status_code == 404

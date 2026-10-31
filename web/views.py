@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 import json
 
 from skills import (builder, card_db, carddb, config, db, drill, gate,
-                    handlab, images, importer, meta_scrape as ms,
+                    handlab, images, importer, meta_scrape as ms, playback,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -321,8 +321,9 @@ def drill_view(name=None):
         found = drill.lines_from(cand, name)
         if found:
             src = cand.name
-            for rec, line, n in found[:12]:
+            for i, (rec, line, n) in enumerate(found[:12]):
                 lines.append({
+                    "i": i,
                     "interrupts": n,
                     # What `lines_from` actually RANKS by. Showing only
                     # the flat count put a "4 interruptions" line above a
@@ -338,6 +339,84 @@ def drill_view(name=None):
             break
     return render_template("drill.html", name=name, lines=lines, source=src,
                            running=jobs.active(c))
+
+
+# --- watching a line on the playmat (STAGE6) -----------------------------
+
+def _watch(title, subtitle, start, responses, lines):
+    data = playback.frames(conn(), start, responses)
+    if not data["frames"]:
+        abort(404)
+    return render_template("watch.html", title=title, subtitle=subtitle,
+                           data=data, lines=lines, running=jobs.active(conn()))
+
+
+@bp.route("/watch/pilot/<name>/<rid>")
+@login_required
+def watch_pilot(name, rid):
+    """A pilot report's line, or one of its hand-trap recoveries.
+
+    ``?line=main`` (default), ``main2``.. for the other kept candidates,
+    or a hand trap's passcode for the line that plays on through it.
+    """
+    if not deck_path(name) or not re.fullmatch(r"[0-9a-f]{8,32}", rid or ""):
+        abort(404)
+    r = handlab.load(handlab.REPORTS / name / f"{rid}.json")
+    if r is None:
+        abort(404)
+    rp = r.get("replay")
+    if not rp:
+        # Reports from before lines were stored kept only the readable
+        # steps, which cannot be turned back into a line. Say so; a
+        # missing button would read as "this line cannot be shown".
+        flash("This report was made before lines were stored, so it cannot "
+              "be watched. Run the hand again to watch it.")
+        return redirect(url_for("views.pilot_report_view", name=name, rid=rid))
+
+    options = []    # (key, label, replay, line index)
+    for k in range(len(rp["lines"])):
+        options.append(("main" if k == 0 else f"main{k + 1}",
+                        "Best line" if k == 0 else f"Line {k + 1}", rp, k))
+    for t in r.get("handtraps") or []:
+        if t.get("replay"):
+            options.append((str(t["code"]), f"Through {t['name']}",
+                            t["replay"], 0))
+    want = request.args.get("line", "main")
+    pick = next((o for o in options if o[0] == want), None)
+    if pick is None:
+        abort(404)
+    key, label, replay, k = pick
+    lines = [{"label": o[1], "on": o[0] == key,
+              "href": url_for("views.watch_pilot", name=name, rid=rid,
+                              line=o[0])} for o in options]
+    return _watch(label, f"{name} · " + " · ".join(r.get("hand_names") or []),
+                  replay["start"], replay["lines"][k], lines)
+
+
+@bp.route("/watch/drill/<name>")
+@login_required
+def watch_drill(name):
+    """The i-th best stored line of a deck, from one results file."""
+    src = request.args.get("src", "")
+    i = request.args.get("i", type=int)
+    # A bare file name in results/, never a path.
+    if (not deck_path(name) or i is None or i < 0
+            or not re.fullmatch(r"[\w.-]+\.jsonl", src)):
+        abort(404)
+    path = ROOT_RESULTS / src
+    if not path.is_file():
+        abort(404)
+    found = drill.lines_from(path, name)
+    if i >= len(found):
+        abort(404)
+    rec, line, n = found[i]
+    if not ((rec.get("start") or {}).get("decks") or {}).get("a"):
+        abort(404)
+    hand = [(card_db.resolve(conn(), x) or {"name": str(x)})["name"]
+            for x in rec.get("hand") or []]
+    return _watch(f"{name} · line {i + 1}",
+                  f"{n} interruption(s) · " + " · ".join(hand),
+                  rec.get("start") or {}, line.get("responses") or [], [])
 
 
 @bp.route("/jobs")

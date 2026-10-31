@@ -103,6 +103,10 @@ def frames(conn, start, responses, trim=True):
                 k = type(m).__name__
                 if k == "NewTurn":
                     st["turn"] += 1
+                    if st["turn"] > 1:   # turn 1 is dealt before the first frame kept
+                        # Replayed with first=0: seat 0 is you.
+                        event("turn", "Turn passes to the opponent"
+                              if m.player != 0 else "Your turn")
                 elif k == "NewPhase":
                     st["phase"] = PHASES.get(m.phase, "")
                 elif k == "Chaining":
@@ -176,6 +180,12 @@ def frames(conn, start, responses, trim=True):
         out[0]["turn"] = max(1, out[0]["turn"])
         out[0]["phase"] = out[0]["phase"] or "Draw Phase"
         out[0]["moves"], out[0]["focus"] = [], None
+    # The line is over when the turn passes; what follows is the
+    # opponent drawing for a turn the solver never played.
+    end = next((i for i, f in enumerate(out)
+                if any(e["kind"] == "turn" for e in f["events"])), None)
+    if trim and end is not None:
+        out = out[:end + 1]
     return {"frames": out, "names": {str(k): v for k, v in names.items()}}
 
 

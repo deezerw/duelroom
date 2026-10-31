@@ -19,6 +19,13 @@
 {% else %}
 
 <h2>End board <span class="muted">· {{ r.interruptions }} interruption(s)</span></h2>
+{% if r.id and r.deck %}
+  <p style="margin:0 0 8px">{% if r.replay %}
+    <a class="btn primary" href="{{ url_for('views.watch_pilot', name=r.deck, rid=r.id) }}">▶ Watch combo line</a>
+  {% else %}
+    <span class="muted">Measured before lines were stored — run the hand again to watch it.</span>
+  {% endif %}</p>
+{% endif %}
 <div class="panel">
   {% for b in r.board %}
     <div style="display:flex;gap:8px;align-items:center;padding:2px 0">
@@ -231,7 +238,9 @@
       <div class="prov" style="margin-top:8px">when it lands and you play on,
         you still reach:
         {{ h.recovered_board | selectattr('zone', 'ne', 'hand')
-           | map(attribute='name') | join(', ') or 'nothing on board' }}</div>
+           | map(attribute='name') | join(', ') or 'nothing on board' }}
+        {% if h.replay and r.id and r.deck %} ·
+          <a href="{{ url_for('views.watch_pilot', name=r.deck, rid=r.id, line=h.code) }}">▶ watch it</a>{% endif %}</div>
     {% endif %}
   </div>
 {% endfor %}

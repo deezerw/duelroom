@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}watch {{ title }} · duelroom{% endblock %}
+{% block body %}
+<style>
+  /* ---------- the playmat ---------------------------------------------
+     Laid out like a duel client: per side, a monster row and a spell/trap
+     row of five, the field zone and Extra Deck on the left, GY and Deck on
+     the right, the two Extra Monster Zones shared in the middle. The
+     opponent's half is the same grid turned 180 degrees, which is also
+     how zone sequences run from where you sit. */
+  .wm{--cw:min(64px, calc((100vw - 60px) / 9.6)); --ch:calc(var(--cw) * 1.46);
+      --gap:calc(var(--cw) * .12)}
+  .wm-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+  @media (max-width:900px){.wm-wrap{grid-template-columns:minmax(0,1fr)}}
+  .mat{position:relative;background:radial-gradient(ellipse at center,#1d2333 0%,#141822 70%);
+       border:1px solid var(--line);border-radius:12px;padding:10px 8px;overflow:hidden;
+       user-select:none}
+  .side{display:grid;grid-template-columns:repeat(9,var(--cw));gap:var(--gap);
+        justify-content:center}
+  .side.opp{transform:rotate(180deg)}
+  .row-emz{display:grid;grid-template-columns:repeat(9,var(--cw));gap:var(--gap);
+           justify-content:center;margin:var(--gap) 0}
+  .slot{position:relative;width:var(--cw);height:var(--ch);border-radius:5px;
+        border:1px dashed #ffffff1c;background:#ffffff05;
+        display:flex;align-items:center;justify-content:center}
+  .slot.zone-m{border-color:#e0af6833} .slot.zone-s{border-color:#73daca33}
+  .slot.zone-f{border-color:#9ece6a33} .slot.pile{border-style:solid;border-color:#ffffff14}
+  .slot .lbl{position:absolute;font-size:9px;letter-spacing:.06em;color:#ffffff30;
+             text-transform:uppercase;pointer-events:none}
+  .side.opp .slot .lbl{transform:rotate(180deg)}
+  .slot.hole{visibility:hidden}
+
+  .card{position:absolute;inset:0;border-radius:4px;overflow:hidden;
+        box-shadow:0 2px 6px #0008;background:#0d0f15;cursor:pointer;
+        transition:transform .25s ease, box-shadow .25s}
+  .card img{width:100%;height:100%;object-fit:cover;display:block}
+  .card.def{transform:rotate(90deg) scale(.86)}
+  /* A face-down card is drawn, not an image: no card-back asset is
+     shipped or fetched. */
+  .card.back{background:
+      radial-gradient(ellipse at 50% 50%,#c76b1f 0 18%,#5a2b0c 19% 23%,transparent 24%),
+      repeating-linear-gradient(45deg,#3b1d0a 0 4px,#46220c 4px 8px);
+      border:2px solid #7a4a1e}
+  .card.back img{opacity:0}
+  .card.back.peek img{opacity:.35}   /* yours, set: you know what it is */
+  .badge{position:absolute;right:2px;bottom:2px;min-width:16px;padding:0 4px;
+         border-radius:8px;background:#000c;color:#fff;font-size:10px;
+         text-align:center;line-height:16px;pointer-events:none}
+  .side.opp .badge{transform:rotate(180deg)}
+  .mats{position:absolute;left:2px;top:2px;padding:0 4px;border-radius:8px;
+        background:#7aa2f7dd;color:#000;font-size:10px;font-weight:700;line-height:15px}
+  .slot.focus .card,.hand .focus{box-shadow:0 0 0 2px #ffd866,0 0 16px 4px #ffd86688}
+  .slot.focus{animation:pulse .9s ease-out}
+  @keyframes pulse{0%{transform:scale(1.12)}100%{transform:scale(1)}}
+
+  .hand{display:flex;justify-content:center;gap:4px;min-height:var(--ch);
+        margin:8px 0 2px;flex-wrap:nowrap}
+  .hand .h{position:relative;width:var(--cw);height:var(--ch);flex:none}
+  .hand.opp .h{width:calc(var(--cw) * .7);height:calc(var(--ch) * .7)}
+  .hand.opp{min-height:calc(var(--ch) * .7);margin:2px 0 8px}
+
+  .lp{display:flex;justify-content:space-between;align-items:center;
+      font-size:12px;color:var(--dim);padding:0 6px}
+  .lp b{font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .banner{text-align:center;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+          color:var(--faint);margin:4px 0}
+
+  /* The activated card shown large in the middle of the mat for a beat,
+     the way duel clients do -- otherwise a quick effect from the hand
+     is a caption with nothing on the board to look at. */
+  .spot{position:absolute;left:50%;top:50%;width:calc(var(--cw) * 2.1);
+        transform:translate(-50%,-50%) scale(.6);opacity:0;pointer-events:none;
+        transition:opacity .2s, transform .2s;border-radius:6px;overflow:hidden;
+        box-shadow:0 0 0 2px #ffd866,0 0 40px 10px #ffd86655;z-index:20}
+  .spot.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  .spot img{width:100%;display:block}
+
+  .caption{min-height:44px;padding:9px 12px;margin:10px 0;border-radius:8px;
+           background:var(--panel);border:1px solid var(--line)}
+  .caption .ev{display:block} .caption .ev + .ev{color:var(--dim);font-size:13px}
+  .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .controls button,.controls select{background:var(--panel);color:var(--ink);
+     border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
+  .controls button:hover{border-color:var(--accent)}
+  .controls input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
+  .controls .pos{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;min-width:64px;text-align:right}
+
+  .steps{max-height:70vh;overflow:auto;padding:4px}
+  .steps .st{display:flex;gap:8px;padding:5px 7px;border-radius:6px;cursor:pointer;
+             font-size:13px;align-items:flex-start}
+  .steps .st:hover{background:#ffffff08}
+  .steps .st.on{background:#7aa2f71f;color:var(--ink)}
+  .steps .st .n{color:var(--faint);font-variant-numeric:tabular-nums;min-width:22px;text-align:right}
+  .steps .st .k{font-size:10px;padding:1px 6px;border-radius:999px;background:#ffffff10;color:var(--dim);flex:none}
+  .steps .st .k.summon{background:#e0af6826;color:#e0af68}
+  .steps .st .k.activate{background:#7aa2f726;color:#7aa2f7}
+  .steps .st .k.set{background:#bb9af726;color:#bb9af7}
+
+  .preview{display:flex;gap:10px;align-items:flex-start;margin-top:12px}
+  .preview img{width:120px;border-radius:6px}
+  .pilemodal{position:fixed;inset:0;background:#000a;display:none;align-items:center;
+             justify-content:center;z-index:50}
+  .pilemodal.on{display:flex}
+  .pilemodal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+                  padding:14px;max-width:min(680px,92vw);max-height:80vh;overflow:auto}
+  .pilemodal .grid{display:flex;flex-wrap:wrap;gap:6px}
+  .pilemodal .grid img{width:64px;border-radius:4px}
+  .flying{z-index:30}
+</style>
+
+<div class="page-head">
+  <h1>{{ title }}</h1>
+  <div class="sub">{{ subtitle }}</div>
+  {% if lines and lines|length > 1 %}
+  <div class="acts">
+    {% for l in lines %}
+      <a class="btn{% if l.on %} primary{% endif %}" href="{{ l.href }}">{{ l.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="wm wm-wrap">
+  <div>
+    <div class="mat" id="mat">
+      <div class="lp"><span>Opponent</span><span>LP <b id="lp1">8000</b></span></div>
+      <div class="hand opp" id="hand1"></div>
+      <div class="side opp" id="side1"></div>
+      <div class="row-emz" id="emz"></div>
+      <div class="side" id="side0"></div>
+      <div class="hand" id="hand0"></div>
+      <div class="lp"><span>You</span><span>LP <b id="lp0">8000</b></span></div>
+      <div class="banner" id="banner"></div>
+      <div class="spot" id="spot"><img alt=""></div>
+    </div>
+    <div class="caption" id="caption"></div>
+    <div class="controls">
+      <button id="b-first" title="start (Home)">⏮</button>
+      <button id="b-prev" title="back (←)">◀</button>
+      <button id="b-play" title="play / pause (space)">▶</button>
+      <button id="b-next" title="forward (→)">▶▏</button>
+      <button id="b-last" title="end (End)">⏭</button>
+      <select id="speed" title="speed">
+        <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+        <option value="2">2×</option><option value="4">4×</option>
+      </select>
+      <input type="range" id="scrub" min="0" value="0">
+      <span class="pos" id="pos"></span>
+    </div>
+    <div class="preview" id="preview"></div>
+  </div>
+  <div class="panel steps" id="steps"></div>
+</div>
+
+<div class="pilemodal" id="pilemodal"><div class="box">
+  <div class="sec" style="margin-top:0"><h2 id="piletitle"></h2></div>
+  <div class="grid" id="pilegrid"></div>
+</div></div>
+
+<script>
+(function(){
+const DATA = {{ data|tojson }};
+const F = DATA.frames, N = DATA.names;
+const IMG = id => "{{ url_for('views.card_image', size='small', card_id=0) }}".replace("/0.jpg", "/" + id + ".jpg");
+const IMGF = id => "{{ url_for('views.card_image', size='full', card_id=0) }}".replace("/0.jpg", "/" + id + ".jpg");
+const POS_FACEDOWN = 0xa, POS_DEFENSE = 0xc;
+const $ = id => document.getElementById(id);
+const el = (tag, cls, txt) => { const e = document.createElement(tag);
+  if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const nm = c => N[String(c)] || (c ? "#" + c : "face-down card");
+
+// The grid for one side, in its own (unrotated) coordinates.
+// [kind, zone key, label]; zone keys match the frames' slot addresses.
+// Nine columns, symmetric about the middle, so the opponent's half --
+// the same grid turned 180 degrees -- lines up zone for zone with yours.
+const LAYOUT = [
+  ["x"], ["f", "sz-5", "field"], ["m","mz-0"], ["m","mz-1"], ["m","mz-2"], ["m","mz-3"], ["m","mz-4"], ["p", "gy", "GY"], ["p", "ban", "banished"],
+  ["x"], ["p", "extra", "extra"], ["s","sz-0"], ["s","sz-1"], ["s","sz-2"], ["s","sz-3"], ["s","sz-4"], ["p", "deck", "deck"], ["x"],
+];
+
+function card(code, pos, mine, extraCls){
+  const c = el("div", "card" + (extraCls ? " " + extraCls : ""));
+  const down = pos != null && (pos & POS_FACEDOWN);
+  if (down) c.classList.add("back");
+  if (down && mine) c.classList.add("peek");
+  if (pos != null && (pos & POS_DEFENSE)) c.classList.add("def");
+  if (code){ const i = el("img"); i.loading = "lazy"; i.alt = ""; i.src = IMG(code); c.appendChild(i);
+    c.title = nm(code); c.addEventListener("click", e => { e.stopPropagation(); show(code); }); }
+  return c;
+}
+
+function buildSide(p){
+  const host = $("side" + p); host.innerHTML = "";
+  for (const [kind, key, label] of LAYOUT){
+    const s = el("div", "slot " + ({m:"zone-m", s:"zone-s", f:"zone-f", p:"pile", x:"hole"}[kind]));
+    if (key) s.dataset.slot = p + "-" + key;
+    if (label) s.appendChild(el("span", "lbl", label));
+    host.appendChild(s);
+  }
+}
+function buildEmz(){
+  const host = $("emz"); host.innerHTML = "";
+  for (let i = 0; i < 9; i++){
+    // EMZ: the core numbers them 5 and 6, left and right from player 0's
+    // seat, above that player's 2nd and 4th Main Monster Zones.
+    const emz = i === 3 || i === 5;
+    const s = el("div", "slot" + (emz ? " zone-m" : " hole"));
+    if (i === 3) s.dataset.slot = "emz-5"; if (i === 5) s.dataset.slot = "emz-6";
+    if (emz) s.appendChild(el("span", "lbl", "extra"));
+    host.appendChild(s);
+  }
+}
+
+function slotEl(addr){
+  // addr: {p, z, s}. EMZ is shared; an Xyz material lives on its monster.
+  let {p, z, s} = addr;
+  if (z === "xyz") z = "mz";
+  if (z === "mz" && s >= 5) return document.querySelector(`[data-slot="emz-${p === 0 ? s : 11 - s}"]`);
+  if (z === "hand") return document.querySelector(`#hand${p} [data-slot="${p}-hand-${s}"]`)
+                        || $("hand" + p);
+  if (z === "mz" || z === "sz") return document.querySelector(`[data-slot="${p}-${z}-${s}"]`);
+  return document.querySelector(`[data-slot="${p}-${z}"]`);
+}
+
+function pile(p, key, codes, count){
+  const s = document.querySelector(`[data-slot="${p}-${key}"]`); if (!s) return;
+  s.querySelectorAll(":scope > .card, :scope > .badge").forEach(x => x.remove());
+  const n = codes ? codes.length : count;
+  if (!n) return;
+  const top = codes ? codes[codes.length - 1] : 0;
+  const c = card(codes ? top : 0, codes ? null : POS_FACEDOWN, false);
+  if (codes){ c.addEventListener("click", e => { e.stopPropagation(); openPile(key, codes); }, true); }
+  s.appendChild(c);
+  s.appendChild(el("span", "badge", n));
+}
+
+function render(i){
+  const f = F[i];
+  document.querySelectorAll(".slot").forEach(s => {
+    s.classList.remove("focus");
+    s.querySelectorAll(":scope > .card, :scope > .badge, :scope > .mats").forEach(x => x.remove()); });
+  for (const p of [0, 1]){
+    const b = f.board[p];
+    for (const z of ["mz", "sz"]){
+      for (const row of b[z]){
+        const s = slotEl({p, z, s: row.s}); if (!s) continue;
+        s.appendChild(card(row.c, row.pos, p === 0));
+        if (row.o.length){ const m = el("span", "mats", row.o.length);
+          m.title = row.o.map(nm).join(", "); s.appendChild(m); }
+      }
+    }
+    pile(p, "gy", b.gy); pile(p, "ban", b.ban); pile(p, "deck", null, b.deck);
+    pile(p, "extra", null, b.extra);
+    const h = $("hand" + p); h.innerHTML = "";
+    b.hand.forEach((code, k) => { const w = el("div", "h"); w.dataset.slot = p + "-hand-" + k;
+      // The opponent's hand is a goldfish placeholder: count it, don't show it.
+      w.appendChild(card(p === 0 ? code : 0, p === 0 ? null : POS_FACEDOWN, p === 0)); h.appendChild(w); });
+    $("lp" + p).textContent = b.lp;
+  }
+  if (f.focus){ const s = slotEl(f.focus); if (s) s.classList.add("focus"); }
+  $("banner").textContent = `Turn ${f.turn} · ${f.phase || ""}`;
+  const cap = $("caption"); cap.innerHTML = "";
+  (f.events.length ? f.events : [{text: "…"}]).forEach(e => cap.appendChild(el("span", "ev", e.text)));
+  $("scrub").value = i; $("pos").textContent = `${i + 1} / ${F.length}`;
+  document.querySelectorAll(".steps .st").forEach(s => s.classList.toggle("on", +s.dataset.i === i));
+  const on = document.querySelector(".steps .st.on");
+  if (on) on.scrollIntoView({block: "nearest"});
+}
+
+// FLIP: remember where each moving card was, render, then slide it from
+// there. The frame is already correct without this; it is only motion.
+function animate(prevRects, f, dur){
+  for (const m of f.moves){
+    const from = prevRects.get(key(m.from)); const to = slotEl(m.to);
+    if (!from || !to) continue;
+    const target = to.querySelector(":scope > .card");
+    if (!target) continue;
+    const r = target.getBoundingClientRect();
+    const dx = from.left - r.left, dy = from.top - r.top;
+    if (!dx && !dy) continue;
+    target.classList.add("flying");
+    const base = getComputedStyle(target).transform, rest = base === "none" ? "" : base;
+    target.animate([{transform: `translate(${dx}px,${dy}px) ${rest}`}, {transform: rest || "none"}],
+                   {duration: dur, easing: "cubic-bezier(.2,.7,.2,1)"}).onfinish = () => target.classList.remove("flying");
+  }
+}
+const key = a => `${a.p}-${a.z}-${a.s}`;
+function rectsFor(f){
+  const m = new Map();
+  for (const mv of f.moves){ const s = slotEl(mv.from); if (s) m.set(key(mv.from), s.getBoundingClientRect()); }
+  return m;
+}
+
+function spotlight(f, dur){
+  const ev = f.events.find(e => e.kind === "activate" || e.kind === "summon");
+  const sp = $("spot");
+  if (!ev || !ev.c){ sp.classList.remove("on"); return; }
+  sp.querySelector("img").src = IMG(ev.c); sp.classList.add("on");
+  clearTimeout(spotlight.t); spotlight.t = setTimeout(() => sp.classList.remove("on"), dur);
+}
+
+let cur = 0, timer = null;
+function go(i, animated){
+  i = Math.max(0, Math.min(F.length - 1, i));
+  const speed = +$("speed").value, dur = 450 / speed;
+  const step = animated && i === cur + 1;
+  const before = step ? rectsFor(F[i]) : null;
+  render(i); cur = i;
+  if (step){ animate(before, F[i], dur); spotlight(F[i], dur * 1.4); }
+}
+function play(){
+  if (timer){ clearTimeout(timer); timer = null; $("b-play").textContent = "▶"; return; }
+  if (cur >= F.length - 1) go(0);
+  $("b-play").textContent = "⏸";
+  const tick = () => {
+    if (cur >= F.length - 1){ timer = null; $("b-play").textContent = "▶"; return; }
+    go(cur + 1, true);
+    const f = F[cur], big = f.events.some(e => e.kind === "activate" || e.kind === "summon");
+    timer = setTimeout(tick, (big ? 1300 : 750) / +$("speed").value);
+  };
+  timer = setTimeout(tick, 300);
+}
+
+function show(code){
+  const p = $("preview"); p.innerHTML = "";
+  const i = el("img"); i.alt = ""; i.src = IMGF(code); p.appendChild(i);
+  p.appendChild(el("div", null, nm(code)));
+}
+function openPile(key, codes){
+  $("piletitle").textContent = {gy: "Graveyard", ban: "Banished"}[key] + ` · ${codes.length}`;
+  const g = $("pilegrid"); g.innerHTML = "";
+  codes.forEach(c => { const i = el("img"); i.alt = nm(c); i.title = nm(c); i.src = IMG(c);
+    i.addEventListener("click", () => show(c)); g.appendChild(i); });
+  $("pilemodal").classList.add("on");
+}
+$("pilemodal").addEventListener("click", e => { if (e.target.id === "pilemodal") e.currentTarget.classList.remove("on"); });
+
+// Step list: one row per frame that says something.
+const list = $("steps");
+F.forEach((f, i) => {
+  if (!f.events.length) return;
+  const e = f.events[0], r = el("div", "st"); r.dataset.i = i;
+  r.appendChild(el("span", "n", i + 1));
+  r.appendChild(el("span", "k " + e.kind, {activate:"effect", summon:"summon", set:"set", move:"→", lp:"LP", start:"start"}[e.kind] || e.kind));
+  r.appendChild(el("span", null, f.events.map(x => x.text).join(" · ")));
+  r.addEventListener("click", () => { if (timer) play(); go(i); });
+  list.appendChild(r);
+});
+
+buildSide(0); buildSide(1); buildEmz();
+$("scrub").max = F.length - 1;
+$("scrub").addEventListener("input", e => { if (timer) play(); go(+e.target.value); });
+$("b-first").onclick = () => { if (timer) play(); go(0); };
+$("b-last").onclick = () => { if (timer) play(); go(F.length - 1); };
+$("b-prev").onclick = () => { if (timer) play(); go(cur - 1); };
+$("b-next").onclick = () => { if (timer) play(); go(cur + 1, true); };
+$("b-play").onclick = play;
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowRight"){ if (timer) play(); go(cur + 1, true); e.preventDefault(); }
+  else if (e.key === "ArrowLeft"){ if (timer) play(); go(cur - 1); e.preventDefault(); }
+  else if (e.key === " "){ play(); e.preventDefault(); }
+  else if (e.key === "Home") go(0); else if (e.key === "End") go(F.length - 1);
+  else if (e.key === "Escape") $("pilemodal").classList.remove("on");
+});
+go(0);
+})();
+</script>
+{% endblock %}
