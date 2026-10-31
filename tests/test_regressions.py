@@ -4790,3 +4790,38 @@ def test_complete_but_unmatched_is_counted_not_smoothed_over():
             {"survived": False, "kept": None, "of": None}]  # ungraded
     assert complete_but_unmatched(rows) == 1
     assert complete_but_unmatched([]) == 0
+
+
+def test_playback_last_frame_is_the_records_end_board():
+    """The playmat must end on the board the solver says the line reaches.
+
+    Frames are the core's own snapshots, never a board kept by applying
+    moves by hand -- so this is the check that the replay is the SAME
+    duel as the record (seed words, rule flags, deck order), not a
+    look-alike that drifts by a card.
+    """
+    from skills import db, playback
+
+    rec = json.loads((Path(__file__).resolve().parent / "fixtures"
+                      / "solved_line.json").read_text())
+    out = playback.from_record(db.connect(), rec)
+    assert out and len(out["frames"]) > 2
+    first, last = out["frames"][0], out["frames"][-1]
+    assert first["events"][0]["kind"] == "start"
+    assert len(first["board"][0]["hand"]) == len(rec["hand"])
+    stored = rec["lines"][0]["board"]["players"][0]
+    mine = last["board"][0]
+    assert [(c["c"], c["s"], c["pos"]) for c in mine["mz"]] == [
+        (c["code"], c["sequence"], c["position"]) for c in stored["mzone"]]
+    assert [(c["c"], c["s"]) for c in mine["sz"]] == [
+        (c["code"], c["sequence"]) for c in stored["szone"]]
+    assert mine["hand"] == stored["hand"] and mine["gy"] == stored["grave"]
+    # Every frame shows a change or says something: no dead steps.
+    fr = out["frames"]
+    assert all(f["events"] or f["board"] != p["board"]
+               for p, f in zip(fr, fr[1:]))
+    # Every card code drawn has a name to caption it with.
+    for f in out["frames"]:
+        for side in f["board"]:
+            for code in (*side["hand"], *side["gy"]):
+                assert str(code) in out["names"]
