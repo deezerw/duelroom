@@ -52,6 +52,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   second <theirs> <ours>    going second into their real board
   gauntlet <deck> <hand>    rank this hand's end boards by what they STOP
   floodgates <deck>         does the deck function under common floodgates
+  train <deck> [hours] [n]  play n hands over and over, keep each best line
   help / quit
 ```
 
@@ -166,6 +167,7 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/breaking.py     Going-second board breaking
   │  skills/gauntlet.py     Candidate end boards ranked by what they STOP
   │  skills/optimizer.py    Flex-slot hill climb with paired seeds
+  │  skills/trainer.py      The deck trainer: replay a hand pool, keep best lines
   │  skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
   │
   └─ output ────────────────────────────────────────────────────────────────
@@ -205,6 +207,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `sweep.py` | `TRIAGE_MS` (15 s), `DRAWS` |
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
+| `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `PIECES` |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card

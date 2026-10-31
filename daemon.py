@@ -17,7 +17,7 @@ from pathlib import Path
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
                     gate, gauntlet, handlab, images, importer,
                     meta_scrape as ms, optimizer, report, scenarios,
-                    stats, sweep)
+                    stats, sweep, trainer)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -60,6 +60,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   rescore [deck] [w]        re-rank stored optimiser trials, no solver time
   draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
+  train <deck> [hours] [n]  play n hands over and over, keep each best line
   help / quit
 """
 
@@ -2132,6 +2133,43 @@ def cmd_decks(conn, args):
         print(f"  {f.stem}")
 
 
+def cmd_train(conn, args):
+    """The deck trainer (skills/trainer.py): `train <deck> [hours] [hands]`,
+    `train <deck> status`, `train <deck> stop`."""
+    if not args and not db.get_meta(conn, "active_deck"):
+        print("usage: train <deck> [hours] [hands] | train <deck> status | stop")
+        return
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    name, rest = path.stem, args[1:]
+    if rest and rest[0] == "stop":
+        trainer.request_stop(name)
+        print(f"{name}: the trainer will stop after its current generation")
+        return
+    if rest and rest[0] == "status":
+        dh = trainer.deck_hash(path)
+        gens = trainer.curve(conn, dh)
+        if not gens:
+            print(f"{name}: never trained")
+            return
+        print(f"{name}: {len(gens) - 1} generation(s)")
+        for g in gens:
+            print(f"  gen {g['gen']:>3}  {g['solves']:>4} solves  "
+                  f"{g['improved']:>3} improved  {g['solved_hands']}/{g['pool']} solved  "
+                  f"mean {g['mean_on_field']:.2f} on field, "
+                  f"{g['mean_interruptions']:.2f} interruptions")
+        return
+    _warn_if_busy("training")
+    hours = float(rest[0]) if rest else 8.0
+    hands = int(rest[1]) if len(rest) > 1 else trainer.HANDS
+    print(f"training {name}: {hands} hands, up to {hours:g} h "
+          f"(stop early: train {name} stop)")
+    n = trainer.train(conn, path, name, hours=hours, hands=hands)
+    print(f"{n} generation(s) run")
+
+
 COMMANDS = {
     "cards": cmd_cards,
     "images": cmd_images,
@@ -2167,6 +2205,7 @@ COMMANDS = {
     "rescore": cmd_rescore,
     "draws": cmd_draws,
     "floodgates": cmd_floodgates,
+    "train": cmd_train,
 }
 
 
