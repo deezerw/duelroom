@@ -35,6 +35,7 @@
         transition:transform .25s ease, box-shadow .25s}
   .card img{width:100%;height:100%;object-fit:cover;display:block}
   .card.def{transform:rotate(90deg) scale(.86)}
+  .card.opp{transform:rotate(180deg)} .card.opp.def{transform:rotate(270deg) scale(.86)}
   /* A face-down card is drawn, not an image: no card-back asset is
      shipped or fetched. */
   .card.back{background:
@@ -50,7 +51,7 @@
   .mats{position:absolute;left:2px;top:2px;padding:0 4px;border-radius:8px;
         background:#7aa2f7dd;color:#000;font-size:10px;font-weight:700;line-height:15px}
   .slot.focus .card,.hand .focus{box-shadow:0 0 0 2px #ffd866,0 0 16px 4px #ffd86688}
-  .slot.focus{animation:pulse .9s ease-out}
+  .slot.focus{animation:pulse 1.3s ease-out}
   @keyframes pulse{0%{transform:scale(1.12)}100%{transform:scale(1)}}
 
   .hand{display:flex;justify-content:center;gap:4px;min-height:var(--ch);
@@ -186,12 +187,15 @@ const LAYOUT = [
   ["x"], ["p", "extra", "extra"], ["s","sz-0"], ["s","sz-1"], ["s","sz-2"], ["s","sz-3"], ["s","sz-4"], ["p", "deck", "deck"], ["x"],
 ];
 
-function card(code, pos, mine, extraCls){
+// `monster`: only a Monster Zone card turns sideways in defense. A
+// spell/trap's position carries both bits (face-up 0x5, set 0xa), so a
+// bare `pos & POS_DEFENSE` laid every backrow card on its side.
+function card(code, pos, mine, extraCls, monster){
   const c = el("div", "card" + (extraCls ? " " + extraCls : ""));
   const down = pos != null && (pos & POS_FACEDOWN);
   if (down) c.classList.add("back");
   if (down && mine) c.classList.add("peek");
-  if (pos != null && (pos & POS_DEFENSE)) c.classList.add("def");
+  if (monster && pos != null && (pos & POS_DEFENSE)) c.classList.add("def");
   if (code){ const i = el("img"); i.loading = "lazy"; i.alt = ""; i.src = IMG(code); c.appendChild(i);
     c.title = nm(code); c.addEventListener("click", e => { e.stopPropagation(); show(code); }); }
   return c;
@@ -252,7 +256,10 @@ function render(i){
     for (const z of ["mz", "sz"]){
       for (const row of b[z]){
         const s = slotEl({p, z, s: row.s}); if (!s) continue;
-        s.appendChild(card(row.c, row.pos, p === 0));
+        // The EMZ row sits outside the turned opponent half, so their
+        // monster there is turned by hand to face them like the rest.
+        const emzOpp = p === 1 && z === "mz" && row.s >= 5;
+        s.appendChild(card(row.c, row.pos, p === 0, emzOpp ? "opp" : "", z === "mz"));
         if (row.o.length){ const m = el("span", "mats", row.o.length);
           m.title = row.o.map(nm).join(", "); s.appendChild(m); }
       }
@@ -294,7 +301,7 @@ function animate(prevRects, f, dur){
     target.classList.add("flying");
     const base = getComputedStyle(target).transform, rest = base === "none" ? "" : base;
     target.animate([{transform: `translate(${dx}px,${dy}px) ${rest}`}, {transform: rest || "none"}],
-                   {duration: dur, easing: "cubic-bezier(.2,.7,.2,1)"}).onfinish = () => target.classList.remove("flying");
+                   {duration: dur, easing: "ease-in-out"}).onfinish = () => target.classList.remove("flying");
   }
 }
 const key = a => `${a.p}-${a.z}-${a.s}`;
@@ -312,10 +319,13 @@ function spotlight(f, dur){
   clearTimeout(spotlight.t); spotlight.t = setTimeout(() => sp.classList.remove("on"), dur);
 }
 
+// Playback pace at 1x, in ms. Flights ease in and out so the card is
+// seen travelling, not snapped most of the way in the first frames.
+const FLY_MS = 630, STEP_MS = 1050, BIG_STEP_MS = 1820;
 let cur = 0, timer = null;
 function go(i, animated){
   i = Math.max(0, Math.min(F.length - 1, i));
-  const speed = +$("speed").value, dur = 450 / speed;
+  const speed = +$("speed").value, dur = FLY_MS / speed;
   const step = animated && i === cur + 1;
   const before = step ? rectsFor(F[i]) : null;
   render(i); cur = i;
@@ -329,7 +339,7 @@ function play(){
     if (cur >= F.length - 1){ timer = null; $("b-play").textContent = "▶"; return; }
     go(cur + 1, true);
     const f = F[cur], big = f.events.some(e => e.kind === "activate" || e.kind === "summon");
-    timer = setTimeout(tick, (big ? 1300 : 750) / +$("speed").value);
+    timer = setTimeout(tick, (big ? BIG_STEP_MS : STEP_MS) / +$("speed").value);
   };
   timer = setTimeout(tick, 300);
 }
