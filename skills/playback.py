@@ -89,7 +89,12 @@ def frames(conn, start, responses, trim=True):
         return names.get(code, "a face-down card")
 
     def event(kind, text, code=0, loc=None):
-        st["events"].append({"kind": kind, "text": text, "c": code})
+        e = {"kind": kind, "text": text, "c": code}
+        if kind == "activate" and loc is not None:
+            # Where it was activated from: the trainer's "avoid this
+            # move" is per zone (Engraver's hand effect is not its GY one).
+            e["z"] = ZONES.get(loc.location & 0xff, "?")
+        st["events"].append(e)
         if loc is not None:
             st["focus"] = _loc(loc)
 
@@ -187,6 +192,20 @@ def frames(conn, start, responses, trim=True):
     if trim and end is not None:
         out = out[:end + 1]
     return {"frames": out, "names": {str(k): v for k, v in names.items()}}
+
+
+def line_moves(conn, start, responses):
+    """The plays a line makes, as a set: ("activate", code, zone) and
+    ("summon", code). What the trainer checks a line against the moves
+    the player asked it to avoid."""
+    out = set()
+    for f in frames(conn, start, responses, trim=False)["frames"]:
+        for e in f["events"]:
+            if e["kind"] == "activate":
+                out.add(("activate", e["c"], e.get("z", "?")))
+            elif e["kind"] == "summon":
+                out.add(("summon", e["c"]))
+    return out
 
 
 def from_record(conn, record, line_index=0):

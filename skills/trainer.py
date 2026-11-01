@@ -48,7 +48,9 @@ from . import engine, sweep
 STATE = engine.ROOT / "results" / "trainer"
 HANDS = 24          # the pool; the learning curve is measured over it
 PER_HAND = 3        # solves per hand per generation, after the first
-PIECES = 4          # interrupter pieces asked about, as sweep does
+BIG_STACK = 3       # a goal of this many pieces or more gets...
+BIG_STACK_X = 2     # ...this many times the budget: 3-piece stacks never
+                    # solved inside 60 s on the first deck trained
 
 
 def _now():
@@ -87,10 +89,130 @@ def clear_stop(name):
     stop_path(name).unlink(missing_ok=True)
 
 
+# --- the player's preferences -----------------------------------------------
+#
+# Two things the player can tell the trainer, kept by deck NAME:
+#
+# - a move to AVOID, clicked on the playmat. Activations are forbidden in
+#   the search (`--no-activate` for the zone, `--no-chain` for the card's
+#   chain-window effects, which is broader: the solver's chain filter has
+#   no zone). Summons have no solver flag, so they are only discouraged in
+#   the ranking -- and a summon to avoid is never asked for as a goal.
+#   Either way the ranking puts every line that avoids them first, so an
+#   old best that uses one stays only until something without it is found.
+# - a card that COUNTS as an interruption on the field. Upstream reads
+#   interruptions from the card scripts and misses many (on the first deck
+#   trained: Kaleido-Heart, Dragostapelia, Mudragon), and a card it does
+#   not count is neither scored nor ever asked for.
+
+AVOID = ("avoid_activate", "avoid_summon")
+# playback's zones -> the solver's. A spell shows as activated in the
+# spell & trap zone even when it was played from the hand, so "sz" bans both.
+_SOLVER_ZONES = {"hand": ("hand",), "mz": ("mzone",), "sz": ("szone", "hand"),
+                 "gy": ("grave",), "ban": ("banished",), "extra": ("extra",)}
+
+
+def prefs(conn, name):
+    """{"avoid": {("activate", code, zone) | ("summon", code)},
+    "interrupters": {code}} -- the shape `playback.line_moves` speaks."""
+    out = {"avoid": set(), "interrupters": set()}
+    for r in conn.execute("SELECT kind, code, zone FROM trainer_prefs WHERE deck=?",
+                          (name,)):
+        if r["kind"] == "avoid_activate":
+            out["avoid"].add(("activate", r["code"], r["zone"]))
+        elif r["kind"] == "avoid_summon":
+            out["avoid"].add(("summon", r["code"]))
+        elif r["kind"] == "interrupter":
+            out["interrupters"].add(r["code"])
+    return out
+
+
+def set_pref(conn, name, kind, code, zone="", on=True):
+    if kind not in (*AVOID, "interrupter"):
+        raise ValueError(kind)
+    with conn:
+        if on:
+            conn.execute("INSERT OR IGNORE INTO trainer_prefs (deck, kind, code, "
+                         "zone, added) VALUES (?,?,?,?,?)",
+                         (name, kind, int(code), zone or "", _now()))
+        else:
+            conn.execute("DELETE FROM trainer_prefs WHERE deck=? AND kind=? AND "
+                         "code=? AND zone=?", (name, kind, int(code), zone or ""))
+
+
+def prefs_table(conn, name):
+    from . import card_db
+    rows = []
+    for r in conn.execute("SELECT * FROM trainer_prefs WHERE deck=? ORDER BY added",
+                          (name,)):
+        card = card_db.resolve(conn, r["code"]) or {"name": f"#{r['code']}"}
+        rows.append({**dict(r), "name": card["name"]})
+    return rows
+
+
+def interrupter_options(conn, deck_path, p):
+    """The deck's monsters for the "counts as an interruption" picker:
+    [{code, name, known, on}] -- `known` when upstream already counts it
+    on the field, `on` when the player added it."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    from . import card_db
+
+    cards, deck, out = default_cards(), load_ydk(Path(deck_path)), []
+    for code in dict.fromkeys(cards.canonical(c) for c in (*deck.extra, *deck.main)):
+        card = cards.get(code)
+        if card is None or not card.is_monster:
+            continue
+        known = any(i.where == "field" for i in card_interruptions(code, cards))
+        out.append({"code": code, "known": known, "on": code in p["interrupters"],
+                    "name": (card_db.resolve(conn, code) or {"name": f"#{code}"})["name"]})
+    return out
+
+
+def solver_args(p):
+    """The avoided activations as solver flags."""
+    args, chained = [], set()
+    for m in sorted(p["avoid"], key=str):
+        if m[0] != "activate":
+            continue
+        for z in _SOLVER_ZONES.get(m[2], ()):
+            args += ["--no-activate", f"{m[1]}@{z}"]
+        if m[1] not in chained:
+            chained.add(m[1])
+            args += ["--no-chain", str(m[1])]
+    return args
+
+
+def _banned_targets(p):
+    return {str(m[1]) for m in p["avoid"] if m[0] == "summon"}
+
+
+def _wants_banned(targets, banned):
+    return any(t.split("@")[0] in banned for t in targets)
+
+
 # --- scoring -----------------------------------------------------------------
 
-def line_key(line, opening, cards=None):
-    """[on_field, interruptions, negates, -actions] for one solved line.
+def parts(key):
+    """A score key by name. Keys stored before 2026-11-01 had no leading
+    `avoided` term; `rescore_bests` rewrites them, this reads either."""
+    if key is None:
+        return None
+    if len(key) == 4:
+        key = [0, *key]
+    return {"avoided": -key[0], "on_field": key[1], "interruptions": key[2],
+            "negates": key[3], "actions": -key[4]}
+
+
+def line_key(line, opening, cards=None, start=None, p=None, conn=None):
+    """[-avoided, on_field, interruptions, negates, -actions] for one line.
+
+    `avoided` counts the moves the player asked to avoid that the line
+    makes (needs `start` and `conn` to replay it); it comes first, so any
+    line that avoids them outranks any that does not. `p` is `prefs()`,
+    whose interrupters also count -- on the field -- as interruptions.
 
     On-field first, as `drill.lines_from` ranks: interruptions held in
     hand are real but they are not a line you can practise -- you hold
@@ -116,6 +238,7 @@ def line_key(line, opening, cards=None):
     from .drill import _on_field
 
     cards = cards or default_cards()
+    p = p or {"avoid": set(), "interrupters": set()}
     board = line.get("board") or {}
     score = board_interruptions(board, cards)
     end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
@@ -127,7 +250,30 @@ def line_key(line, opening, cards=None):
             continue
         n += 1
         neg += int(bool(negate))
-    return [_on_field(line), n, neg, -len(line.get("actions") or [])]
+    extra = _extra_on_field(board, p["interrupters"], cards)
+    avoided = 0
+    if p["avoid"] and start is not None and line.get("responses"):
+        from .playback import line_moves
+        avoided = len(line_moves(conn, start, line["responses"]) & p["avoid"])
+    return [-avoided, _on_field(line) + extra, n + extra, neg,
+            -len(line.get("actions") or [])]
+
+
+def _extra_on_field(board, codes, cards):
+    """The player's own interrupters face-up on the field that upstream's
+    script reading did not already count."""
+    from ygorl.solver.blocking import card_interruptions
+
+    if not codes:
+        return 0
+    me = (board.get("players") or [{}])[0]
+    n = 0
+    for c in (*(me.get("mzone") or []), *(me.get("szone") or [])):
+        if (c["code"] in codes and c.get("position", 0) & 0x5
+                and not any(i.where == "field"
+                            for i in card_interruptions(c["code"], cards))):
+            n += 1
+    return n
 
 
 def _compact(record, line):
@@ -180,7 +326,7 @@ def bootstrap(conn, dh, name, deck_path, say=print):
     want = (sorted(deck.main), sorted(deck.extra))
     pool = {int(r["hand_seed"]): r for r in conn.execute(
         "SELECT * FROM trainer_hands WHERE deck_hash=?", (dh,))}
-    cards = default_cards()
+    cards, p = default_cards(), prefs(conn, name)
     taken = 0
     for path in sorted((engine.ROOT / "results").glob("*.jsonl")):
         if path.name.startswith("optimize_"):
@@ -197,7 +343,8 @@ def bootstrap(conn, dh, name, deck_path, say=print):
             row = pool.get(rec.get("hand_seed"))
             if row is None:
                 continue
-            best = max(((line_key(ln, json.loads(row["hand"]), cards), ln)
+            best = max(((line_key(ln, json.loads(row["hand"]), cards,
+                                  rec.get("start"), p, conn), ln)
                         for ln in rec["lines"]),
                        key=lambda t: t[0])
             have = json.loads(row["best_key"]) if row["best_key"] else None
@@ -214,7 +361,7 @@ def bootstrap(conn, dh, name, deck_path, say=print):
     return taken
 
 
-def rescore_bests(conn, dh, say=print):
+def rescore_bests(conn, dh, name, say=print):
     """Re-score every stored best with the current `line_key`.
 
     Idempotent, and run at the start of every training session, so a
@@ -225,13 +372,14 @@ def rescore_bests(conn, dh, say=print):
     """
     from ygorl.engine.duel import default_cards
 
-    cards, changed = default_cards(), 0
+    cards, changed, p = default_cards(), 0, prefs(conn, name)
     rows = conn.execute("SELECT * FROM trainer_hands WHERE deck_hash=? "
                         "AND best_record IS NOT NULL", (dh,)).fetchall()
     with conn:
         for r in rows:
-            line = json.loads(r["best_record"])["lines"][0]
-            key = line_key(line, json.loads(r["hand"]), cards)
+            rec = json.loads(r["best_record"])
+            key = line_key(rec["lines"][0], json.loads(r["hand"]), cards,
+                           rec.get("start"), p, conn)
             if key != json.loads(r["best_key"]):
                 conn.execute("UPDATE trainer_hands SET best_key=? WHERE "
                              "deck_hash=? AND hand_index=?",
@@ -253,17 +401,22 @@ def _attempts(conn, dh, hand_index):
                 "ORDER BY rowid", (dh, hand_index))]
 
 
-def plan(attempts, breadth, best_goal, per_hand=PER_HAND):
+def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=()):
     """[(targets, label, draw)] for one hand's next generation.
 
     Pure: history in, goals out, so the scheduling is testable without
     an hour of solver. `breadth` is the hand's piece goals (computed by
-    the caller from the deck), used only while the hand has no history.
+    the caller from the deck): all of them while the hand has no history,
+    and afterwards any never asked -- an interrupter the player adds later
+    is asked for first. `banned` are target cards never to ask for (a
+    summon the player said to avoid).
     """
     def draws(targets):
         k = frozenset(targets)
         return sum(1 for a in attempts if frozenset(a["targets"]) == k)
 
+    banned = set(banned)
+    breadth = [(t, lbl) for t, lbl in breadth if not _wants_banned(t, banned)]
     if not attempts:
         return [(list(t), lbl, 0) for t, lbl in breadth]
 
@@ -275,13 +428,19 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND):
 
     def add(targets, label):
         k = frozenset(targets)
-        if k in seen or len(out) >= per_hand:
+        if k in seen or len(out) >= per_hand or _wants_banned(targets, banned):
             return
         seen.add(k)
         # A goal tried before keeps its FIRST label. `combinations_to_try`
         # finds the solved pieces by their "piece:" label, so a piece that
         # only solves on a retry would otherwise never be stacked.
         out.append((list(targets), first_label.get(k, label), draws(targets)))
+
+    # 1. pieces never asked (an interrupter added since)
+    tried = {frozenset(a["targets"]) for a in attempts}
+    for targets, label in breadth:
+        if frozenset(targets) not in tried:
+            add(targets, label)
 
     # 2. stacks nobody has asked this hand for
     for targets, label in sweep.combinations_to_try(attempts, max_new=per_hand):
@@ -315,10 +474,36 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND):
 
 # --- one generation ------------------------------------------------------------
 
+def breadth_goals(deck_path, hand, p):
+    """(base, [(targets, label)]): base + EVERY interrupter piece, plus the
+    player's own interrupters. Not capped as `sweep` caps them: the first
+    deck trained had six recognised pieces and the trainer only ever
+    asked for four."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import blocking_plan
+
+    deck = load_ydk(Path(deck_path))
+    bp = blocking_plan(deck.main, deck.extra, list(hand), default_cards())
+    codes = [int(x.password) for x in bp.pieces]
+    codes += sorted(c for c in p["interrupters"] if c not in codes)
+    goals = [([*bp.base, str(c)], f"piece:{c}") for c in codes]
+    if bp.base:
+        goals.append((list(bp.base), "base"))
+    return list(bp.base), goals
+
+
+def _budget(targets, base, solve_ms):
+    from collections import Counter
+    pieces = sum((Counter(targets) - Counter(base)).values())
+    return solve_ms * BIG_STACK_X if pieces >= BIG_STACK else solve_ms
+
+
 def _record_gen(conn, dh, name, gen, started, solves, improved, solve_ms):
     rows = conn.execute("SELECT best_key FROM trainer_hands WHERE deck_hash=?",
                         (dh,)).fetchall()
-    keys = [json.loads(r["best_key"]) if r["best_key"] else None for r in rows]
+    keys = [parts(json.loads(r["best_key"])) if r["best_key"] else None
+            for r in rows]
     solved = [k for k in keys if k]
     with conn:
         conn.execute(
@@ -328,8 +513,8 @@ def _record_gen(conn, dh, name, gen, started, solves, improved, solve_ms):
             # Unsolved hands count as ZERO, not as missing: a pool mean
             # over solved hands only rises when a hand stops solving.
             (dh, name, gen, started, _now(), solves, improved, len(rows),
-             len(solved), sum(k[0] for k in solved) / max(1, len(rows)),
-             sum(k[1] for k in solved) / max(1, len(rows)), solve_ms))
+             len(solved), sum(k["on_field"] for k in solved) / max(1, len(rows)),
+             sum(k["interruptions"] for k in solved) / max(1, len(rows)), solve_ms))
 
 
 def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
@@ -342,17 +527,25 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
     hands = conn.execute(
         "SELECT * FROM trainer_hands WHERE deck_hash=? ORDER BY hand_index",
         (dh,)).fetchall()
+    p = prefs(conn, name)
+    extra = tuple(solver_args(p))
+    banned = _banned_targets(p)
     batch = []
     for h in hands:
         hand = json.loads(h["hand"])
         hist = _attempts(conn, dh, h["hand_index"])
-        breadth = [] if hist else sweep._breadth_goals(deck_path, hand, PIECES)
+        base, breadth = breadth_goals(deck_path, hand, p)
         best_goal = json.loads(h["best_goal"]) if h["best_goal"] else None
-        for targets, label, draw in plan(hist, breadth, best_goal, per_hand):
+        for targets, label, draw in plan(hist, breadth, best_goal, per_hand,
+                                         banned):
             batch.append((str(deck_path), name, h["hand_index"], int(h["hand_seed"]),
-                          hand, targets, label, solve_ms, draw))
+                          hand, targets, label, _budget(targets, base, solve_ms),
+                          draw, extra))
+    big = sum(1 for b in batch if b[7] > solve_ms)
     say(f"generation {gen}: {len(batch)} solve(s) over {len(hands)} hand(s), "
-        f"{solve_ms // 1000}s each on {workers} worker(s)")
+        f"{solve_ms // 1000}s each ({big} big stack(s) at "
+        f"{solve_ms * BIG_STACK_X // 1000}s) on {workers} worker(s)"
+        + (f"; avoiding {len(p['avoid'])} move(s)" if p["avoid"] else ""))
 
     cards = default_cards()
     best = {h["hand_index"]: (json.loads(h["best_key"]) if h["best_key"] else None)
@@ -364,8 +557,13 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
         a, i = res["attempt"], res["hand_index"]
         key, line = None, None
         if res.get("record"):
-            line = res["record"]["lines"][0]
-            key = line_key(line, opening[i], cards)
+            # Every line the solver wrote, not just its own pick: it ranks
+            # by upstream's count, which knows neither the player's
+            # interrupters nor the moves to avoid.
+            rec = res["record"]
+            key, line = max(((line_key(ln, opening[i], cards, rec.get("start"),
+                                       p, conn), ln) for ln in rec["lines"]),
+                            key=lambda t: t[0])
         better = key is not None and (best[i] is None or key > best[i])
         with conn:
             conn.execute(
@@ -375,16 +573,18 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dh, i, gen, json.dumps(a["targets"]), a["label"], a["draw"],
                  a.get("solver_seed"), a["status"], a.get("wall_s"),
-                 a.get("best_placed"), key[0] if key else None,
-                 key[1] if key else None, key[2] if key else None,
+                 a.get("best_placed"), key[1] if key else None,
+                 key[2] if key else None, key[3] if key else None,
                  int(better), _now()))
             if better:
                 _set_best(conn, dh, i, key, a["targets"],
                           _compact(res["record"], line), gen, "trainer")
         if better:
             improved += 1
-            was = f"{best[i][0]} on field" if best[i] else "no line"
-            say(f"  hand {i}: NEW BEST {key[0]} on field, {key[1]} interruption(s) "
+            was = f"{parts(best[i])['on_field']} on field" if best[i] else "no line"
+            k = parts(key)
+            say(f"  hand {i}: NEW BEST {k['on_field']} on field, {k['interruptions']} "
+                f"interruption(s){', uses an avoided move' if k['avoided'] else ''} "
                 f"(was {was}) via {a['label']}")
             best[i] = key
         say(f"progress {done}/{len(batch)}  hand {i} {a['label']}: {a['status']}")
@@ -405,7 +605,7 @@ def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
     engine.require()
     engine.preflight([Path(deck_path)])
     dh = ensure_pool(conn, deck_path, name, hands)
-    rescore_bests(conn, dh, say)
+    rescore_bests(conn, dh, name, say)
     clear_stop(name)
     with conn:   # an interrupted generation never finished: drop its row
         conn.execute("DELETE FROM trainer_gens WHERE deck_hash=? AND finished IS NULL",
@@ -448,13 +648,14 @@ def hands_table(conn, dh):
             "SELECT h.*, (SELECT COUNT(*) FROM trainer_attempts a WHERE "
             "a.deck_hash=h.deck_hash AND a.hand_index=h.hand_index) AS tries "
             "FROM trainer_hands h WHERE deck_hash=? ORDER BY hand_index", (dh,)):
-        key = json.loads(h["best_key"]) if h["best_key"] else None
+        key = parts(json.loads(h["best_key"])) if h["best_key"] else None
         names = [(card_db.resolve(conn, c) or {"name": str(c)})["name"]
                  for c in json.loads(h["hand"])]
         out.append({"i": h["hand_index"], "hand": names, "key": key,
-                    "on_field": key[0] if key else None,
-                    "interruptions": key[1] if key else None,
-                    "actions": -key[3] if key else None,
+                    "on_field": key["on_field"] if key else None,
+                    "interruptions": key["interruptions"] if key else None,
+                    "actions": key["actions"] if key else None,
+                    "avoided": key["avoided"] if key else 0,
                     "gen": h["best_gen"], "source": h["best_source"],
                     "tries": h["tries"], "watchable": bool(h["best_record"])})
     return out

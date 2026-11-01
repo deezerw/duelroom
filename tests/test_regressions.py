@@ -4873,15 +4873,68 @@ def test_trainer_score_ignores_hand_cards_the_combo_never_touched():
     """A hand trap you opened with and kept is the same card whatever line
     you play, so it is not part of the line's score. One the combo added
     to your hand is."""
-    from skills.trainer import line_key
+    from skills.trainer import line_key, parts
+
+    def k(line, opening):
+        return parts(line_key(line, opening))
 
     ASH = 14558127                       # interrupts from the hand
     board = {"players": [{"mzone": [], "szone": [], "hand": [ASH],
                           "grave": [], "banished": []}, {}]}
     line = {"board": board, "actions": [1, 2, 3]}
-    assert line_key(line, opening=[ASH])[1:3] == [0, 0], "held from the opening: not counted"
-    assert line_key(line, opening=[])[1] == 1, "added by the combo: counted"
+    got = k(line, [ASH])
+    assert (got["interruptions"], got["negates"]) == (0, 0), "held from the opening: not counted"
+    assert k(line, [])["interruptions"] == 1, "added by the combo: counted"
     # two copies at the end, one opened with: the second was obtained
     board["players"][0]["hand"] = [ASH, ASH]
-    assert line_key(line, opening=[ASH, 99999999])[1] == 1
-    assert line_key(line, opening=[ASH])[3] == -3, "fewer actions still breaks ties"
+    assert k(line, [ASH, 99999999])["interruptions"] == 1
+    assert k(line, [ASH])["actions"] == 3, "fewer actions still breaks ties"
+
+
+def test_trainer_counts_the_players_own_interrupters():
+    """Upstream reads interruptions from scripts and misses some; a card the
+    player says counts is scored on the field -- face-up only, and never
+    twice for a card upstream already counts."""
+    from skills.trainer import line_key, parts
+
+    KALEIDO, LARS = 28226490, 35103106   # not recognised / recognised
+    board = {"players": [{"mzone": [{"code": KALEIDO, "position": 1},
+                                    {"code": LARS, "position": 4}],
+                          "szone": [], "hand": [], "grave": [], "banished": []}, {}]}
+    line = {"board": board, "actions": [1]}
+    plain = parts(line_key(line, []))
+    mine = parts(line_key(line, [], p={"avoid": set(),
+                                       "interrupters": {KALEIDO, LARS}}))
+    assert mine["on_field"] == plain["on_field"] + 1
+    assert mine["interruptions"] == plain["interruptions"] + 1
+    board["players"][0]["mzone"][0]["position"] = 8      # face-down: not counted
+    assert parts(line_key(line, [], p={"avoid": set(), "interrupters": {KALEIDO}}))[
+        "on_field"] == plain["on_field"]
+
+
+def test_trainer_key_ranks_avoiding_lines_first_and_reads_old_keys():
+    from skills.trainer import parts
+
+    clean, uses = [0, 1, 1, 1, -90], [-1, 3, 3, 3, -50]
+    assert clean > uses, "a line without the avoided move beats a bigger board with it"
+    assert parts([2, 3, 1, -40]) == {"avoided": 0, "on_field": 2, "interruptions": 3,
+                                     "negates": 1, "actions": 40}, "pre-2026-11-01 keys"
+
+
+def test_trainer_plan_asks_new_pieces_and_never_banned_summons():
+    from skills.trainer import plan, solver_args
+
+    hist = [{"label": "piece:1", "targets": ["B", "1"], "status": "solved", "best_placed": 2},
+            {"label": "piece:2", "targets": ["B", "2"], "status": "solved", "best_placed": 2}]
+    breadth = [(["B", "1"], "piece:1"), (["B", "2"], "piece:2"), (["B", "9"], "piece:9")]
+    out = plan(hist, breadth, ["B", "1"], per_hand=3)
+    assert out[0] == (["B", "9"], "piece:9", 0), "a piece added later is asked first"
+    out = plan(hist, breadth, ["B", "1"], per_hand=3, banned={"2"})
+    assert not any("2" in t for t, _, _ in out), out
+    assert plan([], breadth, None, banned={"9"}) == [(["B", "1"], "piece:1", 0),
+                                                     (["B", "2"], "piece:2", 0)]
+
+    args = solver_args({"avoid": {("activate", 77103950, "sz"), ("summon", 5)},
+                        "interrupters": set()})
+    assert args == ["--no-activate", "77103950@szone", "--no-activate", "77103950@hand",
+                    "--no-chain", "77103950"], "summons have no solver flag"

@@ -90,7 +90,11 @@ def _draw_seed(hand_seed, targets, draw):
 def _solve_one(args):
     """One (hand, goal, draw). Top level so the spawn pool can pickle it."""
     (deck_path, name, hand_index, hand_seed, hand, targets, label,
-     solve_ms, draw) = args
+     solve_ms, draw) = args[:9]
+    # Optional 10th: extra solver flags (the trainer's avoided moves).
+    # `HandJob` has no field for them, so they are added where the request
+    # is built, in this child -- as handlab's --fire-spare is.
+    extra = tuple(args[9]) if len(args) > 9 else ()
     from ygorl.engine.duel import default_cards
     from ygorl.solver import HandJob, Workdir, find_solver
     from ygorl.solver.batch import solve_hand
@@ -106,9 +110,15 @@ def _solve_one(args):
         solve_ms=solve_ms, threads=1, hand=tuple(hand), lines=4,
         binary=find_solver(), solver_seed=seed,
         timeout_s=solve_ms / 1000 + 300)
+    from ygorl.solver import batch as BT
+    orig = BT.SolveRequest
+    if extra:
+        BT.SolveRequest = lambda **kw: orig(**{
+            **kw, "extra_args": tuple(kw.get("extra_args") or ()) + extra})
     try:
         demo = solve_hand(job, cards=cards)
     finally:
+        BT.SolveRequest = orig
         # `solve_hand` removes its own `job` subdirectory, not the mkdtemp
         # ROOT we handed it, so every draw leaked one directory. Measured
         # 2026-10-24: 914 of them under /tmp going back two days, 122 MB,

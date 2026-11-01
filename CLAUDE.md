@@ -207,7 +207,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `sweep.py` | `TRIAGE_MS` (15 s), `DRAWS` |
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
-| `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `PIECES` |
+| `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2) |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
@@ -416,7 +416,19 @@ that solved → near misses biggest-first → the best goal at a fresh seed), an
 hand's **best line ever found** is kept and watchable on the playmat. A line's score
 is `[on field, interruptions, negates, -actions]`, where a card in hand counts ONLY if
 the combo put it there -- hand traps held from the opening hand are excluded
-(`trainer.line_key`; stored bests are re-scored at every session start). The learning curve
+(`trainer.line_key`; stored bests are re-scored at every session start).
+Every interrupter piece is asked for (not sweep's first four), goals of `BIG_STACK`+
+pieces get `BIG_STACK_X` times the budget, and every line a solve writes is ranked,
+not just the solver's pick.
+
+**The player can steer it** (`trainer_prefs`, by deck NAME; train page + the playmat's
+⊘ buttons). *Counts as an interruption*: upstream reads interruptions from scripts and
+misses real ones (on `imported`: Kaleido-Heart, Dragostapelia), and an uncounted card is
+neither scored nor asked for. *Avoid a move*: an activation becomes `--no-activate
+card@zone` + `--no-chain card` (the chain filter has no zone, so it is broader); summons
+have no solver flag, so an avoided summon is only never asked for as a goal and ranked
+down. The key is `[-avoided, on_field, interruptions, negates, -actions]`, so any line
+avoiding them beats any that does not, and the old best stays until one is found. The learning curve
 is the pool's mean best on-field interruptions per generation, so it can only rise or
 stay flat. Bests are seeded from this exact deck's stored results (matched by card list,
 not file name; `trainer_hands.deck_hash`). Stop = a request honoured between
