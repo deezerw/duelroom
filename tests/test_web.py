@@ -1062,3 +1062,37 @@ def test_train_page_start_and_stop(loggedin, monkeypatch):
 
 def test_watch_train_without_a_best_line_is_404(loggedin):
     assert loggedin.get("/watch/train/kewl-tune/9999").status_code == 404
+
+
+def test_train_pref_avoid_and_count(loggedin):
+    """The playmat's ⊘ (fetch, JSON) and the train page's forms (redirect)
+    both land in trainer_prefs; anything malformed is refused."""
+    from skills import db, trainer
+
+    c = db.connect()
+    try:
+        r = loggedin.post("/train/kewl-tune/pref", headers={"X-Requested-With": "fetch"},
+                          data={"kind": "avoid_activate", "code": "77103950", "zone": "sz"})
+        assert r.status_code == 200 and r.get_json() == {"on": True}
+        assert ("activate", 77103950, "sz") in trainer.prefs(c, "kewl-tune")["avoid"]
+        r = loggedin.post("/train/kewl-tune/pref", data={"kind": "interrupter", "code": "28226490"})
+        assert r.status_code == 302
+        assert 28226490 in trainer.prefs(c, "kewl-tune")["interrupters"]
+        page = loggedin.get("/train/kewl-tune").get_data(as_text=True)
+        assert "Moves to avoid" in page and "spell &amp; trap zone" in page
+        for bad in ({"kind": "drop table", "code": "1"},
+                    {"kind": "avoid_activate", "code": "1"},              # no zone
+                    {"kind": "avoid_activate", "code": "1", "zone": "../x"},
+                    {"kind": "avoid_summon", "code": "1", "zone": "hand"},
+                    {"kind": "interrupter", "code": "abc"}):
+            assert loggedin.post("/train/kewl-tune/pref", data=bad).status_code == 400, bad
+        assert loggedin.post("/train/no-such-deck/pref",
+                             data={"kind": "interrupter", "code": "1"}).status_code == 404
+        r = loggedin.post("/train/kewl-tune/pref", headers={"X-Requested-With": "fetch"},
+                          data={"kind": "avoid_activate", "code": "77103950", "zone": "sz",
+                                "on": "0"})
+        assert r.get_json() == {"on": False}
+        assert not trainer.prefs(c, "kewl-tune")["avoid"]
+    finally:
+        with c:
+            c.execute("DELETE FROM trainer_prefs WHERE deck='kewl-tune'")

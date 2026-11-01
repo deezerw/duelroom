@@ -344,12 +344,16 @@ def drill_view(name=None):
 
 # --- watching a line on the playmat (STAGE6) -----------------------------
 
-def _watch(title, subtitle, start, responses, lines):
+def _watch(name, title, subtitle, start, responses, lines):
     data = playback.frames(conn(), start, responses)
     if not data["frames"]:
         abort(404)
+    # Moves already avoided, in the step list's own key format.
+    avoid = [f"{m[0]}:{m[1]}" + (f":{m[2]}" if m[0] == "activate" else "")
+             for m in trainer.prefs(conn(), name)["avoid"]]
     return render_template("watch.html", title=title, subtitle=subtitle,
-                           data=data, lines=lines, running=jobs.active(conn()))
+                           data=data, lines=lines, deck=name, avoid=avoid,
+                           running=jobs.active(conn()))
 
 
 @bp.route("/watch/pilot/<name>/<rid>")
@@ -390,7 +394,7 @@ def watch_pilot(name, rid):
     lines = [{"label": o[1], "on": o[0] == key,
               "href": url_for("views.watch_pilot", name=name, rid=rid,
                               line=o[0])} for o in options]
-    return _watch(label, f"{name} · " + " · ".join(r.get("hand_names") or []),
+    return _watch(name, label, f"{name} · " + " · ".join(r.get("hand_names") or []),
                   replay["start"], replay["lines"][k], lines)
 
 
@@ -415,7 +419,7 @@ def watch_drill(name):
         abort(404)
     hand = [(card_db.resolve(conn(), x) or {"name": str(x)})["name"]
             for x in rec.get("hand") or []]
-    return _watch(f"{name} · line {i + 1}",
+    return _watch(name, f"{name} · line {i + 1}",
                   f"{n} interruption(s) · " + " · ".join(hand),
                   rec.get("start") or {}, line.get("responses") or [], [])
 
@@ -440,6 +444,7 @@ def train_view(name=None):
         flash("No deck selected.")
         return redirect(url_for("views.index"))
     dh = trainer.deck_hash(path)
+    p = trainer.prefs(c, name)
     gens = trainer.curve(c, dh)
     hands = sorted(trainer.hands_table(c, dh),
                    key=lambda h: (-(h["on_field"] or -1), -(h["interruptions"] or 0)))
@@ -447,6 +452,10 @@ def train_view(name=None):
     return render_template(
         "train.html", name=name, gens=gens, hands=hands, job=job,
         stopping=trainer.stop_requested(name), running=jobs.active(c),
+        avoid=[r for r in trainer.prefs_table(c, name) if r["kind"] in trainer.AVOID],
+        options=trainer.interrupter_options(c, path, p),
+        big_stack=trainer.BIG_STACK, big_x=trainer.BIG_STACK_X,
+        zone_words=_ZONE_WORDS,
         default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
         solve_s=engine.SOLVE_MS // 1000)
 
@@ -464,6 +473,39 @@ def train_start(name):
     hands = min(max(request.form.get("hands", type=int) or trainer.HANDS, 4), 80)
     job_id = jobs.enqueue(c, "train", deck=name, hours=hours, hands=hands)
     flash(f"Training queued as job {job_id}.")
+    return redirect(url_for("views.train_view", name=name))
+
+
+_ZONE_WORDS = {"hand": "the hand", "mz": "the field", "sz": "the spell & trap zone",
+               "gy": "the GY", "ban": "banishment", "extra": "the Extra Deck"}
+
+
+@bp.route("/train/<name>/pref", methods=["POST"])
+@login_required
+def train_pref(name):
+    """Avoid a move / count a card as an interruption, or undo either.
+
+    The playmat posts here by fetch and gets JSON, so the replay keeps
+    playing; the train page posts a form and is sent back to itself.
+    Stored bests are re-scored at once, so the page never shows a ranking
+    the next run would disagree with.
+    """
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    kind = request.form.get("kind", "")
+    code = request.form.get("code", type=int)
+    zone = request.form.get("zone", "")
+    on = request.form.get("on", "1") == "1"
+    if (kind not in (*trainer.AVOID, "interrupter") or not code
+            or (kind == "avoid_activate") != (zone in trainer._SOLVER_ZONES)
+            or (kind != "avoid_activate" and zone)):
+        abort(400)
+    trainer.set_pref(c, name, kind, code, zone, on)
+    trainer.rescore_bests(c, trainer.deck_hash(path), name, say=lambda *_: None)
+    if request.headers.get("X-Requested-With") == "fetch":
+        return {"on": on}
     return redirect(url_for("views.train_view", name=name))
 
 
@@ -498,7 +540,7 @@ def watch_train(name, i):
         abort(404)
     found = (f"found in generation {row['gen']}" if row["source"] == "trainer"
              else f"from {row['source']}")
-    return _watch(f"{name} · hand {i + 1} · best line",
+    return _watch(name, f"{name} · hand {i + 1} · best line",
                   f"{row['on_field']} on field, {row['interruptions']} interruption(s), "
                   f"{row['actions']} actions · {found} · " + " · ".join(row["hand"]),
                   rec["start"], rec["lines"][0].get("responses") or [], [])

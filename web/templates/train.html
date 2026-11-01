@@ -21,6 +21,19 @@
   .hands .cards{color:var(--dim);font-size:12.5px}
   .startform{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
   .startform label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;
+        padding:3px 4px 3px 10px;font-size:12.5px}
+  .chip.auto{padding-right:10px;color:var(--dim)}
+  .chip form{margin:0}
+  .chip button{background:none;border:none;color:var(--faint);cursor:pointer;font:inherit;
+               padding:0 6px;border-radius:999px;line-height:1.4}
+  .chip button:hover{color:var(--ink);background:#ffffff10}
+  .prefs h3{font-size:13px;margin:0 0 2px}
+  .prefs .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .prefs select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+                padding:6px 8px;font:inherit;max-width:100%}
+  .badge-avoid{font-size:11px;color:#f7768e;border:1px solid #f7768e66;border-radius:999px;padding:1px 7px;margin-left:4px}
   .startform input{width:90px;background:var(--bg);color:var(--ink);border:1px solid var(--line);
                    border-radius:6px;padding:6px 8px;font:inherit}
 </style>
@@ -58,12 +71,64 @@
     <details class="note"><summary>what one generation costs</summary>
       Each generation gives every hand {{ per_hand }} solves at the full
       {{ solve_s }}s budget (the first gives each hand one solve per
-      interrupter piece instead), six at a time. With {{ default_hands }}
+      interrupter piece instead), six at a time; a goal of {{ big_stack }} or more
+      pieces gets {{ big_x }}× the time, since big stacks are the slow ones. With {{ default_hands }}
       hands that is roughly 10–15 minutes a generation, so a night is
       30–50 generations. It runs on the job worker, so other analyses
       queue behind it, and you can stop it from here at any time without
       losing anything it has found.
     </details>
+  {% endif %}
+</div>
+
+<div class="sec"><h2>How it judges this deck</h2>
+  <span class="hint">changes apply to stored best lines at once, and to the search from the next generation</span></div>
+<div class="panel prefs">
+  <h3>Counts as an interruption on the field</h3>
+  <div class="muted" style="font-size:12.5px">The engine reads interruptions from card scripts and misses some.
+    Every card here is scored, and asked for as a goal.</div>
+  <div class="chips">
+    {% for o in options if o.known %}<span class="chip auto" title="recognised automatically">{{ o.name }}</span>{% endfor %}
+    {% for o in options if o.on and not o.known %}
+      <span class="chip">{{ o.name }}
+        <form method="post" action="{{ url_for('views.train_pref', name=name) }}">
+          <input type="hidden" name="kind" value="interrupter"><input type="hidden" name="code" value="{{ o.code }}">
+          <input type="hidden" name="on" value="0">
+          <button title="stop counting {{ o.name }}" aria-label="remove {{ o.name }}">×</button></form></span>
+    {% endfor %}
+  </div>
+  {% set addable = options|rejectattr('known')|rejectattr('on')|list %}
+  {% if addable %}
+  <form class="row" method="post" action="{{ url_for('views.train_pref', name=name) }}">
+    <input type="hidden" name="kind" value="interrupter"><input type="hidden" name="on" value="1">
+    <select name="code" aria-label="card to count as an interruption">
+      {% for o in addable %}<option value="{{ o.code }}">{{ o.name }}</option>{% endfor %}
+    </select>
+    <button>Count it</button>
+  </form>
+  {% endif %}
+
+  <h3 style="margin-top:16px">Moves to avoid</h3>
+  {% if avoid %}
+  <div class="chips">
+    {% for a in avoid %}
+      <span class="chip">{% if a.kind == 'avoid_activate' %}Activate {{ a.name }} from {{ zone_words.get(a.zone, a.zone) }}{% else %}Summon {{ a.name }}{% endif %}
+        <form method="post" action="{{ url_for('views.train_pref', name=name) }}">
+          <input type="hidden" name="kind" value="{{ a.kind }}"><input type="hidden" name="code" value="{{ a.code }}">
+          <input type="hidden" name="zone" value="{{ a.zone }}"><input type="hidden" name="on" value="0">
+          <button title="allow again" aria-label="allow again">×</button></form></span>
+    {% endfor %}
+  </div>
+  <details class="note"><summary>how avoiding works</summary>
+    An avoided effect is taken out of the search entirely (for its other effects
+    too, when they would be chained). Summons cannot be forbidden in the search, so
+    an avoided summon is never asked for as a goal and any line using it ranks
+    below every line that does not. Either way the current best is kept until a
+    line without the move is found — nothing is thrown away.
+  </details>
+  {% else %}
+  <p class="muted" style="margin:6px 0 0;font-size:12.5px">None. Watch any best line below and click
+    <b>⊘</b> beside a move in its step list.</p>
   {% endif %}
 </div>
 
@@ -127,6 +192,7 @@
           <div class="cards">{{ h.hand|join(' · ') }}</div></td>
         <td>{% if h.key %}<span class="big" style="font-size:17px">{{ h.on_field }}</span>
             <span class="muted" title="total counts a card in hand only if the combo put it there">on field · {{ h.interruptions }} total · {{ h.actions }} actions</span>
+            {% if h.avoided %}<span class="badge-avoid" title="still the best found; the trainer is looking for one without">uses {{ h.avoided }} avoided move{{ 's' if h.avoided > 1 }}</span>{% endif %}
           {% else %}<span class="muted">no line yet</span>{% endif %}</td>
         <td class="mono tries">{{ h.tries }}</td>
         <td class="muted found">{% if h.source == 'trainer' %}gen {{ h.gen }}{% elif h.source %}stored{% endif %}</td>

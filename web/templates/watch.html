@@ -95,6 +95,14 @@
   .steps .st .k.summon{background:#e0af6826;color:#e0af68}
   .steps .st .k.activate{background:#7aa2f726;color:#7aa2f7}
   .steps .st .k.set{background:#bb9af726;color:#bb9af7}
+  .steps .st .tx{flex:1}
+  .steps .st .ev.avoided{text-decoration:line-through;color:var(--faint)}
+  .steps .av{flex:none;background:none;border:1px solid transparent;border-radius:6px;
+             color:var(--faint);font:inherit;font-size:12px;line-height:1;padding:3px 6px;cursor:pointer}
+  .steps .st:hover .av,.steps .av.on,.steps .av:focus-visible{border-color:var(--line)}
+  .steps .av:hover{color:var(--ink);border-color:#f7768e}
+  .steps .av.on{color:#f7768e;border-color:#f7768e66;background:#f7768e14}
+  .steps .hint{font-size:11.5px;color:var(--faint);padding:2px 7px 8px}
 
   .preview{display:flex;gap:10px;align-items:flex-start;margin-top:12px}
   .preview img{width:120px;border-radius:6px}
@@ -340,17 +348,56 @@ function openPile(key, codes){
 }
 $("pilemodal").addEventListener("click", e => { if (e.target.id === "pilemodal") e.currentTarget.classList.remove("on"); });
 
-// Step list: one row per frame that says something.
+// Step list: one row per frame that says something. Each effect or
+// summon gets a ⊘ that tells the trainer to avoid that move for this deck
+// (POSTed in the background, so the replay is not interrupted).
+const DECK = {{ deck|tojson }};
+const AVOID = new Set({{ avoid|tojson }});
+const PREF_URL = {{ url_for('views.train_pref', name=deck)|tojson }};
+const avKey = e => e.kind === "activate" ? `activate:${e.c}:${e.z}` : `summon:${e.c}`;
 const list = $("steps");
+list.appendChild(el("div", "hint", "⊘ on a move tells the trainer to avoid it with this deck"));
+const avButtons = new Map();   // key -> [{btn, span}]
+function paint(k){
+  for (const {btn, span} of avButtons.get(k) || []){
+    const on = AVOID.has(k);
+    btn.classList.toggle("on", on); span.classList.toggle("avoided", on);
+    btn.title = (on ? "Avoided — click to allow again: " : "Avoid this move: ") + span.textContent;
+    btn.setAttribute("aria-pressed", on);
+  }
+}
+async function toggleAvoid(e, k){
+  const on = !AVOID.has(k);
+  const body = new URLSearchParams({kind: e.kind === "activate" ? "avoid_activate" : "avoid_summon",
+                                    code: e.c, zone: e.kind === "activate" ? e.z : "", on: on ? "1" : "0"});
+  try {
+    const r = await fetch(PREF_URL, {method: "POST", body, credentials: "same-origin",
+                                     headers: {"X-Requested-With": "fetch"}});
+    if (!r.ok) throw new Error(r.status);
+    on ? AVOID.add(k) : AVOID.delete(k); paint(k);
+  } catch (err) { alert("Could not save that — " + err.message); }
+}
 F.forEach((f, i) => {
   if (!f.events.length) return;
   const e = f.events[0], r = el("div", "st"); r.dataset.i = i;
   r.appendChild(el("span", "n", i + 1));
   r.appendChild(el("span", "k " + e.kind, {activate:"effect", summon:"summon", set:"set", move:"→", lp:"LP", start:"start"}[e.kind] || e.kind));
-  r.appendChild(el("span", null, f.events.map(x => x.text).join(" · ")));
+  const tx = el("span", "tx");
+  f.events.forEach((x, j) => {
+    if (j) tx.appendChild(document.createTextNode(" · "));
+    const span = el("span", "ev", x.text); tx.appendChild(span);
+    if (!((x.kind === "activate" && x.z && x.z !== "?") || x.kind === "summon") || !x.c) return;
+    const k = avKey(x), b = el("button", "av", "⊘"); b.type = "button";
+    b.addEventListener("click", ev => { ev.stopPropagation(); toggleAvoid(x, k); });
+    if (!avButtons.has(k)) avButtons.set(k, []);
+    avButtons.get(k).push({btn: b, span});
+    tx.appendChild(b);
+  });
+  r.appendChild(tx);
   r.addEventListener("click", () => { if (timer) play(); go(i); });
   list.appendChild(r);
 });
+avButtons.forEach((_, k) => paint(k));
 
 buildSide(0); buildSide(1); buildEmz();
 $("scrub").max = F.length - 1;
