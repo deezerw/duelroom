@@ -264,7 +264,12 @@ function render(i){
   $("scrub").value = i; $("pos").textContent = `${i + 1} / ${F.length}`;
   document.querySelectorAll(".steps .st").forEach(s => s.classList.toggle("on", +s.dataset.i === i));
   const on = document.querySelector(".steps .st.on");
-  if (on) on.scrollIntoView({block: "nearest"});
+  // Keep the current step visible by scrolling the list box only:
+  // scrollIntoView would also scroll the page down to it every step.
+  if (on){ const box = on.parentElement, top = on.offsetTop - box.offsetTop;
+    if (top < box.scrollTop) box.scrollTop = top;
+    else if (top + on.offsetHeight > box.scrollTop + box.clientHeight)
+      box.scrollTop = top + on.offsetHeight - box.clientHeight; }
 }
 
 // FLIP: remember where each moving card was, render, then slide it from
