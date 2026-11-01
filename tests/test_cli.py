@@ -28,7 +28,7 @@ from skills import db
 #   setup                   rebuilds the merged card database
 #   solve ladder gate       minutes to hours of solver
 #   boards optimize second
-#   gauntlet floodgates
+#   gauntlet floodgates train
 #   pilot                   interactive
 #   import export           writes files
 #   snapshot                writes a snapshot row
@@ -75,7 +75,7 @@ def test_every_command_is_either_walked_or_excluded():
     excluded = {
         "cards", "meta", "images", "setup", "solve", "ladder", "gate",
         "boards", "optimize", "second", "gauntlet", "floodgates", "pilot",
-        "import", "export", "snapshot", "threats",
+        "train", "import", "export", "snapshot", "threats",
     }
     registered = set(daemon.COMMANDS)
     missing = registered - walked - excluded
