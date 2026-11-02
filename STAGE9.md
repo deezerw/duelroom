@@ -7,6 +7,28 @@ any enemy hand is a dud.** Boards are ranked by win rate.
 
 Delete this file once the gates pass and the win-rate run is built and verified.
 
+## Status (2026-11-02)
+
+**Both gates PASSED and the game is built.** See CLAUDE.md "Finishing the game".
+
+- Gate A: `--root` (patches/0002) -- kewl-tune 8/8 vs going first 8/8, snake_eye 7/8
+  vs 7/8, the same hand failing both; old `--approach` 0/8 on both. Done via option 1
+  (C++), plus a real bug fix (SELECT_PLACE absolute player).
+- Gate B: `--goal-win` -- known-answer positions all correct, wins verified by replay.
+  Needed a second fix: ocgcore keeps processing past MSG_WIN.
+- Built: `skills/game.py` (T1 / T2 with lethal check / T3), greedy defender
+  (`--opp-greedy`), damage-guided lethal search, `game_turn1`/`game_results`,
+  fairness check on enemy OPENING hands, `games` CLI, `/games` page, whole-game
+  playmat replays, `train ... <enemy>` plateau trigger, near-dud tier.
+- First real game (imported hand 0 vs snake_eye): enemy Maxx C + Veiler + Nibiru on
+  T1, payoff on T2, lethal found on T3 (3400 + 3000 + 2700), replay-verified.
+
+**Left before this file can be deleted:**
+- Impact score per card from game results (summoned in won vs lost games, same hand).
+- Rank top-3 boards per hand (needs STAGE8 item 1).
+- Measured cost of a full run (the 2.5 min/game estimate is unmeasured at 60 s).
+- Going-second variant (their T1 board, your T2 lethal) -- the user liked it; same pieces.
+
 ## Why this is a separate stage: it is blocked today
 
 ISSUES.md #4: the solver cannot search from a position a duel has already reached.

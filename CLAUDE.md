@@ -53,6 +53,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   gauntlet <deck> <hand>    rank this hand's end boards by what they STOP
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
+  games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
   help / quit
 ```
 
@@ -168,6 +169,7 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/gauntlet.py     Candidate end boards ranked by what they STOP
   │  skills/optimizer.py    Flex-slot hill climb with paired seeds
   │  skills/trainer.py      The deck trainer: replay a hand pool, keep best lines
+  │  skills/game.py         Finish the game: turns 1-3 vs a meta deck, win rate
   │  skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
   │
   └─ output ────────────────────────────────────────────────────────────────
@@ -208,6 +210,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 | `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2) |
+| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES` |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
@@ -249,6 +252,12 @@ response windows). Real counts need each line replayed through ygorl.
 
 **`boards`** — end-board library: `archetype`, `board_state` (JSON), `frequency`,
 `source_run`
+
+**`game_turn1`** / **`game_results`** — Stage 9 games (`skills/game.py`): turn 1 once
+per (deck, enemy, hand, board, enemy seed) with the enemy's opening hand for the
+fairness check; one row per game with `outcome` (`win` / `no_win` / `lost_t2` /
+`no_t1`), turn-3 `damage`, and the deciding line's replay path. Game files live in
+`results/games/<deck>/<enemy>/`.
 
 ## Business Logic Notes
 
@@ -390,7 +399,7 @@ stage is complete and verified.
 6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
 7. ~~Deck trainer~~ — **done** (`trainer.py`, `/train`; best-line trainer, see below)
 8. `STAGE8.md` — Matchup testing: top-3 boards per hand, impact score per card, shared enemy hands, 10 runs, locals weighting
-9. `STAGE9.md` — Finish the game: win rate by turn 3, duds (blocked on the resumed-root search, ISSUES.md #4)
+9. `STAGE9.md` — Finish the game: win rate by turn 3, duds — **gates passed, core built** (`game.py`, `/games`); impact score + going-second left
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
@@ -444,6 +453,46 @@ plain extra budget (10 s: 22/24 base, 23/24 adapt, 24/24 base at 20 s; hard goal
 10/24 vs 11/24). Harness: `tools/experiments/adapt_ab*.py`. Untried: `--options`
 macros, a per-starter corpus, `--ctx-shrink`. ygorl's PPO/BC on CPU learned nothing
 usable for combo decks (upstream's own measurement).
+
+## Finishing the game (Stage 9) — the rooted solver
+
+`daemon.py games <deck> <enemy>` or the **games** page (also: `train <deck> ... <enemy>`
+trains until 3 generations in a row improve nothing, then plays them). Going first:
+your turn 1 toward the trainer's best goal for the hand, the enemy's turn 2 into your
+board (first `--goal-win` for `OTK_MS` -- a kill is a loss -- then its payoff
+target), your turn 3 as a `--goal-win` search. **Win = their LP 0 by the end of turn
+3; dud = no win in any game; near-dud = under `NEAR_DUD_RATE`.** Every game is
+replayable on the playmat, all three turns.
+
+**It runs on a SECOND solver binary**, `vendor/ygorl/build/combo-solver-rooted`, built
+by `tools/build_rooted_solver.sh` from `patches/0002-rooted-search.patch` (byte-identical
+rebuild verified). The pinned `engine.SOLVER_BIN` is untouched, so no existing
+measurement changed. What the patch adds, and the two real bugs it fixed:
+
+- `--root <prefix>`: every phase (probe, NRPA, finisher) roots at the position the
+  prefix reaches. This is what ISSUES.md #4 needed -- only the finisher used to see a
+  resumed root. Gate A, empty field, 8 hands, 60 s: kewl-tune going first 8/8, old
+  `--approach` 0/8, `--root` 8/8; snake_eye 7/8, 0/8, 7/8, the same hand failing both.
+- **BUG: `SELECT_PLACE` answered the zone owner relative to the chooser**; the core
+  wants the absolute player. Harmless as player 0, a MSG_RETRY on EVERY summon as
+  player 1 -- the "second blocker" patch 0001 could not name.
+- `--goal-win`: a solution is a duel the target player wins. **BUG/TRAP: ocgcore does
+  not stop at MSG_WIN** -- it keeps processing until its queue is empty -- so a won
+  duel was never seen until the step was cut there. Gate B (vanilla positions with
+  known answers): lethal and clear-then-lethal found, both one-short positions empty.
+  Rollouts score damage dealt and blockers removed; without that the first real game
+  found no lethal, with it lethal was found (verified by replay).
+- `--opp-greedy [--opp-respond codes]`: the non-searching player DEFENDS -- first
+  eligible chain effect per window, never onto its own link -- instead of passing.
+
+**Rebuild ALL solver objects after touching `search.h`.** Recompiling only
+`search.cpp` after adding a member left `main.o` on the old layout and the binary died
+silently in the probe; `build_rooted_solver.sh` compiles everything.
+
+Fairness, checked rather than assumed: the enemy's OPENING hand per seed is asserted
+identical across your hands (`check_shared_enemy_hands`). Their turn-2 draw is not, by
+design -- Maxx "C" during your turn draws them cards off the top. Turn 1 is solved once
+per (hand, board, enemy hand) and reused by every run.
 
 ## Known limitations
 
@@ -522,6 +571,16 @@ Honest gaps, so nobody mistakes a limit for a result:
   Both commands print the refusal on every call and the record carries it.
   **The replacement is `gauntlet.rank_boards`** — the same question asked of `--fire`,
   which is already measured over 40 hands per cell. See ISSUES.md #69.
+- **Games use a GREEDY DEFENDER.** Whoever is not searching uses its first legal
+  interruption at every window. Real players time negates; the searching side may
+  bait this one. Win rates are against that opponent, and both sides get the same
+  model. The upgrade -- trying several windows per piece -- costs a search per window.
+- **A game's turn 1 is re-solved against the enemy deck**, toward the trainer's best
+  goal, with their hand traps firing. It can land a smaller board than the trainer's
+  (stored lines are bound to the passive opponent they were solved against, see
+  `breaking.py`), and `game_turn1.reached` says whether the full goal was made.
+- **Damage on a non-winning turn 3 is read from the solver's best approach**, which
+  is chosen by board progress, so it understates the best damage reachable.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
   limitation the handtrap matrix has, generalised from a card to a board. It is not a
@@ -534,5 +593,7 @@ Honest gaps, so nobody mistakes a limit for a result:
   (1.2 if the 9 with no line count as zero). A gauntlet of weak
   lists flatters every board.
 
-**Deferred:** a bot-vs-bot arena (now after Stage 7), blocked on the turn-2 resume
-problem above. See "Why No Duel AI (Yet)" for the trade.
+**The turn-2 resume problem is solved in the rooted binary** (Stage 9 above); `second`,
+`gauntlet.rank` and the side plan still call the PINNED binary and stay unsupported
+until they are moved onto `--root`. A full bot-vs-bot arena (beyond turn 3, with a
+smarter defender than greedy) is still deferred; see "Why No Duel AI (Yet)".

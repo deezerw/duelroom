@@ -117,7 +117,20 @@ properly for the board library.
 
 ## P1 — a whole feature reports numbers that mean nothing
 
-### 4. The going-second harness never put a board on the field — ROOT CAUSE FOUND 2026-10-26; the SEARCH is still unsupported
+### 4. The going-second harness never put a board on the field — SEARCH FIXED 2026-11-02 in the rooted binary (patch 0002); `second`/`gauntlet.rank` not yet moved onto it
+
+**2026-11-02, resolution.** The missing guidance was the whole problem, plus one bug
+nobody had seen. `patches/0002-rooted-search.patch` adds `--root <prefix>`, which
+makes probe, NRPA and finisher all root at the resumed position, and fixes
+`MSG_SELECT_PLACE` answering the zone owner RELATIVE to the chooser (the core wants
+the absolute player), which turned every player-1 summon into a MSG_RETRY -- the
+unnamed "second blocker" in patch 0001's note. Measured with
+`tools/experiments/rooted_gate.py`, empty field, 8 hands, 60 s: kewl-tune going first
+8/8, `--approach` turn 2 0/8, `--root` turn 2 8/8; snake_eye 7/8, 0/8, 7/8 with the
+same hand failing both ways. Stage 9 (`skills/game.py`) runs on it. The pinned binary
+is unchanged, so `second`, `gauntlet.rank` and `optimizer.side_plan` still refuse;
+moving them to `game.ROOTED_BIN` + `--root` is the remaining work. The account below
+is the history.
 
 **Every going-second number this project ever printed was measured against an empty
 field, on both sides, with the search pointed at a seat nobody controlled.** That is
