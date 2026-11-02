@@ -1799,24 +1799,38 @@ def cmd_export(conn, args):
             secs[r["section"]] += [r["card_id"]] * r["copies"]
         return Deck(name=name, **secs)
 
-    # Legal lists first: a pre-banlist Winner is not what you will face.
+    # Usable lists first: a pre-banlist Winner is not what you will face, and
+    # a list with cards the engine has no script for cannot be simulated
+    # (the newest Angelechy support was unscripted even upstream, 2026-11).
+    from skills import carddb
+
+    def problems_of(i):
+        d = load(i)
+        out = d.validate(conn)
+        miss = carddb.missing_codes(set(d.main + d.extra))
+        if miss:
+            out.append(f"{len(miss)} card(s) the engine cannot load: "
+                       + ", ".join(map(str, sorted(miss))))
+        return out
+
     problems = {}
     row = ms.best_list(conn, archetype, legal=lambda i: not problems.setdefault(
-        i, load(i).validate(conn)))
+        i, problems_of(i)))
     if not row:
         print(f"no stored lists tagged {archetype!r}")
         return
     print(f"  best placing of the stored {archetype!r} lists: "
           f"{row['placement'] or 'placement unknown'}")
     if problems.get(row["id"]):
-        print("  ! no stored list is legal today; exporting the best anyway:")
+        print("  ! no stored list is both legal today and loadable by the engine; "
+              "exporting the best anyway:")
         for p in problems[row["id"]]:
             print(f"    {p}")
     else:
         skipped = sum(1 for v in problems.values() if v)
         if skipped:
-            print(f"  ({skipped} better-placing or older list(s) skipped: "
-                  f"not legal on today's banlist)")
+            print(f"  ({skipped} other list(s) skipped: not legal on today's "
+                  f"banlist, or cards the engine cannot load)")
     name = args[1] if len(args) > 1 else archetype.lower().replace(" ", "-")
     d = load(row["id"], name)
     DECKS.mkdir(parents=True, exist_ok=True)
