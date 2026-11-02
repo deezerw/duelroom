@@ -237,6 +237,40 @@ CREATE TABLE IF NOT EXISTS trainer_gens (
 -- the deck is played outlives a one-card change to the list.
 -- kind: 'avoid_activate' (code + zone), 'avoid_summon' (code),
 --       'interrupter' (code: counts as an interruption on the field)
+-- STAGE9 games (skills/game.py). Turn 1 is solved once per (hand, board,
+-- enemy hand) and reused by every run; one row per game played.
+CREATE TABLE IF NOT EXISTS game_turn1 (
+    deck_hash   TEXT NOT NULL,
+    enemy       TEXT NOT NULL,          -- enemy deck name (assets/decks)
+    hand_index  INTEGER NOT NULL,       -- trainer_hands.hand_index
+    board       INTEGER NOT NULL,       -- which kept board (0 = the best)
+    enemy_seed  INTEGER NOT NULL,       -- fixes the enemy's hand
+    ok          INTEGER NOT NULL,       -- 0: no line at all came back
+    start       TEXT,                   -- .yrpX paths of the closed turn 1
+    prefix      TEXT,
+    reached     INTEGER,                -- the goal itself, through their hand traps
+    pieces      TEXT,                   -- JSON interruption codes on your board
+    enemy_hand  TEXT,                   -- JSON sorted codes: the fairness check
+    created     TEXT NOT NULL,
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed)
+);
+
+CREATE TABLE IF NOT EXISTS game_results (
+    deck_hash     TEXT NOT NULL,
+    enemy         TEXT NOT NULL,
+    hand_index    INTEGER NOT NULL,
+    board         INTEGER NOT NULL,
+    enemy_seed    INTEGER NOT NULL,
+    run           INTEGER NOT NULL,
+    outcome       TEXT NOT NULL,        -- win / no_win / lost_t2 / no_t1
+    damage        INTEGER,              -- best damage on turn 3 when no win
+    enemy_reached INTEGER,              -- the enemy made its payoff through you
+    line          TEXT,                 -- replay of the deciding turn
+    seconds       REAL,
+    created       TEXT NOT NULL,
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
+);
+
 CREATE TABLE IF NOT EXISTS trainer_prefs (
     deck   TEXT NOT NULL,
     kind   TEXT NOT NULL,
