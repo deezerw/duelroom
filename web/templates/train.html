@@ -66,6 +66,11 @@
     <form class="startform" method="post" action="{{ url_for('views.train_start', name=name) }}">
       <label>hours <input type="number" name="hours" value="8" min="0.25" max="72" step="0.25"></label>
       <label>hands in the pool <input type="number" name="hands" value="{{ default_hands }}" min="4" max="80"></label>
+      <label>then play games vs
+        <select name="enemy" style="background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit">
+          <option value="">— no, just train —</option>
+          {% for o in enemies %}<option>{{ o }}</option>{% endfor %}
+        </select></label>
       <button class="primary">Start training</button>
     </form>
     <details class="note"><summary>what one generation costs</summary>
@@ -74,7 +79,10 @@
       interrupter piece instead), six at a time; a goal of {{ big_stack }} or more
       pieces gets {{ big_x }}× the time, since big stacks are the slow ones. With {{ default_hands }}
       hands that is roughly 10–15 minutes a generation, so a night is
-      30–50 generations. It runs on the job worker, so other analyses
+      30–50 generations. With an enemy chosen, training stops by itself once
+      {{ plateau }} generations in a row improve no hand, and the
+      <a href="{{ url_for('views.games_view', name=name) }}">games</a> start against
+      that deck. It runs on the job worker, so other analyses
       queue behind it, and you can stop it from here at any time without
       losing anything it has found.
     </details>

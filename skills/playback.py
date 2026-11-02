@@ -61,7 +61,7 @@ def _side(player):
     }
 
 
-def frames(conn, start, responses, trim=True):
+def frames(conn, start, responses, trim=True, cut_at_turn=True):
     """Replay a line and return {"frames": [...], "names": {code: name}}.
 
     `start` is the record's ``start`` dict and `responses` the line's
@@ -189,7 +189,8 @@ def frames(conn, start, responses, trim=True):
     # opponent drawing for a turn the solver never played.
     end = next((i for i, f in enumerate(out)
                 if any(e["kind"] == "turn" for e in f["events"])), None)
-    if trim and end is not None:
+    # A whole game (STAGE9) keeps every turn: `cut_at_turn=False`.
+    if trim and cut_at_turn and end is not None:
         out = out[:end + 1]
     return {"frames": out, "names": {str(k): v for k, v in names.items()}}
 

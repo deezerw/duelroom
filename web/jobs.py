@@ -44,8 +44,12 @@ KINDS = {
                               p.get("traps", "all"), str(p.get("lines", 1))],
                 "solve one chosen hand", "~5 min"),
     "train":   (lambda d, p: ["train", d, str(p.get("hours", 8)),
-                              str(p.get("hands", 24))],
+                              str(p.get("hands", 24))]
+                + ([p["enemy"]] if p.get("enemy") else []),
                 "deck trainer", "hours, stoppable"),
+    "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
+                              str(p.get("runs", 10)), str(p.get("enemy_hands", 3))],
+                "finish the game vs a meta deck", "hours, resumable"),
 }
 
 # Jobs that are about the installation rather than about one deck.
@@ -54,7 +58,7 @@ DECKLESS = ("meta", "images")
 # Jobs started from their own page, because they need input the generic
 # "run" button cannot give: a pilot run without chosen cards is a job
 # that fails on its first line.
-OWN_PAGE = ("pilot", "train")
+OWN_PAGE = ("pilot", "train", "games")
 
 
 def _now():

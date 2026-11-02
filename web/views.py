@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer,
+                    trainer, game,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -344,15 +344,18 @@ def drill_view(name=None):
 
 # --- watching a line on the playmat (STAGE6) -----------------------------
 
-def _watch(name, title, subtitle, start, responses, lines):
-    data = playback.frames(conn(), start, responses)
+def _watch(name, title, subtitle, start, responses, lines, whole=False):
+    data = playback.frames(conn(), start, responses, cut_at_turn=not whole)
     if not data["frames"]:
         abort(404)
     # Moves already avoided, in the step list's own key format.
     avoid = [f"{m[0]}:{m[1]}" + (f":{m[2]}" if m[0] == "activate" else "")
              for m in trainer.prefs(conn(), name)["avoid"]]
+    # A whole game has the ENEMY's moves in it too: ⊘ would ban their
+    # cards from your deck's training, so a game replay offers none.
     return render_template("watch.html", title=title, subtitle=subtitle,
                            data=data, lines=lines, deck=name, avoid=avoid,
+                           avoidable=not whole,
                            running=jobs.active(conn()))
 
 
@@ -457,7 +460,7 @@ def train_view(name=None):
         big_stack=trainer.BIG_STACK, big_x=trainer.BIG_STACK_X,
         zone_words=_ZONE_WORDS,
         default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
-        solve_s=engine.SOLVE_MS // 1000)
+        solve_s=engine.SOLVE_MS // 1000, enemies=_enemy_decks(name), plateau=3)
 
 
 @bp.route("/train/<name>/start", methods=["POST"])
@@ -471,9 +474,124 @@ def train_start(name):
         return redirect(url_for("views.train_view", name=name))
     hours = min(max(request.form.get("hours", type=float) or 8, 0.25), 72)
     hands = min(max(request.form.get("hands", type=int) or trainer.HANDS, 4), 80)
-    job_id = jobs.enqueue(c, "train", deck=name, hours=hours, hands=hands)
+    # An enemy: train until a plateau, then play the games against it.
+    enemy = request.form.get("enemy", "")
+    params = {"hours": hours, "hands": hands}
+    if enemy in _enemy_decks(name):
+        params["enemy"] = enemy
+    job_id = jobs.enqueue(c, "train", deck=name, **params)
     flash(f"Training queued as job {job_id}.")
     return redirect(url_for("views.train_view", name=name))
+
+
+# --- finishing the game (STAGE9) ---------------------------------------------
+
+def _enemy_decks(name):
+    """Decks that can be an enemy: stored, not this one, with a payoff target."""
+    out = []
+    for p in sorted(DECKS.glob("*.ydk")):
+        if p.stem != name and scenarios.target_for(p.stem):
+            out.append(p.stem)
+    return out
+
+
+def _games_job(c, name):
+    return c.execute(
+        "SELECT * FROM jobs WHERE kind='games' AND deck=? "
+        "AND state IN ('queued','running') ORDER BY id LIMIT 1", (name,)).fetchone()
+
+
+@bp.route("/games")
+@bp.route("/games/<name>")
+@login_required
+def games_view(name=None):
+    c = conn()
+    name = name or db.get_meta(c, "active_deck")
+    path = deck_path(name) if name else None
+    if not path or not path.exists():
+        flash("No deck selected.")
+        return redirect(url_for("views.index"))
+    dh = trainer.deck_hash(path)
+    hand_rows = {h["i"]: h for h in trainer.hands_table(c, dh)}
+    nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
+    enemies = []
+    for (enemy,) in c.execute("SELECT DISTINCT enemy FROM game_results "
+                              "WHERE deck_hash=? ORDER BY enemy", (dh,)):
+        games = {}
+        for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND "
+                           "enemy=? ORDER BY enemy_seed, run", (dh, enemy)):
+            games.setdefault(g["hand_index"], []).append(dict(g))
+        rows = []
+        for r in game.summary(c, dh, enemy):
+            h = hand_rows.get(r["hand_index"])
+            rows.append({**r, "hand": h["hand"] if h else [],
+                         "games_list": games.get(r["hand_index"], [])})
+        openings = {}
+        for t in c.execute("SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE "
+                           "deck_hash=? AND enemy=? AND ok=1", (dh, enemy)):
+            openings[t["enemy_seed"]] = [nm(x) for x in json.loads(t["enemy_hand"] or "[]")]
+        enemies.append({"name": enemy, "rows": rows,
+                        "openings": sorted(openings.items())})
+    return render_template(
+        "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
+        trained=sum(1 for h in hand_rows.values() if h["key"]),
+        job=_games_job(c, name), running=jobs.active(c),
+        runs=game.RUNS, enemy_hands=game.ENEMY_HANDS,
+        near_dud=int(game.NEAR_DUD_RATE * 100), solve_s=engine.SOLVE_MS // 1000,
+        built=game.ROOTED_BIN.exists())
+
+
+@bp.route("/games/<name>/start", methods=["POST"])
+@login_required
+def games_start(name):
+    c = conn()
+    if not deck_path(name):
+        abort(404)
+    enemy = request.form.get("enemy", "")
+    if enemy not in _enemy_decks(name):
+        flash("Pick an enemy deck.")
+        return redirect(url_for("views.games_view", name=name))
+    if _games_job(c, name):
+        flash("Games for this deck are already queued or running.")
+        return redirect(url_for("views.games_view", name=name))
+    runs = min(max(request.form.get("runs", type=int) or game.RUNS, 1), 30)
+    ehands = min(max(request.form.get("enemy_hands", type=int) or game.ENEMY_HANDS, 1), 10)
+    job_id = jobs.enqueue(c, "games", deck=name, enemy=enemy, runs=runs,
+                          enemy_hands=ehands)
+    flash(f"Games against {enemy} queued as job {job_id}.")
+    return redirect(url_for("views.games_view", name=name))
+
+
+@bp.route("/watch/game/<name>/<enemy>/<int:hand>/<int:eseed>/<int:run>")
+@login_required
+def watch_game(name, enemy, hand, eseed, run):
+    """A whole game on the playmat: turns 1-3, ending where it was decided."""
+    from ygorl.engine.replay import Replay
+    from ygorl.solver.demo import start_identity
+
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    dh = trainer.deck_hash(path)
+    g = c.execute("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
+                  "hand_index=? AND enemy_seed=? AND run=?",
+                  (dh, enemy, hand, eseed, run)).fetchone()
+    if not g:
+        abort(404)
+    src = g["line"]
+    if not src:   # no turn-3 line at all: show the game up to turn 3
+        t2 = game.GAMES / name / enemy / f"h{hand}" / f"e{eseed}" / f"run{run}" / "t2" / "prefix.yrpX"
+        src = str(t2) if t2.exists() else None
+    if not src or not Path(src).exists():
+        abort(404)
+    rep = Replay.from_yrp(Path(src))
+    words = {"win": "won on turn 3", "no_win": "no win by turn 3",
+             "lost_t2": "lost on turn 2", "no_t1": "no turn 1"}
+    return _watch(name, f"{name} vs {enemy} · hand {hand + 1} · game {run + 1}",
+                  f"enemy hand {eseed - 999} · {words.get(g['outcome'], g['outcome'])}",
+                  start_identity(rep), [r.hex() for r in rep.responses], [],
+                  whole=True)
 
 
 _ZONE_WORDS = {"hand": "the hand", "mz": "the field", "sz": "the spell & trap zone",

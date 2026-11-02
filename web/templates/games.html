@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}games {{ name }} · duelroom{% endblock %}
+{% block body %}
+<style>
+  .startform{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+  .startform label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  .startform input,.startform select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+                   border-radius:6px;padding:6px 8px;font:inherit}
+  .startform input{width:80px}
+  .games td{vertical-align:top}
+  .games .cards{color:var(--dim);font-size:12.5px}
+  .rate{font-variant-numeric:tabular-nums;font-weight:600}
+  .tier{font-size:11px;border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap}
+  .tier.dud{color:#f7768e;border:1px solid #f7768e88}
+  .tier.near-dud{color:#e0af68;border:1px solid #e0af6888}
+  .dots{display:flex;flex-wrap:wrap;gap:3px;max-width:340px}
+  .dot{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid #ffffff22}
+  .dot.win{background:#9ece6a}
+  .dot.no_win{background:#3b4261}
+  .dot.lost_t2{background:#f7768e}
+  .dot.no_t1{background:transparent}
+  .dot:hover{outline:2px solid var(--ink)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin:4px 0 10px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .openings{font-size:12.5px;color:var(--dim);margin:0 0 10px}
+  .openings li{margin:2px 0}
+  @media (max-width:760px){
+    .games thead{display:none}
+    .games tr{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:10px 12px;
+              border-bottom:1px solid var(--line)}
+    .games td{display:block;padding:0;border:none}
+    .games td:first-child,.games td.dotscell{grid-column:1 / -1}
+    .games td.extra{display:none}
+  }
+</style>
+
+<div class="page-head">
+  <h1>Games</h1>
+  <div class="sub"><b>{{ name }}</b> — going first: your turn 1, the enemy's turn 2
+    into your board, your turn 3. A hand <b>wins</b> if their LP hits 0 by the end
+    of turn 3; a hand that never does is a <b>dud</b>.</div>
+</div>
+
+<div class="panel">
+  {% if not built %}
+    <p style="margin:0">The game solver is not built yet. On the server:
+      <code>tools/build_rooted_solver.sh</code></p>
+  {% elif job and job.state == 'running' %}
+    <p style="margin:0"><b>Playing now</b> (job
+      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>).
+      Results below fill in as each game finishes.</p>
+  {% elif job %}
+    <p style="margin:0">Queued as job
+      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>
+      {% if running %}— job {{ running.id }} ({{ running.kind }}) runs first{% endif %}.</p>
+  {% elif not trained %}
+    <p style="margin:0">Train this deck first — the games play each trained hand's
+      best line as your turn 1. <a href="{{ url_for('views.train_view', name=name) }}">Train</a></p>
+  {% elif not options %}
+    <p style="margin:0">No enemy deck with a known payoff yet. Export a meta list on
+      the meta page first.</p>
+  {% else %}
+    <form class="startform" method="post" action="{{ url_for('views.games_start', name=name) }}">
+      <label>enemy deck
+        <select name="enemy">{% for o in options %}<option>{{ o }}</option>{% endfor %}</select></label>
+      <label>games per hand pairing <input type="number" name="runs" value="{{ runs }}" min="1" max="30"></label>
+      <label>enemy hands <input type="number" name="enemy_hands" value="{{ enemy_hands }}" min="1" max="10"></label>
+      <button class="primary">Play the games</button>
+    </form>
+    <details class="note"><summary>what this costs, and how fair it is</summary>
+      Every one of your {{ trained }} trained hands faces the <b>same</b> enemy
+      opening hands (checked from the games themselves before any is played), and
+      plays each pairing several times because the search is randomized. Your turn 1
+      is solved once per pairing and reused, so the repeats differ only in turns 2
+      and 3. A game is about three {{ solve_s }}s searches; with
+      {{ trained }} hands × {{ enemy_hands }} enemy hands × {{ runs }} games that is
+      {{ trained * enemy_hands * runs }} games, roughly
+      {{ ((trained * enemy_hands * runs * 3) / 60 / 3)|round(1) }} hours on the
+      worker. It resumes where it stopped.
+    </details>
+  {% endif %}
+</div>
+
+{% for e in enemies %}
+<div class="sec"><h2>vs {{ e.name }}</h2>
+  <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
+<div class="panel">
+  {% if e.openings %}
+  <div class="openings">Enemy opening hands (identical for every one of your hands):
+    <ul>{% for seed, cards in e.openings %}<li><b>{{ loop.index }}</b> — {{ cards|join(', ') }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  <div class="legend">
+    <span><i class="dot win"></i>won by turn 3</span>
+    <span><i class="dot no_win"></i>no win</span>
+    <span><i class="dot lost_t2"></i>killed on turn 2</span>
+    <span>click a square to watch that game</span>
+  </div>
+  <table class="games">
+    <thead><tr><th>hand</th><th>won</th><th class="extra">killed T2</th><th>games</th></tr></thead>
+    <tbody>
+    {% for r in e.rows %}
+      <tr>
+        <td>Hand {{ r.hand_index + 1 }}{% if r.tier %}<span class="tier {{ r.tier }}">{{ r.tier }}</span>{% endif %}
+          <div class="cards">{{ r.hand|join(', ') }}</div></td>
+        <td><span class="rate">{{ (r.win_rate * 100)|round|int }}%</span>
+          <span class="muted">{{ r.wins }}/{{ r.games }}</span>
+          {% if not r.complete %}<span class="muted">· running</span>{% endif %}</td>
+        <td class="extra">{{ r.lost_t2 }}</td>
+        <td class="dotscell"><div class="dots">
+          {% for g in r.games_list %}
+            <a class="dot {{ g.outcome }}" title="enemy hand {{ g.enemy_seed - 999 }}, game {{ g.run + 1 }}: {{ g.outcome|replace('_', ' ') }}{% if g.damage %} ({{ g.damage }} damage){% endif %}"
+               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run) }}"></a>
+          {% endfor %}
+        </div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+<details class="note" style="margin-top:14px"><summary>how the enemy and your board are played</summary>
+  Every turn is a full search from where the game actually stands. Whoever is not
+  searching defends <b>greedily</b>: at each chance it uses its first available
+  interruption — hand traps and the interruption pieces on its board — and never
+  chains onto its own effect. That is a decent player, not a perfect one: it negates
+  the first thing it legally can, and the searching side is free to bait that. Turn 2
+  first checks whether the enemy can simply kill you (a loss), then plays toward its
+  deck's payoff board.
+</details>
+{% endblock %}
