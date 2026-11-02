@@ -25,10 +25,13 @@ and the searching side's search is free to bait that. A smarter defender
 search per window tried.
 
 Fairness rules (STAGE8/9):
-* The enemy's hand is fixed per enemy seed and SHARED by all your hands:
-  the template seed decides deck b's shuffle, and your deck a is
-  substituted the same way every time. `run` asserts it from the
-  positions themselves rather than trusting the argument.
+* The enemy's OPENING hand is fixed per enemy seed and SHARED by all
+  your hands: the template seed decides deck b's shuffle, and your deck a
+  is substituted the same way every time. `run` asserts it from the
+  positions themselves rather than trusting the argument. Their turn-2
+  draw is NOT fixed, and should not be: a Maxx "C" resolved during your
+  turn 1 draws them cards off the top, so what they draw next depends on
+  how you played -- the same as at a table.
 * Turn 1 is solved ONCE per (hand, board, enemy hand) and reused by all
   `RUNS` runs, so the runs vary only the turn-2 and turn-3 searches.
 """
@@ -342,7 +345,9 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                "hand_index": row["hand_index"], "board": 0,
                "enemy_seed": eseed, "ok": int(t1 is not None)}
         if t1:
-            ehand = _hand(replay(t1["prefix"]).board, 1)
+            # The OPENING hand: by turn 2 it legitimately differs (Maxx "C"
+            # draws scale with your summons, used hand traps are gone).
+            ehand = _hand(replay(t1["start"]).board, 1)
             rec.update(start=str(t1["start"]), prefix=str(t1["prefix"]),
                        reached=int(t1["reached"]),
                        pieces=json.dumps(_pieces(t1["board"], 0, cards)),
