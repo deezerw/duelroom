@@ -535,10 +535,12 @@ def games_view(name=None):
                         "openings": sorted(openings.items())})
     return render_template(
         "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
-        trained=sum(1 for h in hand_rows.values() if h["key"]),
+        trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
+                          "AND best_goal IS NOT NULL", (dh,)).fetchone()[0],
         job=_games_job(c, name), running=jobs.active(c),
         runs=game.RUNS, enemy_hands=game.ENEMY_HANDS,
         near_dud=int(game.NEAR_DUD_RATE * 100), solve_s=engine.SOLVE_MS // 1000,
+        otk_s=game.OTK_MS // 1000,
         built=game.ROOTED_BIN.exists())
 
 

@@ -18,7 +18,7 @@
   .dot.win{background:#9ece6a}
   .dot.no_win{background:#3b4261}
   .dot.lost_t2{background:#f7768e}
-  .dot.no_t1{background:transparent}
+  .dot.no_t1{background:transparent;cursor:default}
   .dot:hover{outline:2px solid var(--ink)}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin:4px 0 10px}
   .legend span{display:inline-flex;align-items:center;gap:5px}
@@ -72,11 +72,12 @@
       opening hands (checked from the games themselves before any is played), and
       plays each pairing several times because the search is randomized. Your turn 1
       is solved once per pairing and reused, so the repeats differ only in turns 2
-      and 3. A game is about three {{ solve_s }}s searches; with
+      and 3. A game is two {{ solve_s }}s searches plus a {{ otk_s }}s kill check,
+      three games at a time; with
       {{ trained }} hands × {{ enemy_hands }} enemy hands × {{ runs }} games that is
       {{ trained * enemy_hands * runs }} games, roughly
-      {{ ((trained * enemy_hands * runs * 3) / 60 / 3)|round(1) }} hours on the
-      worker. It resumes where it stopped.
+      {{ ((trained * enemy_hands * (runs * (2 * solve_s + otk_s) + solve_s)) / 3600 / 3)|round(1) }}
+      hours on the worker. It resumes where it stopped.
     </details>
   {% endif %}
 </div>
@@ -94,6 +95,7 @@
     <span><i class="dot win"></i>won by turn 3</span>
     <span><i class="dot no_win"></i>no win</span>
     <span><i class="dot lost_t2"></i>killed on turn 2</span>
+    <span><i class="dot no_t1"></i>no turn-1 line</span>
     <span>click a square to watch that game</span>
   </div>
   <table class="games">
@@ -109,8 +111,10 @@
         <td class="extra">{{ r.lost_t2 }}</td>
         <td class="dotscell"><div class="dots">
           {% for g in r.games_list %}
-            <a class="dot {{ g.outcome }}" title="enemy hand {{ g.enemy_seed - 999 }}, game {{ g.run + 1 }}: {{ g.outcome|replace('_', ' ') }}{% if g.damage %} ({{ g.damage }} damage){% endif %}"
-               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run) }}"></a>
+            {% set tip %}enemy hand {{ g.enemy_seed - 999 }}, game {{ g.run + 1 }}: {{ g.outcome|replace('_', ' ') }}{% if g.damage %} ({{ g.damage }} damage){% endif %}{% endset %}
+            {% if g.outcome == 'no_t1' %}<span class="dot no_t1" title="{{ tip }} — nothing to watch"></span>
+            {% else %}<a class="dot {{ g.outcome }}" title="{{ tip }}"
+               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run) }}"></a>{% endif %}
           {% endfor %}
         </div></td>
       </tr>
