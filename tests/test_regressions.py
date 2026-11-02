@@ -4938,3 +4938,58 @@ def test_trainer_plan_asks_new_pieces_and_never_banned_summons():
                         "interrupters": set()})
     assert args == ["--no-activate", "77103950@szone", "--no-activate", "77103950@hand",
                     "--no-chain", "77103950"], "summons have no solver flag"
+
+
+# --- games (STAGE9) ------------------------------------------------------
+
+def _games_db():
+    import sqlite3
+    from skills import db
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(db.SCHEMA)
+    return conn
+
+
+def _game(conn, hand, seed, run, outcome):
+    conn.execute(
+        "INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+        "enemy_seed, run, outcome, created) VALUES ('d','e',?,0,?,?,?,'t')",
+        (hand, seed, run, outcome))
+
+
+def test_games_no_dud_verdict_before_the_games_are_in():
+    """A hand 0-for-2 while its other 28 games are still queued was shown
+    as a DUD: tiers were given whatever the game count."""
+    from skills import game
+    conn = _games_db()
+    _game(conn, 0, 1000, 0, "no_win")
+    _game(conn, 0, 1000, 1, "no_win")
+    row, = game.summary(conn, "d", "e", games_per_hand=30)
+    assert row["tier"] == "" and not row["complete"]
+    # ... and the default reads the expected count off the stored games:
+    # hand 1 has played both runs, hand 0 only one so far.
+    conn.execute("DELETE FROM game_results")
+    _game(conn, 0, 1000, 0, "no_win")
+    _game(conn, 1, 1000, 0, "no_win")
+    _game(conn, 1, 1000, 1, "win")
+    rows = {r["hand_index"]: r for r in game.summary(conn, "d", "e")}
+    assert rows[0]["tier"] == "" and not rows[0]["complete"]
+    assert rows[1]["complete"] and rows[1]["tier"] == ""   # 1/2 is no near-dud
+    _game(conn, 0, 1000, 1, "no_win")
+    rows = {r["hand_index"]: r for r in game.summary(conn, "d", "e")}
+    assert rows[0]["tier"] == "dud"
+
+
+def test_games_refuse_to_resume_against_a_changed_enemy_list(tmp_path):
+    """Stored games are keyed by the enemy's file NAME and `export` rewrites
+    that file in place, so a re-export silently mixed two lists."""
+    from skills import game
+    conn = _games_db()
+    a = tmp_path / "e.ydk"
+    a.write_text("#main\n" + "43096270\n" * 40 + "#extra\n!side\n")
+    game.check_enemy_list(conn, "d", "e", a)
+    game.check_enemy_list(conn, "d", "e", a)        # same list: fine
+    a.write_text("#main\n" + "43096270\n" * 39 + "89631139\n#extra\n!side\n")
+    with pytest.raises(RuntimeError, match="has changed"):
+        game.check_enemy_list(conn, "d", "e", a)

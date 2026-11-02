@@ -311,6 +311,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         raise RuntimeError(f"no payoff target for {enemy_name}: run "
                            f"scenarios.ensure_target first")
     dh = trainer.deck_hash(deck_path)
+    check_enemy_list(conn, dh, enemy_name, enemy_deck)
     rows = conn.execute(
         "SELECT hand_index, hand, best_goal FROM trainer_hands "
         "WHERE deck_hash=? AND best_goal IS NOT NULL ORDER BY hand_index",
@@ -362,6 +363,21 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                  rec.get("pieces"), rec.get("enemy_hand"), _now()))
         return rec
 
+    failed = []
+
+    def guarded(fn):
+        # One game's crash (a replay MSG_RETRY, a solver that died) must not
+        # end an hours-long run. Nothing is recorded for it, so the next
+        # run retries it; the count is reported at the end.
+        def call(*a):
+            try:
+                return fn(*a)
+            except Exception as e:  # noqa: BLE001 -- reported, then retried
+                failed.append(e)
+                say(f"  !! {fn.__name__} failed: {type(e).__name__}: {e}")
+                return None
+        return call
+
     def one(job):
         row, eseed, k = job
         conn = db.connect()
@@ -372,6 +388,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         if done:
             return None
         t1 = t1_for(row, eseed)
+        if t1 is None:      # its turn 1 crashed: retried on the next run
+            return None
         t0 = time.time()
         out = {"outcome": "no_t1"}
         if t1.get("ok"):
@@ -409,14 +427,39 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
 
     # Turn 1 first, one per (hand, enemy hand), so every run reuses it and
     # the shared-enemy-hand check runs before any game is played.
+    t1_safe = guarded(t1_for)
     with ThreadPoolExecutor(workers) as ex:
-        list(ex.map(lambda j: t1_for(*j),
+        list(ex.map(lambda j: t1_safe(*j),
                     [(dict(r), e) for r in rows for e in seeds]))
     check_shared_enemy_hands(conn, dh, enemy_name)
+    t1_for = t1_safe          # `one` reaches turn 1 through this name too
     jobs = [(dict(r), e, k) for k in range(runs) for r in rows for e in seeds]
     with ThreadPoolExecutor(workers) as ex:
-        list(ex.map(one, jobs))
+        list(ex.map(guarded(one), jobs))
+    if failed:
+        say(f"{len(failed)} step(s) failed and were not recorded; run the "
+            f"same command again to retry them")
     return summary(conn, dh, enemy_name, runs * enemy_hands)
+
+
+def check_enemy_list(conn, dh, enemy_name, enemy_deck):
+    """Stored games are keyed by the enemy's NAME, and `export` rewrites
+    that file in place. Refuse to resume (or mix in) games played against a
+    different list under the same name."""
+    from . import db, trainer
+    key = f"game_enemy:{dh}:{enemy_name}"
+    now = trainer.deck_hash(enemy_deck)
+    was = db.get_meta(conn, key)
+    if was is None:     # first run (or games from before this check)
+        with conn:
+            db.set_meta(conn, key, now)
+        return
+    if was != now:
+        raise RuntimeError(
+            f"{enemy_name}.ydk has changed since the stored games against it "
+            f"were played (list {was} -> {now}); delete them first: "
+            f"DELETE FROM game_turn1/game_results WHERE deck_hash='{dh}' AND "
+            f"enemy='{enemy_name}'")
 
 
 def check_shared_enemy_hands(conn, dh, enemy_name):
@@ -434,7 +477,17 @@ def check_shared_enemy_hands(conn, dh, enemy_name):
 
 
 def summary(conn, dh, enemy_name, games_per_hand=None):
-    """Per hand: games, wins, win rate, tier (dud / near-dud / -)."""
+    """Per hand: games, wins, win rate, tier (dud / near-dud / -).
+
+    `games_per_hand` default: what the stored games imply (enemy hands
+    played x runs played). A tier is only given once a hand's games are
+    complete -- 0 wins out of the first 2 is not yet a dud."""
+    if games_per_hand is None:
+        r = conn.execute(
+            "SELECT COUNT(DISTINCT enemy_seed) s, MAX(run) + 1 k FROM "
+            "game_results WHERE deck_hash=? AND enemy=?",
+            (dh, enemy_name)).fetchone()
+        games_per_hand = (r["s"] or 0) * (r["k"] or 0)
     out = []
     for r in conn.execute(
             "SELECT hand_index, COUNT(*) n, SUM(outcome='win') w, "
@@ -443,10 +496,12 @@ def summary(conn, dh, enemy_name, games_per_hand=None):
             "GROUP BY hand_index ORDER BY hand_index", (dh, enemy_name)):
         n, w = r["n"], r["w"] or 0
         rate = w / n if n else 0.0
-        tier = "dud" if w == 0 else ("near-dud" if rate < NEAR_DUD_RATE else "")
+        complete = n >= games_per_hand
+        tier = "" if not complete else (
+            "dud" if w == 0 else ("near-dud" if rate < NEAR_DUD_RATE else ""))
         out.append({"hand_index": r["hand_index"], "games": n, "wins": w,
                     "lost_t2": r["l"] or 0, "win_rate": rate,
                     "best_damage": r["best_dmg"], "tier": tier,
-                    "complete": games_per_hand is None or n >= games_per_hand})
+                    "complete": complete})
     out.sort(key=lambda x: -x["win_rate"])
     return out
