@@ -677,11 +677,15 @@ def placement_rank(placement):
     return 98
 
 
-def best_list(conn, tag):
+def best_list(conn, tag, legal=None):
     """The best-placing stored list for `tag`, most recent as the tiebreak.
 
     Returns a row with id/title/placement, or None. Replaces
     `ORDER BY d.id LIMIT 1`, which ranked by scrape order.
+
+    `legal(deck_id) -> bool`, when given, ranks every legal list above
+    every illegal one: a Winner from before a banlist is not today's meta
+    (all four stored Angelechy-Elfnote lists ran 3 Terminus and 3 Tinia).
     """
     rows = conn.execute(
         """SELECT d.id, d.title, d.placement, d.deck_date FROM decks d
@@ -693,7 +697,8 @@ def best_list(conn, tag):
         return None
     return sorted(
         rows,
-        key=lambda r: (placement_rank(r["placement"]),
+        key=lambda r: (bool(legal) and not legal(r["id"]),
+                       placement_rank(r["placement"]),
                        -(_date_key(r["deck_date"])), r["id"]),
     )[0]
 

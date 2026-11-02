@@ -4993,3 +4993,26 @@ def test_games_refuse_to_resume_against_a_changed_enemy_list(tmp_path):
     a.write_text("#main\n" + "43096270\n" * 39 + "89631139\n#extra\n!side\n")
     with pytest.raises(RuntimeError, match="has changed"):
         game.check_enemy_list(conn, "d", "e", a)
+
+
+def test_export_prefers_a_legal_list_over_a_better_placing_banned_one():
+    """All four stored Angelechy-Elfnote lists (two Winners) ran 3 Terminus
+    and 3 Tinia, both limited since; export wrote one as the meta enemy."""
+    import sqlite3
+    from skills import meta_scrape as ms
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE decks (id INTEGER PRIMARY KEY, title TEXT,
+                            placement TEXT, deck_date TEXT);
+        CREATE TABLE deck_tags (deck_id INTEGER, tag TEXT);
+    """)
+    conn.executemany("INSERT INTO decks VALUES (?,?,?,?)",
+                     [(1, "banned winner", "Winner", "2026-01-02"),
+                      (2, "legal top 8", "Top 8", "2026-01-01")])
+    conn.executemany("INSERT INTO deck_tags VALUES (?,?)",
+                     [(1, "a"), (2, "a")])
+    assert ms.best_list(conn, "a")["id"] == 1
+    assert ms.best_list(conn, "a", legal=lambda i: i != 1)["id"] == 2
+    assert ms.best_list(conn, "a", legal=lambda i: False)["id"] == 1

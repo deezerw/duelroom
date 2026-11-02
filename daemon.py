@@ -1790,20 +1790,35 @@ def cmd_export(conn, args):
     # ranked by scrape order, which is how branded.ydk became a hybrid
     # with no Branded Fusion that averages 1.0 interruptions over 40 hands
     # while serving as a meta deck in the board library.
-    row = ms.best_list(conn, archetype)
+    def load(deck_id, name="x"):
+        secs = {"main": [], "extra": [], "side": []}
+        for r in conn.execute(
+            "SELECT card_id, section, copies FROM deck_cards WHERE deck_id = ?",
+            (deck_id,),
+        ):
+            secs[r["section"]] += [r["card_id"]] * r["copies"]
+        return Deck(name=name, **secs)
+
+    # Legal lists first: a pre-banlist Winner is not what you will face.
+    problems = {}
+    row = ms.best_list(conn, archetype, legal=lambda i: not problems.setdefault(
+        i, load(i).validate(conn)))
     if not row:
         print(f"no stored lists tagged {archetype!r}")
         return
     print(f"  best placing of the stored {archetype!r} lists: "
           f"{row['placement'] or 'placement unknown'}")
-    secs = {"main": [], "extra": [], "side": []}
-    for r in conn.execute(
-        "SELECT card_id, section, copies FROM deck_cards WHERE deck_id = ?",
-        (row["id"],),
-    ):
-        secs[r["section"]] += [r["card_id"]] * r["copies"]
+    if problems.get(row["id"]):
+        print("  ! no stored list is legal today; exporting the best anyway:")
+        for p in problems[row["id"]]:
+            print(f"    {p}")
+    else:
+        skipped = sum(1 for v in problems.values() if v)
+        if skipped:
+            print(f"  ({skipped} better-placing or older list(s) skipped: "
+                  f"not legal on today's banlist)")
     name = args[1] if len(args) > 1 else archetype.lower().replace(" ", "-")
-    d = Deck(name=name, **secs)
+    d = load(row["id"], name)
     DECKS.mkdir(parents=True, exist_ok=True)
     d.write_ydk(DECKS / f"{name}.ydk")
     print(f"wrote {name}.ydk — {row['title']} ({row['placement']}) {d}")
