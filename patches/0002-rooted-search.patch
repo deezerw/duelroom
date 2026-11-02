@@ -23,10 +23,18 @@
 #    MSG_WIN -- it keeps processing and only reports OCG_DUEL_STATUS_END when
 #    its unit queue is empty (processor_visit.cpp). Under --goal-win a
 #    decided duel now ends the step; otherwise no win was ever seen.
+# 6. `--opp-greedy` [+ `--opp-respond a|b|...`]: the non-searching player is
+#    a GREEDY DEFENDER -- first eligible chain effect at each window (never
+#    onto its own link), first legal choice on its follow-ups -- instead of
+#    always passing. This is what lets your board interrupt the enemy's turn.
+# 7. `--goal-win` progress: NRPA rollouts score 2 per LP of damage dealt and
+#    1500 per opposing monster removed, else a lethal search is blind until a
+#    rollout happens to win (first full game: no win found -> win found).
 #
 # Gates (tools/experiments/rooted_gate.py, lethal_gate.py), 2026-11-02:
-#   A  kewl-tune, 8 hands, 60 s, empty field: going first 8/8, old
-#      --approach turn 2 0/8, --root turn 2 8/8.
+#   A  empty field, 8 hands each, 60 s: kewl-tune first 8/8, old --approach
+#      turn 2 0/8, --root turn 2 8/8; snake_eye 7/8, 0/8, 7/8 -- the SAME
+#      hand failing both ways.
 #   B  vanilla positions with a known answer: lethal and clear-then-lethal
 #      found (5 and 8 lines, all replay to a win), both one-short positions
 #      return nothing.
@@ -139,10 +147,29 @@ diff -ru combo-solver/solver-patched/enumerate.cpp combo-solver-rooted/solver-pa
  					c.response[size_t(i) * 3 + 1] = free_slots[i].loc;
  					c.response[size_t(i) * 3 + 2] = free_slots[i].seq;
  				}
+diff -ru combo-solver/solver-patched/enumerate.h combo-solver-rooted/solver-patched/enumerate.h
+--- combo-solver/solver-patched/enumerate.h	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/enumerate.h	2026-11-02 01:49:31.363909297 -0500
+@@ -95,6 +95,15 @@
+ 	const Choice& back() const { return store[used - 1]; }
+ 	// Reduces the list to its last element (the opponent's "do nothing") by
+ 	// swapping buffers: no content is copied.
++	// Keeps choice i alone (--opp-greedy).
++	void KeepOnly(size_t i) {
++		if(i < used) {
++			std::swap(store[0], store[i]);
++			used = 1;
++		}
++	}
++	const Choice& At(size_t i) const { return store[i]; }
++
+ 	void KeepOnlyLast() {
+ 		if(used > 1) {
+ 			std::swap(store[0], store[used - 1]);
 diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched/main.cpp
 --- combo-solver/solver-patched/main.cpp	2026-10-17 19:22:44.866839526 -0400
-+++ combo-solver-rooted/solver-patched/main.cpp	2026-11-02 01:40:24.269115064 -0500
-@@ -1458,6 +1458,11 @@
++++ combo-solver-rooted/solver-patched/main.cpp	2026-11-02 01:49:31.373909572 -0500
+@@ -1458,6 +1458,18 @@
  	// Phase (hence Main 2) is removed from the enumeration and "-> End Phase"
  	// remains.
  	bool mp1_only = false;
@@ -151,10 +178,17 @@ diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched
 +	// (MSG_WIN). Board targets are not the goal; --target still feeds the
 +	// guidance heuristics and is required by --no-ref.
 +	bool goal_win = false;
++	// --opp-greedy (patch 0002): the non-searching player is a GREEDY DEFENDER
++	// instead of a wall that always passes -- at a chain window it plays its
++	// first eligible effect (never onto its own link), and its follow-up
++	// prompts take the first legal choice. --opp-respond <code|code...>
++	// restricts which cards it uses (empty = all).
++	bool opp_greedy = false;
++	std::vector<uint32_t> opp_respond;
  	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
  	// crosses the opponent's turn (quick windows only).
  	uint64_t turns = 0;
-@@ -1608,6 +1613,9 @@
+@@ -1608,6 +1620,9 @@
  	// extra roots (full path + backtracks): the Go-Explore archive that persists
  	// BETWEEN runs.
  	std::vector<std::string> approach_files;
@@ -164,7 +198,7 @@ diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched
  	// Cards ADDED to the opponent's hand in the starting duel (--opp-hand). Gives
  	// the guard and the handrip something to work on when the start is a hand test
  	// (an opponent with no hand); PLAYABLE cards (Nibiru...) are needed for the core
-@@ -1897,6 +1905,10 @@
+@@ -1897,6 +1912,10 @@
  				"to a duel template\n                     (flags, life "
  				"points, opponent). Implies --no-plan and\n"
  				"                     requires --target and --deck.\n"
@@ -175,42 +209,61 @@ diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched
  				"  --approach <f.yrp> an approach written by an earlier run\n"
  				"                     (best_approach_*.yrp), served to the "
  				"finisher as an extra\n                     root (full path + "
-@@ -1973,6 +1985,8 @@
+@@ -1973,6 +1992,11 @@
  				"                     chain link of ours. The effects are "
  				"derived from the\n                     declared operator "
  				"table; no card name is compiled in.\n"
++				"  --opp-greedy       the opponent DEFENDS greedily: first eligible chain\n"
++				"                     effect at every window (never on its own link)\n"
++				"  --opp-respond <c>  codes (a|b|...) the greedy opponent may use\n"
 +				"  --goal-win         the goal is WINNING: a line is a solution when the\n"
 +				"                     duel ends with --player as the winner (patch 0002)\n"
  				"  --mp1-only         the whole combo lives in Main Phase 1: "
  				"entering the\n                     Battle Phase is removed "
  				"from the enumeration\n                     (\"-> End Phase\" "
-@@ -2383,6 +2397,7 @@
+@@ -2383,6 +2407,8 @@
  				{ "--carry",            &Options::carry },
  				{ "--no-self-negate",   &Options::no_self_negate },
  				{ "--mp1-only",         &Options::mp1_only },
 +				{ "--goal-win",         &Options::goal_win },
++				{ "--opp-greedy",       &Options::opp_greedy },
  				{ "--zone-serial",      &Options::zone_serial },
  				{ "--json",             &Options::json },
  			};
-@@ -2476,6 +2491,9 @@
+@@ -2476,6 +2502,21 @@
  		} else if(a == "--guard-keep") {
  			const char* v = next("--guard-keep"); if(!v) return false;
  			o.guard_keep_specs.emplace_back(v);
++		} else if(a == "--opp-respond") {
++			const char* v = next("--opp-respond"); if(!v) return false;
++			std::string sv(v);
++			size_t at = 0;
++			while(at <= sv.size()) {
++				size_t bar = sv.find('|', at);
++				if(bar == std::string::npos) bar = sv.size();
++				if(bar > at)
++					o.opp_respond.push_back(static_cast<uint32_t>(
++						std::stoul(sv.substr(at, bar - at))));
++				at = bar + 1;
++			}
 +		} else if(a == "--root") {
 +			const char* v = next("--root"); if(!v) return false;
 +			o.root_file = v;
  		} else if(a == "--approach") {
  			const char* v = next("--approach"); if(!v) return false;
  			o.approach_files.emplace_back(v);
-@@ -4077,6 +4095,7 @@
+@@ -4077,6 +4118,10 @@
  	// The domain in TURNS: --turns 2 lets the line cross the opponent's turn
  	// (Omega's second rip lives there). 0 = default = 1 turn.
  	cfg.max_turns = opt.turns ? static_cast<uint32_t>(opt.turns) : 1u;
 +	cfg.goal_win = opt.goal_win;
++	cfg.opp_greedy = opt.opp_greedy;
++	for(uint32_t c : opt.opp_respond)
++		cfg.opp_respond.push_back(c);
  
  	// The four levers and their successors. All of them are READ under the guard
  	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
-@@ -5541,12 +5560,15 @@
+@@ -5541,12 +5586,15 @@
  				bool guard_ok = true;
  				bool material_ok = true;
  				int pplayer = -1;
@@ -226,7 +279,7 @@ diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched
  						if(m.type == MSG_MOVE && !cons.material_req.empty() &&
  						   m.size >= 28) {
  							uint32_t c = 0, reason = 0;
-@@ -5673,7 +5695,9 @@
+@@ -5673,7 +5721,9 @@
  				// lists are sorted (ComputeBoardKeyInto), so inclusion is
  				// std::includes. Without inclusion: strict equality, the historical
  				// behaviour byte for byte.
@@ -237,7 +290,7 @@ diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched
  					GoalBySubset(opt)
  						? std::includes(fin.loose.begin(), fin.loose.end(),
  										target.loose.begin(),
-@@ -11043,6 +11067,25 @@
+@@ -11043,6 +11093,25 @@
  									"unreadable.\n", opt.start_replay.c_str());
  			return 1;
  		}
@@ -299,7 +352,7 @@ diff -ru combo-solver/solver-patched/replay.h combo-solver-rooted/solver-patched
  };
 diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patched/search.cpp
 --- combo-solver/solver-patched/search.cpp	2026-10-24 23:35:47.401833131 -0400
-+++ combo-solver-rooted/solver-patched/search.cpp	2026-11-02 01:46:24.638607460 -0500
++++ combo-solver-rooted/solver-patched/search.cpp	2026-11-02 01:57:32.060506758 -0500
 @@ -263,6 +263,9 @@
  	}
  	for(const ResolveReq& req : cfg.resolve_min)
@@ -310,19 +363,28 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	zone_serialize_live = cfg.zone_serialize && !cfg.goal_zone.empty();
  	// Seed of the burned bound: the best burned counts of the previous phases bound
  	// it from the start (anytime only, slack included).
-@@ -331,6 +334,8 @@
+@@ -331,6 +334,9 @@
  	recent_materials.clear();
  	recipe_materials.clear();
  	saw_retry = false;
 +	won_this_step = false;
++	damage_this_step = 0;
 +	bool duel_decided = false;
  	for(;;) {
  		int status = duel.Process();
  		duel.Messages(msgs_scratch);
-@@ -515,6 +520,16 @@
+@@ -515,6 +521,24 @@
  			case MSG_RETRY:
  				saw_retry = true;
  				break;
++			case MSG_DAMAGE:
++				// payload: player(1) amount(4)
++				if(m.size >= 5 && m.data[0] != cfg.target_player) {
++					uint32_t amount = 0;
++					std::memcpy(&amount, m.data + 1, 4);
++					damage_this_step += amount;
++				}
++				break;
 +			case MSG_WIN:
 +				// payload: winner(1) reason(1). The core does NOT stop here: it
 +				// keeps processing and only reports OCG_DUEL_STATUS_END once its
@@ -336,7 +398,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  			default:
  				break;
  			}
-@@ -526,6 +541,9 @@
+@@ -526,6 +550,9 @@
  		}
  		if(saw_retry)
  			return Step::Rejected;   // illegal answer: dead branch
@@ -346,7 +408,44 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  		if(status == OCG_DUEL_STATUS_AWAITING)
  			return Step::Prompt;
  		if(status == OCG_DUEL_STATUS_END)
-@@ -1637,6 +1655,8 @@
+@@ -552,8 +579,34 @@
+ 	// The opponent does not play: it passes systematically (the solo scope we
+ 	// chose). The last option is the "do nothing" of chain windows and yes/no
+ 	// questions.
+-	if(prompt_player != cfg.target_player)
+-		out.KeepOnlyLast();
++	if(prompt_player != cfg.target_player) {
++		if(!cfg.opp_greedy) {
++			out.KeepOnlyLast();
++		} else if(prompt_type == MSG_SELECT_CHAIN) {
++			// Greedy defender: the first eligible effect, unless the chain's last
++			// link is already its own (it does not stack onto itself). Pass is
++			// the last option when the window is not forced.
++			uint8_t link_player = 255;
++			const bool own_link = duel.LastChainLink(&link_player) &&
++								  link_player == prompt_player;
++			size_t pick = out.size() - 1;
++			if(!own_link)
++				for(size_t i = 0; i < out.size(); ++i) {
++					const uint32_t code = out.At(i).card;
++					if(!code)
++						continue;
++					if(cfg.opp_respond.empty() ||
++					   std::find(cfg.opp_respond.begin(), cfg.opp_respond.end(),
++								 code) != cfg.opp_respond.end()) {
++						pick = i;
++						break;
++					}
++				}
++			out.KeepOnly(pick);
++		} else if(!out.empty()) {
++			out.KeepOnly(0);   // follow-ups (targets, yes): the first legal choice
++		}
++	}
+ 	// THE --no-self-negate DISCIPLINE. A chain window of the player, NOT forced
+ 	// (the last option is the decline, answer -1; a forced window emits none, and a
+ 	// rule obligation is not filtered), and the last link of the chain is OURS:
+@@ -1637,6 +1690,8 @@
  	}
  	if(here.mzone_count > stats.best_monsters)
  		stats.best_monsters = here.mzone_count;
@@ -355,7 +454,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	// Main goal, or one of the ALTERNATIVE goals (opponent test --fire: the board
  	// without the cards sacrificed to answer the threat).
  	// Goal by INCLUSION (--target-subset) or by EXACT EQUALITY (default). The
-@@ -1690,6 +1710,17 @@
+@@ -1690,6 +1745,17 @@
  		if(count < cfg.resolve_min[i].min_count)
  			return false;
  	}
@@ -373,7 +472,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	Solution s;
  	s.responses = path;
  	s.actions = actions;
-@@ -2183,7 +2214,12 @@
+@@ -2183,7 +2249,12 @@
  	uint32_t total_actions = actions + actions_this_step;
  	uint32_t total_turns = turns + turns_this_step;
  	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
@@ -387,7 +486,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	if(!SummonsOk(summons) || material_violation) {
  		++stats.constraint_cuts;
  		return false;
-@@ -2308,7 +2344,12 @@
+@@ -2308,7 +2379,12 @@
  	uint32_t total_actions = actions + actions_this_step;
  	uint32_t total_turns = turns + turns_this_step;
  	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
@@ -401,7 +500,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	if(!SummonsOk(summons) || material_violation) {
  		++stats.constraint_cuts;
  		return false;
-@@ -2517,7 +2558,12 @@
+@@ -2517,7 +2593,12 @@
  	uint32_t total_actions = actions + actions_this_step;
  	uint32_t total_turns = turns + turns_this_step;
  	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
@@ -415,7 +514,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	if(!SummonsOk(summons) || material_violation) {
  		++stats.constraint_cuts;
  		return false;
-@@ -2715,7 +2761,12 @@
+@@ -2715,7 +2796,12 @@
  		actions += actions_this_step;
  		turns += turns_this_step;
  		if(st == Step::Rejected) { ++stats.dead_ends; return hit; }
@@ -429,7 +528,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  		if(!SummonsOk(summons) || material_violation) {
  		++stats.constraint_cuts;
  		return hit;
-@@ -2747,7 +2798,7 @@
+@@ -2747,7 +2833,7 @@
  		}
  		// Past the end of turn 1 the board is frozen: continuing the rollout into
  		// the opponent's turn can no longer reach anything.
@@ -438,9 +537,23 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  			++stats.turn_cuts;
  			return hit;
  		}
-@@ -3075,7 +3126,23 @@
+@@ -3064,6 +3150,11 @@
+ 	// budget keeps the meaning "total length of the line", and the solutions carry
+ 	// the full count (prefix + suffix).
+ 	uint32_t depth = reenter_active ? reenter_depth : 0;
++	// --goal-win progress (patch 0002): damage dealt and blockers removed
++	// since the rollout's first decision. Without them a lethal search is
++	// blind until a rollout happens to win.
++	uint32_t dealt = 0;
++	int opp_mz0 = -1;
+ 	const uint32_t prompt_cap =
+ 		cfg.elide_forced ? cfg.max_decisions * 8u + 64u : cfg.max_decisions;
+ 	for(uint32_t pi = 0; pi < prompt_cap && depth < cfg.max_decisions; ++pi) {
+@@ -3074,8 +3165,25 @@
+ 		Step st = StepToPrompt();
  		actions += actions_this_step;
  		turns += turns_this_step;
++		dealt += damage_this_step;
  		if(st == Step::Rejected) { ++stats.dead_ends; return; }
 -		if(st == Step::Ended)    { ++stats.terminals; return; }
 +		if(st == Step::Ended) {
@@ -463,7 +576,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  		// A violated constraint kills the rollout with its current score: the
  		// policy learns to respect it by itself.
  		if(!SummonsOk(summons) || material_violation) {
-@@ -3265,7 +3332,7 @@
+@@ -3265,7 +3373,7 @@
  			// count (real recoveries), and every re-reaching of the board is
  			// re-recorded when it is cheaper.
  		}
@@ -472,7 +585,21 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  			++stats.turn_cuts;
  			break;
  		}
-@@ -4103,7 +4170,7 @@
+@@ -3365,6 +3473,13 @@
+ 							  static_cast<double>(cfg.resolve_weight) *
+ 								  ResolveProgress(resolved);
+ 			double sc = material * 1000.0 + novel_states;
++			if(cfg.goal_win) {
++				const auto opp = static_cast<uint8_t>(1 - cfg.target_player);
++				const int mz = static_cast<int>(duel.Count(opp, LOCATION_MZONE));
++				if(opp_mz0 < 0)
++					opp_mz0 = mz;
++				sc += 2.0 * dealt + 1500.0 * (std::max)(0, opp_mz0 - mz);
++			}
+ 			// LEARNED LANDMARKS: the `h` that DECREASES, served where it can
+ 			// change something. Every landmark achievement is worth
+ 			// `landmark_weight` points of material, the same unit as
+@@ -4103,7 +4218,7 @@
  		return;
  	// COPY: the archive can evict this entry during the rollout that follows.
  	reenter_path = e.path;
@@ -481,7 +608,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	uint64_t resolved = 0;
  	size_t used = 0;
  	bool dead = false;
-@@ -4684,7 +4751,7 @@
+@@ -4684,7 +4799,7 @@
  	// Macros applicable at the expanded node: (macro index, index of the choice
  	// carrying its first key). Buffer reused between expansions.
  	std::vector<std::pair<uint32_t, uint32_t>> lapp;
@@ -490,7 +617,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  	uint64_t resolved = 0;
  	enum class Adv { Branch, Dead, Goal };
  	// Total of the required resolutions (--resolve): the "missing resolutions"
-@@ -4705,7 +4772,12 @@
+@@ -4705,7 +4820,12 @@
  			actions += actions_this_step;
  			turns += turns_this_step;
  			if(st == Step::Rejected) { ++stats.dead_ends; return Adv::Dead; }
@@ -504,7 +631,7 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  			if(!SummonsOk(summons) || material_violation) {
  				++stats.constraint_cuts;
  				return Adv::Dead;
-@@ -4723,10 +4795,10 @@
+@@ -4723,10 +4843,10 @@
  					if(!(cfg.anytime && cfg.finisher_post_goal))
  						return Adv::Goal;
  				}
@@ -519,18 +646,21 @@ diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patch
  			if(!FillChoices(ro_choices)) {
 diff -ru combo-solver/solver-patched/search.h combo-solver-rooted/solver-patched/search.h
 --- combo-solver/solver-patched/search.h	2026-10-17 19:22:43.000000000 -0400
-+++ combo-solver-rooted/solver-patched/search.h	2026-11-02 01:39:59.914557047 -0500
-@@ -2671,6 +2671,9 @@
++++ combo-solver-rooted/solver-patched/search.h	2026-11-02 01:57:32.057506682 -0500
+@@ -2671,6 +2671,12 @@
  	// cards (real recoveries cut both ways), and every re-reaching of the board is
  	// re-recorded when it is cheaper.
  	bool anytime = false;
 +	// --goal-win (duelroom patch 0002): a solution is a duel the target player
 +	// WINS; board matches are not goals.
 +	bool goal_win = false;
++	// --opp-greedy / --opp-respond (duelroom patch 0002).
++	bool opp_greedy = false;
++	std::vector<uint32_t> opp_respond;
  	// Burned bound (B&B): a state whose CURRENT burned count exceeds
  	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
  	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
-@@ -3494,6 +3497,10 @@
+@@ -3494,6 +3500,10 @@
  	// strategy would otherwise duplicate. In anytime mode, recording goes through
  	// replacement of the worst and dedup by path; the cost of the goal stays
  	// readable in goal_burned/goal_actions/goal_depth (the NRPA score reads it).
@@ -541,12 +671,15 @@ diff -ru combo-solver/solver-patched/search.h combo-solver-rooted/solver-patched
  	bool GoalCheck(const BoardKey& here, uint32_t depth, uint32_t actions,
  				   uint64_t resolved);
  	// Current burned cards of the target player (graveyard + banished): the tier 1
-@@ -3648,6 +3655,8 @@
+@@ -3648,6 +3658,11 @@
  	// time.
  	uint32_t turns_this_step = 0;
  	bool saw_retry = false;
 +	// MSG_WIN for cfg.target_player seen during the last StepToPrompt.
 +	bool won_this_step = false;
++	// LP damage dealt to the OPPONENT of cfg.target_player in the last
++	// StepToPrompt (MSG_DAMAGE): --goal-win's progress signal.
++	uint32_t damage_this_step = 0;
  	bool ended = false;
  
  	// Transposition table. Indexed by state, with the remaining budget under which
