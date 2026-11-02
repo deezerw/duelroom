@@ -2172,8 +2172,14 @@ def cmd_train(conn, args):
     n = trainer.train(conn, path, name, hours=hours, hands=hands,
                       plateau=PLATEAU if enemy else None)
     print(f"{n} generation(s) run")
-    if enemy and not trainer.stop_requested(name):
+    # Only a plateau starts the games. `train` clears the stop flag before it
+    # returns, so asking it whether a stop was requested always said no and
+    # a stopped training went straight into hours of games.
+    if enemy and trainer.plateaued(conn, trainer.deck_hash(path), PLATEAU):
         _print_games(game.run(conn, path, name, enemy))
+    elif enemy:
+        print(f"no plateau yet (stopped or out of time): games against {enemy} "
+              f"not started -- `games {name} {enemy}` plays them anyway")
 
 
 # Generations in a row with no hand improved before `train ... <enemy>`

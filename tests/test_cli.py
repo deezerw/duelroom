@@ -153,3 +153,23 @@ def test_report_prints_a_blind_spot_note_once_per_deck():
             daemon.COMMANDS["report"](conn, [deck])
         n = buf.getvalue().count('! Maxx "C": lines convert')
         assert n == 1, f"{deck} printed the blind-spot note {n} times"
+
+
+@pytest.mark.parametrize("plateau,plays", [(False, False), (True, True)])
+def test_train_with_an_enemy_plays_games_only_at_a_plateau(monkeypatch, capsys,
+                                                           plateau, plays):
+    """`train <deck> ... <enemy>` asked `stop_requested` after `train()` had
+    already cleared the flag, so stopping the trainer went straight into
+    hours of games."""
+    from skills import db, game, trainer
+    called = []
+    monkeypatch.setattr(trainer, "train", lambda *a, **k: 1)
+    monkeypatch.setattr(trainer, "plateaued", lambda *a, **k: plateau)
+    monkeypatch.setattr(game, "run", lambda *a, **k: called.append(a) or [])
+    monkeypatch.setattr(daemon, "_warn_if_busy", lambda *a: None)
+    conn = db.connect()
+    deck = db.get_meta(conn, "active_deck")
+    daemon.cmd_train(conn, [deck, "1", "4", "snake_eye"])
+    assert bool(called) == plays
+    if not plays:
+        assert "not started" in capsys.readouterr().out
