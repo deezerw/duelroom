@@ -1,0 +1,552 @@
+# duelroom patch 0002 -- ROOTED SEARCH (`--root <prefix.yrp>`), STAGE9 Gate A.
+#
+# ISSUES.md #4: a search from a position a duel has already reached found
+# nothing, because only the finisher ever saw the resumed root (no plan,
+# probe or NRPA there). Three changes make every phase root there:
+#
+# 1. `--root`: the start replay carries the prefix (Replay::root_prefix);
+#    Duel::Setup replays it right after the duel starts, leaving the last
+#    answer pending exactly as the finisher's replay_prefix does. WriteYrp1
+#    writes prefix + line, so every output replays from the duel's start.
+# 2. Turn cuts count from the root: Search adds Duel::RootTurns() to
+#    initial_turns; includes patch 0001's `turns >= 2` -> max_turns + 1.
+# 3. A REAL BUG, not a feature: MSG_SELECT_PLACE answers named the zone
+#    owner RELATIVE to the chooser where the core wants the ABSOLUTE player
+#    (playerop.cpp:575). Harmless as player 0, a MSG_RETRY on every summon
+#    as player 1 -- the second blocker patch 0001's note could not name
+#    ("no extra-deck monster summoned").
+#
+# 4. `--goal-win`: a solution is a duel the target player WINS (MSG_WIN),
+#    not a board. Every strategy's Step::Ended site records the win; the
+#    writer's verification judges by the replay's winner.
+# 5. A second real trap, found by STAGE9 Gate B: ocgcore does NOT stop at
+#    MSG_WIN -- it keeps processing and only reports OCG_DUEL_STATUS_END when
+#    its unit queue is empty (processor_visit.cpp). Under --goal-win a
+#    decided duel now ends the step; otherwise no win was ever seen.
+#
+# Gates (tools/experiments/rooted_gate.py, lethal_gate.py), 2026-11-02:
+#   A  kewl-tune, 8 hands, 60 s, empty field: going first 8/8, old
+#      --approach turn 2 0/8, --root turn 2 8/8.
+#   B  vanilla positions with a known answer: lethal and clear-then-lethal
+#      found (5 and 8 lines, all replay to a win), both one-short positions
+#      return nothing.
+#
+# Without --root/--goal-win the binary behaves as the pinned one for player 0.
+# Built as a SEPARATE binary (tools/build_rooted_solver.sh); the pinned
+# engine.SOLVER_BIN is untouched, so no measurement needs re-gating.
+# Apply inside build/combo-solver-rooted/solver-patched with `patch -p2`.
+
+diff -ru combo-solver/solver-patched/duel.cpp combo-solver-rooted/solver-patched/duel.cpp
+--- combo-solver/solver-patched/duel.cpp	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/duel.cpp	2026-11-02 01:33:07.012096708 -0500
+@@ -134,6 +134,7 @@
+ 		error = "the yrp1 does not contain two decks";
+ 		return false;
+ 	}
++	{
+ 	ArenaScope scope(arena);
+ 	for(uint8_t team = 0; team < 2; ++team) {
+ 		const Deck& deck = yrp.decks[team];
+@@ -164,6 +165,32 @@
+ 		}
+ 	}
+ 	OCG_StartDuel(handle);
++	}
++	// Rooted search: replay the prefix and leave its LAST answer pending, the
++	// state the finisher's replay_prefix leaves an approach root in (the
++	// Search's first Process consumes it). Outside the scope above: Messages()
++	// allocates host memory, which must not land in the arena.
++	size_t used = 0;
++	while(used < yrp.root_prefix.size()) {
++		const int st = Process();
++		for(const Message& m : Messages()) {
++			if(m.type == MSG_NEW_TURN)
++				++root_turns;
++			if(m.type == MSG_RETRY) {
++				error = "--root: the core rejected answer " + std::to_string(used) +
++						" of the prefix (MSG_RETRY)";
++				return false;
++			}
++		}
++		if(st == OCG_DUEL_STATUS_AWAITING)
++			SetResponse(yrp.root_prefix[used++]);
++		else if(st != OCG_DUEL_STATUS_CONTINUE) {
++			error = "--root: the duel ended inside the prefix (" +
++					std::to_string(used) + "/" +
++					std::to_string(yrp.root_prefix.size()) + " answers)";
++			return false;
++		}
++	}
+ 	return true;
+ }
+ 
+diff -ru combo-solver/solver-patched/duel.h combo-solver-rooted/solver-patched/duel.h
+--- combo-solver/solver-patched/duel.h	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/duel.h	2026-11-02 01:33:07.012096708 -0500
+@@ -71,6 +71,9 @@
+ 			   uint8_t extra_hand_team = 1);
+ 
+ 	int Process();                       // OCG_DUEL_STATUS_*
++	// MSG_NEW_TURN messages seen while Setup replayed the --root prefix (0
++	// without --root): the turns the search's root already lies past.
++	uint32_t RootTurns() const { return root_turns; }
+ 	std::vector<Message> Messages();     // messages produced by the last Process
+ 	// Allocation-free variant once warm: `out` is reused.
+ 	void Messages(std::vector<Message>& out);
+@@ -117,6 +120,7 @@
+ 	const CardDB& Db() const { return db; }
+ 
+ private:
++	uint32_t root_turns = 0;
+ 	static void CardReaderThunk(void* payload, uint32_t code, OCG_CardData* data);
+ 	static int ScriptReaderThunk(void* payload, OCG_Duel duel, const char* name);
+ 	static void LogThunk(void* payload, const char* msg, int type);
+diff -ru combo-solver/solver-patched/enumerate.cpp combo-solver-rooted/solver-patched/enumerate.cpp
+--- combo-solver/solver-patched/enumerate.cpp	2026-10-17 19:22:44.865839504 -0400
++++ combo-solver-rooted/solver-patched/enumerate.cpp	2026-11-02 01:37:22.836958079 -0500
+@@ -688,7 +688,15 @@
+ 
+ 	case MSG_SELECT_PLACE:
+ 	case MSG_SELECT_DISFIELD: {
+-		r.Get<uint8_t>();   // player
++		// The mask is RELATIVE to the selecting player (bits 0-15 = its own
++		// zones) but the answer names the ABSOLUTE player (playerop.cpp:575,
++		// `select_player == playerid`). Answering `owner` as-is only works for
++		// player 0; for player 1 every placement was a MSG_RETRY, so a search
++		// on the second player's turn could never summon (duelroom patch 0002).
++		const uint8_t chooser = r.Get<uint8_t>();
++		auto abs_player = [chooser](uint8_t owner) {
++			return static_cast<uint8_t>(owner == 0 ? chooser : 1 - chooser);
++		};
+ 		uint8_t count = r.Get<uint8_t>();
+ 		uint32_t flag = r.Get<uint32_t>();
+ 		if(!r.Ok() || count == 0)
+@@ -741,7 +749,7 @@
+ 				const Slot& s = free_slots[i];
+ 				Choice& c = out.Emit();
+ 				c.response.resize(3);
+-				c.response[0] = s.owner;
++				c.response[0] = abs_player(s.owner);
+ 				c.response[1] = s.loc;
+ 				c.response[2] = s.seq;
+ 				c.edge = EdgeOf(message, { s.owner, s.loc, s.seq });
+@@ -756,7 +764,7 @@
+ 				Choice& c = out.Emit();
+ 				c.response.resize(size_t(count) * 3);
+ 				for(uint8_t i = 0; i < count; ++i) {
+-					c.response[size_t(i) * 3 + 0] = free_slots[i].owner;
++					c.response[size_t(i) * 3 + 0] = abs_player(free_slots[i].owner);
+ 					c.response[size_t(i) * 3 + 1] = free_slots[i].loc;
+ 					c.response[size_t(i) * 3 + 2] = free_slots[i].seq;
+ 				}
+diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched/main.cpp
+--- combo-solver/solver-patched/main.cpp	2026-10-17 19:22:44.866839526 -0400
++++ combo-solver-rooted/solver-patched/main.cpp	2026-11-02 01:40:24.269115064 -0500
+@@ -1458,6 +1458,11 @@
+ 	// Phase (hence Main 2) is removed from the enumeration and "-> End Phase"
+ 	// remains.
+ 	bool mp1_only = false;
++	// --goal-win (duelroom patch 0002): the goal is WINNING THE DUEL -- a line
++	// is a solution when the duel ends with the target player as the winner
++	// (MSG_WIN). Board targets are not the goal; --target still feeds the
++	// guidance heuristics and is required by --no-ref.
++	bool goal_win = false;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -1608,6 +1613,9 @@
+ 	// extra roots (full path + backtracks): the Go-Explore archive that persists
+ 	// BETWEEN runs.
+ 	std::vector<std::string> approach_files;
++	// --root <f.yrp>: the start replay's search ROOT is the position this file's
++	// answers reach (duelroom patch 0002). Requires --start, same header.
++	std::string root_file;
+ 	// Cards ADDED to the opponent's hand in the starting duel (--opp-hand). Gives
+ 	// the guard and the handrip something to work on when the start is a hand test
+ 	// (an opponent with no hand); PLAYABLE cards (Nibiru...) are needed for the core
+@@ -1897,6 +1905,10 @@
+ 				"to a duel template\n                     (flags, life "
+ 				"points, opponent). Implies --no-plan and\n"
+ 				"                     requires --target and --deck.\n"
++				"  --root <f.yrp>     search FROM the position this replay's answers\n"
++				"                     reach (same duel as --start): probe, NRPA and\n"
++				"                     finisher all root there; lines are written with\n"
++				"                     the prefix in front (duelroom patch 0002)\n"
+ 				"  --approach <f.yrp> an approach written by an earlier run\n"
+ 				"                     (best_approach_*.yrp), served to the "
+ 				"finisher as an extra\n                     root (full path + "
+@@ -1973,6 +1985,8 @@
+ 				"                     chain link of ours. The effects are "
+ 				"derived from the\n                     declared operator "
+ 				"table; no card name is compiled in.\n"
++				"  --goal-win         the goal is WINNING: a line is a solution when the\n"
++				"                     duel ends with --player as the winner (patch 0002)\n"
+ 				"  --mp1-only         the whole combo lives in Main Phase 1: "
+ 				"entering the\n                     Battle Phase is removed "
+ 				"from the enumeration\n                     (\"-> End Phase\" "
+@@ -2383,6 +2397,7 @@
+ 				{ "--carry",            &Options::carry },
+ 				{ "--no-self-negate",   &Options::no_self_negate },
+ 				{ "--mp1-only",         &Options::mp1_only },
++				{ "--goal-win",         &Options::goal_win },
+ 				{ "--zone-serial",      &Options::zone_serial },
+ 				{ "--json",             &Options::json },
+ 			};
+@@ -2476,6 +2491,9 @@
+ 		} else if(a == "--guard-keep") {
+ 			const char* v = next("--guard-keep"); if(!v) return false;
+ 			o.guard_keep_specs.emplace_back(v);
++		} else if(a == "--root") {
++			const char* v = next("--root"); if(!v) return false;
++			o.root_file = v;
+ 		} else if(a == "--approach") {
+ 			const char* v = next("--approach"); if(!v) return false;
+ 			o.approach_files.emplace_back(v);
+@@ -4077,6 +4095,7 @@
+ 	// The domain in TURNS: --turns 2 lets the line cross the opponent's turn
+ 	// (Omega's second rip lives there). 0 = default = 1 turn.
+ 	cfg.max_turns = opt.turns ? static_cast<uint32_t>(opt.turns) : 1u;
++	cfg.goal_win = opt.goal_win;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+@@ -5541,12 +5560,15 @@
+ 				bool guard_ok = true;
+ 				bool material_ok = true;
+ 				int pplayer = -1;
++				int winner = -1;   // MSG_WIN on the replay (--goal-win's judge)
+ 				std::vector<uint32_t> summons, mats;
+ 				std::vector<size_t> resolves(cons.resolve_min.size(), 0);
+ 				auto scan = [&] {
+ 					for(const Message& m : d.Messages()) {
+ 						if(m.type == MSG_RETRY)
+ 							retry = true;
++						if(m.type == MSG_WIN && m.size >= 1)
++							winner = m.data[0];
+ 						if(m.type == MSG_MOVE && !cons.material_req.empty() &&
+ 						   m.size >= 28) {
+ 							uint32_t c = 0, reason = 0;
+@@ -5673,7 +5695,9 @@
+ 				// lists are sorted (ComputeBoardKeyInto), so inclusion is
+ 				// std::includes. Without inclusion: strict equality, the historical
+ 				// behaviour byte for byte.
+-				const bool full_board =
++				// --goal-win: THE SAME JUDGE AS THE SEARCH -- the duel ended and
++				// the target player won. The board is irrelevant.
++				const bool full_board = opt.goal_win ? winner == con :
+ 					GoalBySubset(opt)
+ 						? std::includes(fin.loose.begin(), fin.loose.end(),
+ 										target.loose.begin(),
+@@ -11043,6 +11067,25 @@
+ 									"unreadable.\n", opt.start_replay.c_str());
+ 			return 1;
+ 		}
++		if(!opt.root_file.empty()) {
++			Replay root_replay;
++			if(!root_replay.Load(opt.root_file, error)) {
++				std::printf("!! --root: %s\n", error.c_str());
++				return 1;
++			}
++			const Replay* ry = root_replay.IsStreamed() ? root_replay.Embedded()
++													  : &root_replay;
++			if(!ry || ry->seed[0] != start_yrp->seed[0] ||
++			   ry->seed[1] != start_yrp->seed[1]) {
++				std::printf("!! --root %s: not the --start duel (seed differs)\n",
++							opt.root_file.c_str());
++				return 1;
++			}
++			// start_replay is ours and not const: the pointer only is.
++			const_cast<Replay*>(start_yrp)->root_prefix = ry->responses;
++			std::printf("  root              : %zu answer(s) replayed before "
++						"every search (--root)\n", ry->responses.size());
++		}
+ 		if(start_yrp->decks.size() <= static_cast<size_t>(opt.target_player)) {
+ 			std::printf("!! the starting replay carries no deck "
+ 									"for player %d.\n", opt.target_player);
+diff -ru combo-solver/solver-patched/replay.cpp combo-solver-rooted/solver-patched/replay.cpp
+--- combo-solver/solver-patched/replay.cpp	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/replay.cpp	2026-11-02 01:32:29.461236369 -0500
+@@ -327,7 +327,10 @@
+ 		}
+ 	}
+ 
+-	for(const auto& r : responses) {
++	// Rooted search: the prefix first, so the file replays from the duel start.
++	std::vector<std::vector<uint8_t>> all = base.root_prefix;
++	all.insert(all.end(), responses.begin(), responses.end());
++	for(const auto& r : all) {
+ 		if(r.empty() || r.size() > 255) {
+ 			error = "answer of invalid size (" + std::to_string(r.size()) + ")";
+ 			return false;
+diff -ru combo-solver/solver-patched/replay.h combo-solver-rooted/solver-patched/replay.h
+--- combo-solver/solver-patched/replay.h	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/replay.h	2026-11-02 01:32:22.941086989 -0500
+@@ -65,6 +65,15 @@
+ 	std::vector<Packet> packets;
+ 	int turn_count{};
+ 
++	// ROOTED SEARCH (--root, duelroom patch 0002). Answers replayed by
++	// Duel::Setup right after the duel starts, so EVERY phase -- probe, NRPA,
++	// finisher, verification -- searches from the position they reach rather
++	// than from turn 1. WriteYrp1 puts them back in front of every line written
++	// against this replay, so the files replay from the duel's real start.
++	// `root_turns`: MSG_NEW_TURN count of the prefix (the search's initial_turns).
++	std::vector<std::vector<uint8_t>> root_prefix;
++	uint32_t root_turns{};
++
+ private:
+ 	std::unique_ptr<Replay> yrp;
+ };
+diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patched/search.cpp
+--- combo-solver/solver-patched/search.cpp	2026-10-24 23:35:47.401833131 -0400
++++ combo-solver-rooted/solver-patched/search.cpp	2026-11-02 01:46:24.638607460 -0500
+@@ -263,6 +263,9 @@
+ 	}
+ 	for(const ResolveReq& req : cfg.resolve_min)
+ 		resolve_total += req.min_count;
++	// Rooted search (--root): the turns the prefix crossed are already behind
++	// the root, so every turn cut counts from them. 0 without --root.
++	cfg.initial_turns += duel.RootTurns();
+ 	zone_serialize_live = cfg.zone_serialize && !cfg.goal_zone.empty();
+ 	// Seed of the burned bound: the best burned counts of the previous phases bound
+ 	// it from the start (anytime only, slack included).
+@@ -331,6 +334,8 @@
+ 	recent_materials.clear();
+ 	recipe_materials.clear();
+ 	saw_retry = false;
++	won_this_step = false;
++	bool duel_decided = false;
+ 	for(;;) {
+ 		int status = duel.Process();
+ 		duel.Messages(msgs_scratch);
+@@ -515,6 +520,16 @@
+ 			case MSG_RETRY:
+ 				saw_retry = true;
+ 				break;
++			case MSG_WIN:
++				// payload: winner(1) reason(1). The core does NOT stop here: it
++				// keeps processing and only reports OCG_DUEL_STATUS_END once its
++				// unit queue is empty (processor_visit.cpp), so without the cut
++				// below a won duel played on past the win and the flag was reset
++				// at the next step -- no win was ever seen.
++				duel_decided = true;
++				if(m.size >= 1 && m.data[0] == cfg.target_player)
++					won_this_step = true;
++				break;
+ 			default:
+ 				break;
+ 			}
+@@ -526,6 +541,9 @@
+ 		}
+ 		if(saw_retry)
+ 			return Step::Rejected;   // illegal answer: dead branch
++		// --goal-win: a decided duel is over, whoever won it.
++		if(duel_decided && cfg.goal_win)
++			return Step::Ended;
+ 		if(status == OCG_DUEL_STATUS_AWAITING)
+ 			return Step::Prompt;
+ 		if(status == OCG_DUEL_STATUS_END)
+@@ -1637,6 +1655,8 @@
+ 	}
+ 	if(here.mzone_count > stats.best_monsters)
+ 		stats.best_monsters = here.mzone_count;
++	if(cfg.goal_win)
++		return false;   // only WinGoal records under --goal-win
+ 	// Main goal, or one of the ALTERNATIVE goals (opponent test --fire: the board
+ 	// without the cards sacrificed to answer the threat).
+ 	// Goal by INCLUSION (--target-subset) or by EXACT EQUALITY (default). The
+@@ -1690,6 +1710,17 @@
+ 		if(count < cfg.resolve_min[i].min_count)
+ 			return false;
+ 	}
++	return RecordSolution(depth, actions, alt_hit);
++}
++
++bool Search::WinGoal(uint32_t depth, uint32_t actions) {
++	if(!cfg.goal_win || !won_this_step)
++		return false;
++	++stats.board_reached;
++	return RecordSolution(depth, actions, false);
++}
++
++bool Search::RecordSolution(uint32_t depth, uint32_t actions, bool alt_hit) {
+ 	Solution s;
+ 	s.responses = path;
+ 	s.actions = actions;
+@@ -2183,7 +2214,12 @@
+ 	uint32_t total_actions = actions + actions_this_step;
+ 	uint32_t total_turns = turns + turns_this_step;
+ 	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
+-	if(st == Step::Ended)    { ++stats.terminals; return false; }
++	if(st == Step::Ended) {
++		if(WinGoal(depth, total_actions))
++			return !cfg.anytime && solutions.size() >= cfg.max_solutions;
++		++stats.terminals;
++		return false;
++	}
+ 	if(!SummonsOk(summons) || material_violation) {
+ 		++stats.constraint_cuts;
+ 		return false;
+@@ -2308,7 +2344,12 @@
+ 	uint32_t total_actions = actions + actions_this_step;
+ 	uint32_t total_turns = turns + turns_this_step;
+ 	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
+-	if(st == Step::Ended)    { ++stats.terminals; return false; }
++	if(st == Step::Ended) {
++		if(WinGoal(depth, total_actions))
++			return !cfg.anytime && solutions.size() >= cfg.max_solutions;
++		++stats.terminals;
++		return false;
++	}
+ 	if(!SummonsOk(summons) || material_violation) {
+ 		++stats.constraint_cuts;
+ 		return false;
+@@ -2517,7 +2558,12 @@
+ 	uint32_t total_actions = actions + actions_this_step;
+ 	uint32_t total_turns = turns + turns_this_step;
+ 	if(st == Step::Rejected) { ++stats.dead_ends; return false; }
+-	if(st == Step::Ended)    { ++stats.terminals; return false; }
++	if(st == Step::Ended) {
++		if(WinGoal(depth, total_actions))
++			return !cfg.anytime && solutions.size() >= cfg.max_solutions;
++		++stats.terminals;
++		return false;
++	}
+ 	if(!SummonsOk(summons) || material_violation) {
+ 		++stats.constraint_cuts;
+ 		return false;
+@@ -2715,7 +2761,12 @@
+ 		actions += actions_this_step;
+ 		turns += turns_this_step;
+ 		if(st == Step::Rejected) { ++stats.dead_ends; return hit; }
+-		if(st == Step::Ended)    { ++stats.terminals; return hit; }
++		if(st == Step::Ended) {
++			if(WinGoal(depth, actions))
++				return true;
++			++stats.terminals;
++			return hit;
++		}
+ 		if(!SummonsOk(summons) || material_violation) {
+ 		++stats.constraint_cuts;
+ 		return hit;
+@@ -2747,7 +2798,7 @@
+ 		}
+ 		// Past the end of turn 1 the board is frozen: continuing the rollout into
+ 		// the opponent's turn can no longer reach anything.
+-		if(turns >= 2) {
++		if(turns >= cfg.max_turns + 1) {
+ 			++stats.turn_cuts;
+ 			return hit;
+ 		}
+@@ -3075,7 +3126,23 @@
+ 		actions += actions_this_step;
+ 		turns += turns_this_step;
+ 		if(st == Step::Rejected) { ++stats.dead_ends; return; }
+-		if(st == Step::Ended)    { ++stats.terminals; return; }
++		if(st == Step::Ended) {
++			// --goal-win: the same lexicographic goal score as a board reached.
++			if(WinGoal(depth, actions)) {
++				const double gs = 1e12 - static_cast<double>(goal_burned) * 1e9 -
++								  static_cast<double>(goal_actions) * 1e5 -
++								  static_cast<double>(depth);
++				if(gs > run.score) {
++					run.score = gs;
++					run.peak_steps = run.steps.size();
++				}
++				if(qhat_on)
++					qh_reward = 1.0;
++				return;
++			}
++			++stats.terminals;
++			return;
++		}
+ 		// A violated constraint kills the rollout with its current score: the
+ 		// policy learns to respect it by itself.
+ 		if(!SummonsOk(summons) || material_violation) {
+@@ -3265,7 +3332,7 @@
+ 			// count (real recoveries), and every re-reaching of the board is
+ 			// re-recorded when it is cheaper.
+ 		}
+-		if(turns >= 2) {
++		if(turns >= cfg.max_turns + 1) {
+ 			++stats.turn_cuts;
+ 			break;
+ 		}
+@@ -4103,7 +4170,7 @@
+ 		return;
+ 	// COPY: the archive can evict this entry during the rollout that follows.
+ 	reenter_path = e.path;
+-	uint32_t turns = 0, summons = 0, actions = 0;
++	uint32_t turns = duel.RootTurns(), summons = 0, actions = 0;
+ 	uint64_t resolved = 0;
+ 	size_t used = 0;
+ 	bool dead = false;
+@@ -4684,7 +4751,7 @@
+ 	// Macros applicable at the expanded node: (macro index, index of the choice
+ 	// carrying its first key). Buffer reused between expansions.
+ 	std::vector<std::pair<uint32_t, uint32_t>> lapp;
+-	uint32_t actions = 0, turns = 0, summons = 0;
++	uint32_t actions = 0, turns = duel.RootTurns(), summons = 0;
+ 	uint64_t resolved = 0;
+ 	enum class Adv { Branch, Dead, Goal };
+ 	// Total of the required resolutions (--resolve): the "missing resolutions"
+@@ -4705,7 +4772,12 @@
+ 			actions += actions_this_step;
+ 			turns += turns_this_step;
+ 			if(st == Step::Rejected) { ++stats.dead_ends; return Adv::Dead; }
+-			if(st == Step::Ended)    { ++stats.terminals; return Adv::Dead; }
++			if(st == Step::Ended) {
++				if(check && WinGoal(static_cast<uint32_t>(path.size()), actions))
++					return Adv::Goal;
++				++stats.terminals;
++				return Adv::Dead;
++			}
+ 			if(!SummonsOk(summons) || material_violation) {
+ 				++stats.constraint_cuts;
+ 				return Adv::Dead;
+@@ -4723,10 +4795,10 @@
+ 					if(!(cfg.anytime && cfg.finisher_post_goal))
+ 						return Adv::Goal;
+ 				}
+-				if(turns >= 2) { ++stats.turn_cuts; return Adv::Dead; }
++				if(turns >= cfg.max_turns + 1) { ++stats.turn_cuts; return Adv::Dead; }
+ 				if(GuardCut(board_scratch, summons))
+ 					return Adv::Dead;
+-			} else if(turns >= 2) {
++			} else if(turns >= cfg.max_turns + 1) {
+ 				return Adv::Dead;
+ 			}
+ 			if(!FillChoices(ro_choices)) {
+diff -ru combo-solver/solver-patched/search.h combo-solver-rooted/solver-patched/search.h
+--- combo-solver/solver-patched/search.h	2026-10-17 19:22:43.000000000 -0400
++++ combo-solver-rooted/solver-patched/search.h	2026-11-02 01:39:59.914557047 -0500
+@@ -2671,6 +2671,9 @@
+ 	// cards (real recoveries cut both ways), and every re-reaching of the board is
+ 	// re-recorded when it is cheaper.
+ 	bool anytime = false;
++	// --goal-win (duelroom patch 0002): a solution is a duel the target player
++	// WINS; board matches are not goals.
++	bool goal_win = false;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -3494,6 +3497,10 @@
+ 	// strategy would otherwise duplicate. In anytime mode, recording goes through
+ 	// replacement of the worst and dedup by path; the cost of the goal stays
+ 	// readable in goal_burned/goal_actions/goal_depth (the NRPA score reads it).
++	// Records the current path as a solution (the tail GoalCheck and WinGoal share).
++	bool RecordSolution(uint32_t depth, uint32_t actions, bool alt_hit);
++	// --goal-win: the duel just ended with the target player winning; record it.
++	bool WinGoal(uint32_t depth, uint32_t actions);
+ 	bool GoalCheck(const BoardKey& here, uint32_t depth, uint32_t actions,
+ 				   uint64_t resolved);
+ 	// Current burned cards of the target player (graveyard + banished): the tier 1
+@@ -3648,6 +3655,8 @@
+ 	// time.
+ 	uint32_t turns_this_step = 0;
+ 	bool saw_retry = false;
++	// MSG_WIN for cfg.target_player seen during the last StepToPrompt.
++	bool won_this_step = false;
+ 	bool ended = false;
+ 
+ 	// Transposition table. Indexed by state, with the remaining budget under which
