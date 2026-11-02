@@ -389,6 +389,8 @@ stage is complete and verified.
 5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
 6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
 7. ~~Deck trainer~~ — **done** (`trainer.py`, `/train`; best-line trainer, see below)
+8. `STAGE8.md` — Matchup testing: top-3 boards per hand, impact score per card, shared enemy hands, 10 runs, locals weighting
+9. `STAGE9.md` — Finish the game: win rate by turn 3, duds (blocked on the resumed-root search, ISSUES.md #4)
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
