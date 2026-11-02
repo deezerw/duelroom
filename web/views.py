@@ -467,7 +467,8 @@ def train_view(name=None):
 @login_required
 def train_start(name):
     c = conn()
-    if not deck_path(name):
+    path = deck_path(name)
+    if not path or not path.exists():   # a Path is truthy: check the file
         abort(404)
     if _training_job(c, name):
         flash("This deck is already training.")
@@ -545,7 +546,8 @@ def games_view(name=None):
 @login_required
 def games_start(name):
     c = conn()
-    if not deck_path(name):
+    path = deck_path(name)
+    if not path or not path.exists():   # a Path is truthy: check the file
         abort(404)
     enemy = request.form.get("enemy", "")
     if enemy not in _enemy_decks(name):

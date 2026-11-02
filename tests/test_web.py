@@ -1096,3 +1096,16 @@ def test_train_pref_avoid_and_count(loggedin):
     finally:
         with c:
             c.execute("DELETE FROM trainer_prefs WHERE deck='kewl-tune'")
+
+
+@pytest.mark.parametrize("route", ["/games/nosuchdeck/start", "/train/nosuchdeck/start"])
+def test_start_routes_refuse_a_missing_deck(client, route):
+    """deck_path returns a Path for any safe name, and a Path is truthy:
+    `if not deck_path(name)` let a job be queued for a deck that does not
+    exist (the worker then ran it and marked it done)."""
+    from skills import db
+    client.post("/login", data={"password": "pw"})
+    before = db.connect().execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    r = client.post(route, data={"enemy": "snake_eye"})
+    assert r.status_code == 404
+    assert db.connect().execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == before
