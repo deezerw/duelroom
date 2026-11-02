@@ -2213,9 +2213,16 @@ def cmd_games(conn, args):
     if rest and rest[0] == "status":
         _print_games(game.summary(conn, trainer.deck_hash(path), enemy))
         return
+    try:
+        runs = int(rest[0]) if rest else game.RUNS
+        ehands = int(rest[1]) if len(rest) > 1 else game.ENEMY_HANDS
+    except ValueError:
+        print("runs and enemy hands are whole numbers: games <deck> <enemy> [runs] [enemy hands]")
+        return
+    if runs < 1 or ehands < 1:
+        print("runs and enemy hands must be at least 1")
+        return
     _warn_if_busy("these games")
-    runs = int(rest[0]) if rest else game.RUNS
-    ehands = int(rest[1]) if len(rest) > 1 else game.ENEMY_HANDS
     _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
                           enemy_hands=ehands))
 

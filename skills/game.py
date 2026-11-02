@@ -239,7 +239,8 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
 def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
           otk_ms=OTK_MS):
     """The enemy's turn into your board. Returns {lost, start, prefix, board,
-    reached}; `lost` means they found lethal."""
+    reached}; `lost` means they found lethal. If the duel ended on their
+    turn the result is only {lost, won, line}."""
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
@@ -256,7 +257,8 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
     src = r["solution"] or r["approach"] or prefix
     pos = replay(src, until_turn=3)
     if pos.winner is not None:   # e.g. their closing turn ended the duel
-        return {"lost": pos.winner == 1, "line": str(src)}
+        return {"lost": pos.winner == 1, "won": pos.winner == 0,
+                "line": str(src)}
     start2, prefix2 = breaking.split_position(Replay.from_yrp(start),
                                               pos.responses, scratch / "t2")
     return {"lost": False, "start": start2, "prefix": prefix2,
@@ -402,6 +404,9 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                        scratch, ms, seed)
             if t2["lost"]:
                 out = {"outcome": "lost_t2", "line": t2.get("line")}
+            elif t2.get("won"):  # they lost on their own turn (costs, burn)
+                out = {"outcome": "win", "damage": None, "line": t2["line"],
+                       "enemy_reached": 0}
             else:
                 goal = json.loads(row["best_goal"])
                 enemy_pieces = _pieces(t2["board"], 1, cards)
