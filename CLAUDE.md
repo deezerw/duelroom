@@ -579,8 +579,9 @@ Honest gaps, so nobody mistakes a limit for a result:
   goal, with their hand traps firing. It can land a smaller board than the trainer's
   (stored lines are bound to the passive opponent they were solved against, see
   `breaking.py`), and `game_turn1.reached` says whether the full goal was made.
-- **Damage on a non-winning turn 3 is read from the solver's best approach**, which
-  is chosen by board progress, so it understates the best damage reachable.
+- **Damage on a non-winning turn 3 is read from the solver's best approach**: the
+  most target overlap, then (under `--goal-win`) the lowest opponent LP. It is the
+  best the search happened to visit, not a damage maximum, so it can understate.
 - **`gauntlet` is only as strong as the decks it points at you.** "Stopped" means the
   opposing deck did not assemble ITS ONE PAYOFF TARGET through your board -- the same
   limitation the handtrap matrix has, generalised from a card to a board. It is not a
