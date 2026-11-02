@@ -51,6 +51,7 @@ READ_ONLY = [
     ("rescore", []),
     ("flex", ["Branded"]),
     ("drift", ["Branded"]),
+    ("games", []),      # usage only: a real run is hours of solver
 ]
 
 

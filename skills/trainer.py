@@ -595,11 +595,20 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
     return improved
 
 
+def plateaued(conn, dh, n):
+    """True when the last `n` finished generations improved no hand."""
+    gens = [g for g in curve(conn, dh) if g["gen"] > 0]
+    return len(gens) >= n and all(not g["improved"] for g in gens[-n:])
+
+
 def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
-          per_hand=PER_HAND, solve_ms=None, workers=None, say=print):
-    """Run generations until `generations` are done, `hours` pass, or a
-    stop is requested. Resumable: every attempt is committed as it lands,
-    and a killed generation is simply started again under a new number."""
+          per_hand=PER_HAND, solve_ms=None, workers=None, say=print,
+          plateau=None):
+    """Run generations until `generations` are done, `hours` pass, a stop
+    is requested, or -- with `plateau` -- that many generations in a row
+    improved no hand ("as good as it'll get", STAGE8). Resumable: every
+    attempt is committed as it lands, and a killed generation is simply
+    started again under a new number."""
     import time
 
     engine.require()
@@ -624,6 +633,9 @@ def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
             break
         if stop_requested(name):
             say("stop requested -- ending after the last full generation")
+            break
+        if plateau and plateaued(conn, dh, plateau):
+            say(f"plateau: {plateau} generation(s) in a row improved no hand")
             break
         gen = curve(conn, dh)[-1]["gen"] + 1
         run_generation(conn, deck_path, name, dh, gen, per_hand, solve_ms,

@@ -17,7 +17,7 @@ from pathlib import Path
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
                     gate, gauntlet, handlab, images, importer,
                     meta_scrape as ms, optimizer, report, scenarios,
-                    stats, sweep, trainer)
+                    stats, sweep, trainer, game)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -61,6 +61,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
+  games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
   help / quit
 """
 
@@ -2164,10 +2165,53 @@ def cmd_train(conn, args):
     _warn_if_busy("training")
     hours = float(rest[0]) if rest else 8.0
     hands = int(rest[1]) if len(rest) > 1 else trainer.HANDS
+    enemy = rest[2] if len(rest) > 2 else None
     print(f"training {name}: {hands} hands, up to {hours:g} h "
-          f"(stop early: train {name} stop)")
-    n = trainer.train(conn, path, name, hours=hours, hands=hands)
+          f"(stop early: train {name} stop)"
+          + (f"; at a plateau, games against {enemy}" if enemy else ""))
+    n = trainer.train(conn, path, name, hours=hours, hands=hands,
+                      plateau=PLATEAU if enemy else None)
     print(f"{n} generation(s) run")
+    if enemy and not trainer.stop_requested(name):
+        _print_games(game.run(conn, path, name, enemy))
+
+
+# Generations in a row with no hand improved before `train ... <enemy>`
+# calls the deck as good as it will get and starts the games.
+PLATEAU = 3
+
+
+def _print_games(rows):
+    print("\nwin rate by turn 3 (going first):")
+    for r in rows:
+        tier = f"  {r['tier'].upper()}" if r["tier"] else ""
+        print(f"  hand {r['hand_index'] + 1:>2}  {r['wins']:>2}/{r['games']:<2} "
+              f"{r['win_rate']:>5.0%}  lost on turn 2: {r['lost_t2']}{tier}"
+              + ("" if r["complete"] else "  (incomplete)"))
+
+
+def cmd_games(conn, args):
+    """`games <deck> <enemy> [runs] [enemy hands]` / `games <deck> <enemy> status`:
+    your turn 1, their turn 2, your turn 3 -- does the hand win by then?"""
+    if len(args) < 2:
+        print("usage: games <deck> <enemy> [runs] [enemy hands] | games <deck> <enemy> status")
+        return
+    path = _resolve_deck(args[0], conn)
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    enemy, rest = args[1], args[2:]
+    if not (engine.ROOT / "assets" / "decks" / f"{enemy}.ydk").exists():
+        print(f"no such enemy deck: {enemy}")
+        return
+    if rest and rest[0] == "status":
+        _print_games(game.summary(conn, trainer.deck_hash(path), enemy))
+        return
+    _warn_if_busy("these games")
+    runs = int(rest[0]) if rest else game.RUNS
+    ehands = int(rest[1]) if len(rest) > 1 else game.ENEMY_HANDS
+    _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
+                          enemy_hands=ehands))
 
 
 COMMANDS = {
@@ -2206,6 +2250,7 @@ COMMANDS = {
     "draws": cmd_draws,
     "floodgates": cmd_floodgates,
     "train": cmd_train,
+    "games": cmd_games,
 }
 
 
