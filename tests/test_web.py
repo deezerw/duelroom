@@ -847,9 +847,11 @@ CORRECTED_COPY = [
      r"hands</strong> where the"),
     ("/matrix", "the all-windows standard is named",
      r"every</strong> window"),
-    # ISSUES #49: the honest per-hand survival, with its live count.
-    ("/report", "plays-through is of LIVE hands", r"live</strong>"),
-    ("/report", "never-live is unmeasured, not 0",
+    # ISSUES #49: the honest per-hand survival, with its live count. Pinned
+    # to a deck WITH a measured matrix: bare /report follows the active
+    # deck, and these failed whenever that deck had no matrix rows.
+    ("/report/kewl-tune", "plays-through is of LIVE hands", r"live</strong>"),
+    ("/report/kewl-tune", "never-live is unmeasured, not 0",
      r"unmeasured|never had a legal window"),
     # ISSUES #50/#52: which board library the summon figures came from.
     ("/threats", "source library is stated", r"Derived from"),
