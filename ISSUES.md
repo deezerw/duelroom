@@ -2377,3 +2377,43 @@ only in field pieces — and the command says so instead of printing an ordering
 the honest state of this method: it separates boards by what they **hold**, not by what
 they **built**. Extending it to field pieces needs a different primitive; `--no-activate`
 (forbid activating a card of theirs) is the candidate and is not built.
+
+## 70. Bug-test pass on the Stage 9 games — 8 defects FIXED 2026-11-02
+
+Found by reading `skills/game.py` and its web/CLI surface end to end, probing every
+games route with the test client, and an isolated live run (imported vs snake_eye,
+3 hands x 2 enemy hands, 20 s, scratch DB). Every win in that run was replayed to a
+player-0 win, and every recorded damage equals the opponent's LP drop.
+
+1. **Rooted solver: `--goal-win` never kept a best approach when the goal card was
+   already out.** The turn-3 target is the trainer's goal (e.g. a set Trivikarma),
+   often still on the field from turn 1, so target overlap was maxed at the root,
+   `best_path` stayed empty, no `best_approach` was written and the finisher got no
+   seed. Games recorded `0 damage` with no line. At equal overlap `--goal-win` now
+   prefers lower opponent LP, then fewer opponent monsters (`Search::WinProgress`,
+   `Duel::Lp`, `BetterApproach` at all five merge sites; patch 0002 regenerated,
+   rebuild byte-identical). The same stored position went from no line to **lethal
+   found**; the live run's three non-wins now carry 7000 / 2800 / 500. Gate B still
+   PASS, and its one-short cases now write an approach at 1 LP.
+2. **`POST /games/<x>/start` and `/train/<x>/start` queued jobs for decks that do not
+   exist.** `deck_path` returns a Path for any safe name and a Path is truthy. The
+   worker ran the job and marked it done.
+3. **Stopping `train <deck> ... <enemy>` still started hours of games.** `train()`
+   clears the stop flag before returning, so the `stop_requested` check after it was
+   always false. Games now start only at a plateau.
+4. **A hand 0-for-2 with 28 games still queued showed as DUD.** Tiers now wait for a
+   hand's games to complete (expected count read off the stored games by default).
+5. **Games are keyed by the enemy's file name and `export` rewrites it in place**, so a
+   re-export would silently mix two lists. `run` now records the list's hash and
+   refuses to resume against a different one.
+6. **One crashed game ended the whole multi-hour run.** It is now reported, left
+   unrecorded and retried by the next run.
+7. **A duel won on the enemy's turn was a KeyError** (`turn2` returned no board); it is
+   now a win. `games <deck> <enemy> ten` raised ValueError; counts are validated.
+8. **Games page:** no-turn-1 squares linked to a 404; the hours estimate ignored the
+   solve budget and the kill check; "trained" counted a different set of hands than
+   the run plays.
+
+Also: the two `/report` copy checks that had been carried as known failures were a
+test bug — bare `/report` follows the active deck, and `imported` has no matrix rows.
+Pinned to kewl-tune; the suite is fully green (361).
