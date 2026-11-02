@@ -54,7 +54,8 @@ lethal that needs the board cleared first.
   so boards differ only by the board), search MP1, then the battle-phase check.
   The enemy's held hand traps and board responses use the same worst-for-you rule.
 - **10 runs per (board, enemy hand).** Win rate per hand = wins / (3 boards' best ×
-  3 enemy hands × 10). Dud = 0 wins.
+  3 enemy hands × 10). Dud = 0 wins. **Near-dud** = 1-2 wins of 30 (under 10%):
+  listed beside the duds, since in practice it is as bad as one.
 - **Impact score becomes real:** win rate of games where the card was summoned vs
   games where the same hand reached a board without it.
 - **Report:** win rate, damage dealt when not lethal (tiebreak: 7500 of 8000 beats
