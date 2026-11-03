@@ -943,6 +943,7 @@ def hands_table(conn, dh):
         names = [(card_db.resolve(conn, c) or {"name": str(c)})["name"]
                  for c in json.loads(h["hand"])]
         out.append({"i": h["hand_index"], "hand": names, "key": key,
+                    "codes": [int(c) for c in json.loads(h["hand"])],
                     "on_field": key["on_field"] if key else None,
                     "interruptions": key["interruptions"] if key else None,
                     "actions": key["actions"] if key else None,

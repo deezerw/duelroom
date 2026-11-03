@@ -1228,3 +1228,8 @@ def test_full_art_falls_back_to_small_art(loggedin, monkeypatch):
         assert r.mimetype == "image/jpeg" and r.headers["Cache-Control"] == "no-store"
     monkeypatch.setattr(images, "have", lambda size, cid: False)
     assert loggedin.get("/img/full/89631139.jpg").mimetype == "image/svg+xml"
+
+
+def test_starter_page_shows_card_art(loggedin):
+    body = loggedin.get("/starters/kewl-tune").get_data(as_text=True)
+    assert "/img/small/" in body
