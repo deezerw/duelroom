@@ -54,6 +54,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
+  impact <deck> [enemy]     card impact scores from the games played
   help / quit
 ```
 
@@ -399,7 +400,7 @@ stage is complete and verified.
 6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
 7. ~~Deck trainer~~ — **done** (`trainer.py`, `/train`; best-line trainer, see below)
 8. `STAGE8.md` — Matchup testing: top-3 boards per hand, impact score per card, shared enemy hands, 10 runs, locals weighting
-9. `STAGE9.md` — Finish the game: win rate by turn 3, duds — **gates passed, core built** (`game.py`, `/games`); impact score + going-second left
+9. `STAGE9.md` — Finish the game: win rate by turn 3, duds — **gates passed, core built** (`game.py`, `/games`), impact score built; going-second left
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
@@ -473,6 +474,24 @@ plain extra budget (10 s: 22/24 base, 23/24 adapt, 24/24 base at 20 s; hard goal
 10/24 vs 11/24). Harness: `tools/experiments/adapt_ab*.py`. Untried: `--options`
 macros, a per-starter corpus, `--ctx-shrink`. ygorl's PPO/BC on CPU learned nothing
 usable for combo decks (upstream's own measurement).
+
+## Card impact (`skills/impact.py`)
+
+Games page "Card impact" per enemy deck, or `daemon.py impact <deck> [enemy]`. A card
+is USED in a game when you summoned or activated it (any turn, incl. hand traps on
+theirs), read once per game from its replay (~0.05 s) into `game_used`, keyed on the
+`game_results.line` it was read from (re-recorded game = read again). `game.run`
+records it as each game lands; the page reads at most `IMPACT_READ_S` (3 s) of backlog
+per load; the CLI reads everything. Only your own decklist's cards count (Angelechy
+Enlisted moves itself onto your field and its next trigger is yours).
+
+Impact = Mantel-Haenszel risk difference of win rate, used vs not, over strata
+**(your hand, their hand)**, with an Agresti-Caffo 95% interval. Stratifying by hand
+alone was measured wrong on imported vs angelechy: Ash Blossom scored -67 (you hold it
+for their strong hands) and +1 by (hand, enemy hand). Consequences: turn 1 is solved
+once per pairing and reused, so turn-1-only cards are "every game" (no comparison);
+most cards score > 0 (more of your deck came out = the game went well), so read
+them against each other; "few games" under `MIN_SIDE` (5) compared games a side.
 
 ## Finishing the game (Stage 9) — the rooted solver
 

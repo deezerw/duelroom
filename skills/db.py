@@ -271,6 +271,21 @@ CREATE TABLE IF NOT EXISTS game_results (
     PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
 );
 
+-- What you summoned or activated in each game (skills/impact.py), read once
+-- from its replay. `line` is the game_results.line it was read from: a game
+-- recorded again with another line is read again.
+CREATE TABLE IF NOT EXISTS game_used (
+    deck_hash   TEXT NOT NULL,
+    enemy       TEXT NOT NULL,
+    hand_index  INTEGER NOT NULL,
+    board       INTEGER NOT NULL,
+    enemy_seed  INTEGER NOT NULL,
+    run         INTEGER NOT NULL,
+    line        TEXT NOT NULL,          -- '' when the game had none
+    used        TEXT,                   -- JSON {code: first turn}; NULL = unreadable
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
+);
+
 CREATE TABLE IF NOT EXISTS trainer_prefs (
     deck   TEXT NOT NULL,
     kind   TEXT NOT NULL,

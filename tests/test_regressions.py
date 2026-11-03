@@ -5094,3 +5094,60 @@ def test_export_prefers_a_legal_list_over_a_better_placing_banned_one():
     assert ms.best_list(conn, "a")["id"] == 1
     assert ms.best_list(conn, "a", legal=lambda i: i != 1)["id"] == 2
     assert ms.best_list(conn, "a", legal=lambda i: False)["id"] == 1
+
+
+# --- card impact (skills/impact.py) ------------------------------------------
+
+def _impact_game(conn, hand, eseed, run, won, used, line=None):
+    import json
+    line = line or f"/x/h{hand}e{eseed}r{run}.yrp"
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                 "enemy_seed, run, outcome, line, created) VALUES ('d','e',?,0,?,?,?,?,'x')",
+                 (hand, eseed, run, "win" if won else "no_win", line))
+    conn.execute("INSERT INTO game_used (deck_hash, enemy, hand_index, board, enemy_seed, "
+                 "run, line, used) VALUES ('d','e',?,0,?,?,?,?)",
+                 (hand, eseed, run, line, json.dumps({str(c): 1 for c in used})))
+
+
+def test_impact_is_compared_inside_the_same_pair_of_hands():
+    """A hand trap used only against the strong enemy hand is not blamed for
+    that hand's losses; a card that wins inside the same pairing is credited."""
+    from skills import impact
+
+    conn = _games_db()
+    for k in range(10):
+        # enemy hand 1000 is weak (you win), 1001 strong (you lose) and is
+        # where you use the hand trap 7: no comparable games -> no score.
+        _impact_game(conn, 0, 1000, k, True, [1])
+        _impact_game(conn, 0, 1001, k, False, [1, 7])
+        # card 5: inside one pairing, the games that used it are the wins.
+        _impact_game(conn, 1, 1000, k, k < 5, [1, 5] if k < 5 else [1])
+    rows = {r["code"]: r for r in impact.scores(conn, "d", "e")}
+    assert rows[7]["status"] == "every game" and rows[7]["impact"] is None, \
+        "a raw rate would score this 0% vs 50%: the enemy hand, not the card"
+    assert rows[5]["status"] == "scored" and rows[5]["impact"] == 1.0
+    assert rows[5]["used_win"] == 1.0 and rows[5]["not_win"] == 0.0
+    assert 0 < rows[5]["ci"] < 1, "Agresti-Caffo: 5/5 vs 0/5 is not +100 +- 0"
+    assert rows[1]["status"] == "every game"
+    assert 5 not in {r["code"] for r in impact.scores(conn, "d", "e", own={1, 7})}, \
+        "only your own cards are scored"
+
+
+def test_impact_reads_a_game_again_when_its_line_changed(monkeypatch):
+    from skills import impact
+
+    conn = _games_db()
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                 "run, outcome, line, created) VALUES ('d','e',0,0,1000,0,'win','/a.yrp','x')")
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                 "run, outcome, line, created) VALUES ('d','e',0,0,1000,1,'no_t1',NULL,'x')")
+    reads = []
+    monkeypatch.setattr(impact, "source", lambda name, enemy, g: g["line"])
+    monkeypatch.setattr(impact, "used_cards", lambda p: reads.append(p) or {9: 1})
+    assert impact.fill(conn, "d", "deck", "e") == 0
+    assert impact.fill(conn, "d", "deck", "e") == 0
+    assert reads == ["/a.yrp"], "read once; a game with no turn 1 is never read"
+    conn.execute("UPDATE game_results SET line='/b.yrp' WHERE run=0")
+    impact.fill(conn, "d", "deck", "e")
+    assert reads == ["/a.yrp", "/b.yrp"], "re-recorded with another line: read again"
+    assert [r["code"] for r in impact.scores(conn, "d", "e")] == [9]

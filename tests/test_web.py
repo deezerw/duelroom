@@ -1133,3 +1133,10 @@ def test_watch_current_best_opens_the_top_ranked_line(loggedin):
     rows = [{"key": None}, {"key": trainer.parts([0, 2, 3, 3, -50])},
             {"key": trainer.parts([0, 3, 2, 2, -90])}, {"key": trainer.parts([0, 3, 2, 2, -80])}]
     assert sorted(rows, key=trainer.rank) == [rows[3], rows[2], rows[1], rows[0]]
+
+
+def test_games_page_shows_card_impact(loggedin):
+    page = loggedin.get("/games/imported")
+    if page.status_code != 200 or "vs " not in page.get_data(as_text=True):
+        return      # no games stored for this deck on this machine
+    assert "Card impact" in page.get_data(as_text=True)

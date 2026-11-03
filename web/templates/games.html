@@ -24,6 +24,11 @@
   .legend span{display:inline-flex;align-items:center;gap:5px}
   .openings{font-size:12.5px;color:var(--dim);margin:0 0 10px}
   .openings li{margin:2px 0}
+  .impact{width:100%;border-collapse:collapse;font-size:13px}
+  .impact td,.impact th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+  .impact .pos{color:#9ece6a} .impact .neg{color:#f7768e}
+  .impact tr.every-game td:first-child,.impact tr.few-games td:first-child{color:var(--dim)}
+  @media (max-width:760px){.impact .extra{display:none}}
   @media (max-width:760px){
     .games thead{display:none}
     .games tr{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:10px 12px;
@@ -121,6 +126,46 @@
     {% endfor %}
     </tbody>
   </table>
+
+  <h3 style="margin:16px 0 4px">Card impact</h3>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">How much more often you win
+    the games where you <b>used</b> a card (summoned it, or activated it) than the games where
+    the <b>same opening hand against the same enemy hand</b> got through without it, pooled.
+    {% if e.unread %}<b>{{ e.unread }} game(s) not read yet</b> — reload to read more.{% endif %}</div>
+  {% if e.impact %}
+  <table class="impact">
+    <thead><tr><th>card</th><th>impact</th><th class="extra">won when used / without</th>
+      <th class="extra">used in</th><th class="extra">mostly on</th></tr></thead>
+    <tbody>
+    {% for r in e.impact %}
+      <tr class="{{ r.status|replace(' ', '-') }}">
+        <td>{{ r.name }}</td>
+        <td>{% if r.status == 'every game' %}<span class="muted" title="no hand ever went without it, so there is nothing to compare">every game</span>
+            {% else %}<span class="rate {{ 'pos' if r.impact > 0 else ('neg' if r.impact < 0 else '') }}">{{ '%+d'|format((r.impact * 100)|round|int) }}</span>
+              <span class="muted">± {{ (r.ci * 100)|round|int }}</span>
+              {% if r.status == 'few games' %}<span class="muted" title="under {{ min_side }} comparable games with it or without it"> · few games</span>{% endif %}{% endif %}</td>
+        <td class="extra">{% if r.status != 'every game' %}{{ (r.used_win * 100)|round|int }}% / {{ (r.not_win * 100)|round|int }}%{% else %}{{ (r.used_win * 100)|round|int }}% / —{% endif %}</td>
+        <td class="extra">{{ r.used }} of {{ r.games }}</td>
+        <td class="extra">turn {{ r.turn }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <details class="note"><summary>reading these numbers</summary>
+    Impact is in win-rate points: <b>+12</b> means the hands that used this card won 12 points
+    more often than when the same hands didn't; ± is the 95% range, so a score whose range
+    crosses 0 is not yet a finding. Compared only within the same pair of hands, so a card is
+    not credited for the good hands it turns up in, nor blamed for the strong enemy hands it
+    gets used against (a hand trap is used exactly when they have a big turn). <b>every
+    game</b> = never played without it in a comparable game; your turn 1 is solved once per
+    enemy hand and reused, so cards used only on turn 1 land here. Most cards score above 0,
+    because a game where more of your deck came out is a game that went well — compare cards
+    with each other. A card you never used is not listed: "not measured", not "bad". It is
+    per enemy deck, and it is a correlation, not a swap test.
+  </details>
+  {% else %}
+  <p class="muted" style="margin:0;font-size:12.5px">No games read yet.</p>
+  {% endif %}
 </div>
 {% endfor %}
 

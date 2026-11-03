@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer, game,
+                    trainer, game, impact,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -25,6 +25,7 @@ bp = Blueprint("views", __name__)
 ROOT = Path(__file__).resolve().parent.parent
 DECKS = ROOT / "assets" / "decks"
 ROOT_RESULTS = ROOT / "results"
+IMPACT_READ_S = 3       # replays read per games-page load, at most this long
 
 
 def conn():
@@ -517,6 +518,7 @@ def games_view(name=None):
         return redirect(url_for("views.index"))
     dh = trainer.deck_hash(path)
     hand_rows = {h["i"]: h for h in trainer.hands_table(c, dh)}
+    own = impact.deck_codes(path)
     nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
     enemies = []
     for (enemy,) in c.execute("SELECT DISTINCT enemy FROM game_results "
@@ -534,8 +536,15 @@ def games_view(name=None):
         for t in c.execute("SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE "
                            "deck_hash=? AND enemy=? AND ok=1", (dh, enemy)):
             openings[t["enemy_seed"]] = [nm(x) for x in json.loads(t["enemy_hand"] or "[]")]
+        # Reading a game's replay takes ~0.05 s; a page load reads at most
+        # a few seconds' worth, so a big backlog fills over a few visits
+        # (or at once with `daemon.py impact`).
+        unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S)
+        cards = [{**r, "name": nm(r["code"])}
+                 for r in impact.scores(c, dh, enemy, own=own)]
         enemies.append({"name": enemy, "rows": rows,
-                        "openings": sorted(openings.items())})
+                        "openings": sorted(openings.items()),
+                        "impact": cards, "unread": unread})
     return render_template(
         "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
         trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
@@ -543,7 +552,7 @@ def games_view(name=None):
         job=_games_job(c, name), running=jobs.active(c),
         runs=game.RUNS, enemy_hands=game.ENEMY_HANDS,
         near_dud=int(game.NEAR_DUD_RATE * 100), solve_s=engine.SOLVE_MS // 1000,
-        otk_s=game.OTK_MS // 1000,
+        otk_s=game.OTK_MS // 1000, min_side=impact.MIN_SIDE,
         built=game.ROOTED_BIN.exists())
 
 

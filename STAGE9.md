@@ -24,7 +24,9 @@ Delete this file once the gates pass and the win-rate run is built and verified.
   T1, payoff on T2, lethal found on T3 (3400 + 3000 + 2700), replay-verified.
 
 **Left before this file can be deleted:**
-- Impact score per card from game results (summoned in won vs lost games, same hand).
+- ~~Impact score per card from game results~~ -- done 2026-11-02 (`skills/impact.py`,
+  games page "Card impact", `daemon.py impact`); stratified by (your hand, their hand),
+  not by hand alone -- see CLAUDE.md.
 - Rank top-3 boards per hand (needs STAGE8 item 1).
 - Measured cost of a full run (the 2.5 min/game estimate is unmeasured at 60 s).
 - Going-second variant (their T1 board, your T2 lethal) -- the user liked it; same pieces.

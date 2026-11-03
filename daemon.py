@@ -62,6 +62,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
+  impact <deck> [enemy]     card impact scores from the games played
   help / quit
 """
 
@@ -2238,6 +2239,36 @@ def _print_games(rows):
               + ("" if r["complete"] else "  (incomplete)"))
 
 
+def cmd_impact(conn, args):
+    """`impact <deck> [enemy]`: read every game not read yet, then print each
+    card's impact on the win rate (skills/impact.py), per enemy deck."""
+    from skills import card_db, impact
+
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print("usage: impact <deck> [enemy]")
+        return
+    dh, name = trainer.deck_hash(path), path.stem
+    enemies = args[1:2] or [r[0] for r in conn.execute(
+        "SELECT DISTINCT enemy FROM game_results WHERE deck_hash=? ORDER BY enemy", (dh,))]
+    if not enemies:
+        print(f"no games played for {name} yet: games {name} <enemy>")
+        return
+    for enemy in enemies:
+        impact.fill(conn, dh, name, enemy, say=print)
+        rows = impact.scores(conn, dh, enemy, own=impact.deck_codes(path))
+        print(f"\n{name} vs {enemy}: {rows[0]['games'] if rows else 0} game(s) read")
+        for r in rows:
+            nm = (card_db.resolve(conn, r["code"]) or {"name": str(r["code"])})["name"]
+            if r["status"] == "every game":
+                print(f"  {'every game':>14}  {nm}  (used in {r['used']}, never without)")
+            else:
+                flag = "  few games" if r["status"] == "few games" else ""
+                print(f"  {r['impact'] * 100:+6.0f} ±{r['ci'] * 100:3.0f} pts  {nm}  "
+                      f"(won {r['used_win']:.0%} used / {r['not_win']:.0%} without, "
+                      f"{r['compared']} compared){flag}")
+
+
 def cmd_games(conn, args):
     """`games <deck> <enemy> [runs] [enemy hands]` / `games <deck> <enemy> status`:
     your turn 1, their turn 2, your turn 3 -- does the hand win by then?"""
@@ -2306,6 +2337,7 @@ COMMANDS = {
     "floodgates": cmd_floodgates,
     "train": cmd_train,
     "games": cmd_games,
+    "impact": cmd_impact,
 }
 
 
