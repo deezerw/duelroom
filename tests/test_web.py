@@ -1214,3 +1214,17 @@ def test_starter_test_page_and_start(loggedin, monkeypatch):
     argv = J.KINDS["starters"][0]("kewl-tune", {k: v for k, v in seen.items()
                                                 if k not in ("kind", "deck")})
     assert argv == ["starters", "kewl-tune", "2", "1.0", "--seconds", "15", "--skip", "14558127"]
+
+
+def test_full_art_falls_back_to_small_art(loggedin, monkeypatch):
+    """The playmat preview asks for full-size art, which is a separate fetch;
+    until it runs, a card with small art shows that, not "no art yet"."""
+    from skills import images
+
+    real = images.have
+    monkeypatch.setattr(images, "have", lambda size, cid: size != "full" and real(size, cid))
+    r = loggedin.get("/img/full/89631139.jpg")
+    if real("small", 89631139):
+        assert r.mimetype == "image/jpeg" and r.headers["Cache-Control"] == "no-store"
+    monkeypatch.setattr(images, "have", lambda size, cid: False)
+    assert loggedin.get("/img/full/89631139.jpg").mimetype == "image/svg+xml"

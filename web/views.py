@@ -1083,8 +1083,17 @@ def card_image(size, card_id):
     if size not in images.SIZES:
         abort(404)
     if not images.have(size, card_id):
-        return Response(PLACEHOLDER, mimetype="image/svg+xml",
-                        headers={"Cache-Control": "no-store"})
+        # Full-size art is its own (optional, large) fetch job; until it has
+        # run, the playmat's enlarged preview showed "no art yet" for every
+        # card. The small art, blown up, beats a blank.
+        small = next((s for s in images.SIZES if s != size and images.have(s, card_id)), None)
+        if small is None:
+            return Response(PLACEHOLDER, mimetype="image/svg+xml",
+                            headers={"Cache-Control": "no-store"})
+        r = send_from_directory(images.dir_for(small), f"{card_id}.jpg",
+                                mimetype="image/jpeg")
+        r.headers["Cache-Control"] = "no-store"   # the real full art replaces it once fetched
+        return r
     return send_from_directory(
         images.dir_for(size), f"{card_id}.jpg", mimetype="image/jpeg",
         max_age=60 * 60 * 24 * 365)   # a passcode's art never changes
