@@ -5257,3 +5257,49 @@ def test_card_values_without_zone_migrate_as_field_values(tmp_path):
     c = db.connect(path)
     assert [tuple(r) for r in c.execute("SELECT deck, code, zone, value FROM card_values")] == \
         [("d", 82135803, "field", 2.0)]
+
+
+def test_starter_hands_respect_copies_skip_and_keep_indices():
+    """Every k-card hand the main deck can hold: a card twice only with two
+    copies; leaving a card out drops its hands without renumbering the rest."""
+    from collections import Counter
+
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+
+    from skills import trainer
+    from web.views import deck_path
+
+    path = deck_path("kewl-tune")
+    cards = default_cards()
+    count = Counter(cards.canonical(c) for c in load_ydk(path).main)
+    ones = trainer.starter_hands(path, 1)
+    assert [h for _i, h in ones] == [[c] for c in sorted(count)]
+    pairs = dict(trainer.starter_hands(path, 2))
+    assert all(Counter(h)[c] <= count[c] for h in pairs.values() for c in h)
+    single = next(c for c, n in count.items() if n == 1)
+    assert [single, single] not in pairs.values()
+    left = dict(trainer.starter_hands(path, 2, skip={single}))
+    assert all(single not in h for h in left.values())
+    assert all(pairs[i] == h for i, h in left.items())
+
+
+def test_starter_test_trains_its_own_pool(monkeypatch):
+    """`train(starters=k)` runs the generations over the k-card pool under
+    its own key -- never the training hands -- and skips the 5-card bootstrap."""
+    from skills import db, trainer
+    from web.views import deck_path
+
+    path, seen = deck_path("kewl-tune"), []
+    monkeypatch.setattr(trainer.engine, "require", lambda: None)
+    monkeypatch.setattr(trainer.engine, "preflight", lambda paths: None)
+    monkeypatch.setattr(trainer, "bootstrap", lambda *a, **k: seen.append("bootstrap"))
+    monkeypatch.setattr(trainer, "run_generation",
+                        lambda conn, dp, name, dh, gen, *a: seen.append(dh) or
+                        trainer._record_gen(conn, dh, name, gen, trainer._now(), 0, 0, 1))
+    c = db.connect(":memory:")
+    assert trainer.train(c, path, "kewl-tune", generations=1, starters=1, skip=()) == 1
+    key = trainer.starter_key(trainer.deck_hash(path), 1)
+    assert seen == [key]
+    n = c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=?", (key,)).fetchone()[0]
+    assert n == len(trainer.starter_hands(path, 1))

@@ -55,6 +55,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
   impact <deck> [enemy]     card impact scores from the games played
+  starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 ```
 
@@ -446,6 +447,13 @@ stay flat. Bests are seeded from this exact deck's stored results (matched by ca
 not file name; `trainer_hands.deck_hash`). Stop = a request honoured between
 generations; every attempt is committed as it lands, so a killed run resumes with no
 repeated (hand, goal, draw).
+
+**Starter test** (`/starters/<deck>`, `starters <deck> <1-3> [hours]`, job kind `starters`):
+the trainer over every k-card hand the main deck can hold (copies respected, hand traps left
+out by default, `--skip` more), pool key `trainer.starter_key(dh, k)` so it never mixes with the
+training hands; no 5-card bootstrap; 60 s tries by default; ends at a plateau. A hand that makes
+nothing in generation 1 gets no more tries (`plan` has nothing to retry). Sizes for imported:
+24 / 286 / 2262 hands (~0.5 / 5.5 / 44 h first generation at 60 s on 6 workers).
 
 **Card values** (`card_values`, keyed by zone field/grave/hand, train page "Card values", `trainer.set_value`): what one
 interruption of a card is worth, 0-5 in halves, default 1. `line_key`'s `on_field` and

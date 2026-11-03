@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}starter test {{ name }} · duelroom{% endblock %}
+{% block body %}
+<style>
+  .startform{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+  .startform label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  .startform input,.startform select{width:90px;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+                   border-radius:6px;padding:6px 8px;font:inherit}
+  .skips{display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 0 4px;font-size:12.5px}
+  .skips label{display:flex;gap:5px;align-items:center;color:var(--dim)}
+  .tabs{display:flex;gap:6px;margin:0 0 10px}
+  .tabs a{border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:13px;text-decoration:none;color:var(--dim)}
+  .tabs a.on{color:var(--ink);border-color:var(--ink)}
+  .starters td{vertical-align:top}
+  .starters .num{text-align:right;white-space:nowrap}
+  .starters .dead td{color:var(--faint)}
+  @media (max-width:760px){.starters .hide-sm{display:none}}
+</style>
+
+<div class="page-head">
+  <h1>Starter test</h1>
+  <div class="sub"><b>{{ name }}</b> — every 1, 2 or 3-card hand the deck can hold, played on its
+    own with the rest of the deck behind it, by the same trainer: which cards make the most
+    interruptions off just themselves. Scored with your <a href="{{ url_for('views.train_view', name=name) }}">card
+    values</a>, extenders and moves to avoid.</div>
+</div>
+
+<div class="panel">
+  {% if job and job.state == 'running' %}
+    <p style="margin:0 0 10px"><b>Running now</b> (job
+      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>,
+      {{ job_size }}-card hands).
+      {% if stopping %}Stopping after the current generation.{% endif %}</p>
+    {% if not stopping %}
+    <form method="post" action="{{ url_for('views.starters_stop', name=name) }}" style="margin:0">
+      <input type="hidden" name="size" value="{{ k }}"><button>Stop after this generation</button></form>
+    {% endif %}
+  {% elif job %}
+    <p style="margin:0 0 10px">Queued (job <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>)
+      {% if running %}— waits for job {{ running.id }} to finish{% endif %}.</p>
+    <form method="post" action="{{ url_for('views.starters_stop', name=name) }}" style="margin:0">
+      <input type="hidden" name="size" value="{{ k }}"><button>Cancel</button></form>
+  {% else %}
+  <form class="startform" method="post" action="{{ url_for('views.starters_start', name=name) }}">
+    <label>hand size<select name="size">
+      {% for n in sizes %}<option value="{{ n }}" {% if n == k %}selected{% endif %}>{{ n }} card{{ 's' if n > 1 }}</option>{% endfor %}
+    </select></label>
+    <label>up to hours<input type="number" name="hours" value="8" min="0.25" max="200" step="0.25"></label>
+    <label>seconds a try<input type="number" name="seconds" value="{{ solve_s }}" min="15" max="900" step="15"></label>
+    <button class="btn primary">Start</button>
+    <div style="flex-basis:100%">
+      <div class="muted" style="font-size:12.5px">Leave out (fewer hands, faster):</div>
+      <div class="skips">
+        {% for o in cards %}<label><input type="checkbox" name="skip" value="{{ o.code }}"
+          {% if o.code in skip %}checked{% endif %}>{{ o.name }}</label>{% endfor %}
+      </div>
+    </div>
+  </form>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0">
+    {% for n in sizes %}{% set e = estimates[n] %}<b>{{ n }} card{{ 's' if n > 1 }}</b>: {{ e[0] }} hands,
+      first generation ~{{ '%.1f'|format(e[1]) }} h at {{ solve_s }} s{% if not loop.last %} · {% endif %}{% endfor %}
+    (hand traps left out; each card you leave out cuts it further). Every hand asks for every board
+    once in its first generation; a hand that makes nothing then gets no more tries, so the rest of
+    the time goes to the hands that do something. It ends on its own after a plateau.</p>
+  {% endif %}
+</div>
+
+<div class="sec"><h2>Results</h2></div>
+<div class="panel">
+  <div class="tabs">
+    {% for n in sizes %}<a class="{{ 'on' if n == k }}" href="{{ url_for('views.starters_view', name=name, k=n) }}">{{ n }} card{{ 's' if n > 1 }}{% if done[n] %} · {{ done[n] }}{% endif %}</a>{% endfor %}
+  </div>
+  {% if not rows %}
+    <p class="muted" style="margin:0">No {{ k }}-card starter test yet.</p>
+  {% else %}
+    {% set solved = rows|selectattr('key')|list %}
+    <p class="muted" style="margin:0 0 8px;font-size:12.5px">{{ solved|length }} of {{ rows|length }} hands made a
+      board{% if gens %} · {{ gens|length - 1 }} generation(s){% endif %}. Best first: on-field value, then total
+      interruption value, then negates.</p>
+    <table class="starters">
+      <thead><tr><th>hand</th><th class="num">on field</th><th class="num">interruptions</th>
+        <th class="num hide-sm">actions</th><th class="num hide-sm">tries</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="{{ '' if r.key else 'dead' }}">
+          <td>{{ r.hand|join(' + ') }}</td>
+          {% if r.key %}
+            <td class="num">{{ r.on_field }}</td><td class="num">{{ r.interruptions }}</td>
+            <td class="num hide-sm">{{ r.actions }}</td>
+          {% else %}<td class="num">—</td><td class="num">—</td><td class="num hide-sm"></td>{% endif %}
+          <td class="num hide-sm">{{ r.tries }}</td>
+          <td>{% if r.watchable %}<a class="btn" href="{{ url_for('views.watch_starter', name=name, k=k, i=r.i) }}">▶ watch</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}

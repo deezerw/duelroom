@@ -63,6 +63,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]  finish the game: win rate by turn 3
   impact <deck> [enemy]     card impact scores from the games played
+  starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 """
 
@@ -2239,6 +2240,67 @@ def _print_games(rows):
               + ("" if r["complete"] else "  (incomplete)"))
 
 
+def cmd_starters(conn, args):
+    """The starter test: `starters <deck> <1-3> [hours] [--seconds N]
+    [--skip code,code] [--with-handtraps]` trains every k-card hand the deck
+    can hold; `starters <deck> <k> status` prints the best of them."""
+    args = list(args)
+    solve_ms, skip, with_ht = trainer.STARTER_MS, None, False
+    if "--with-handtraps" in args:
+        args.remove("--with-handtraps")
+        with_ht = True
+    for flag in ("--seconds", "--skip"):
+        if flag in args:
+            at = args.index(flag)
+            try:
+                val = args[at + 1]
+                if flag == "--seconds":
+                    solve_ms = int(float(val) * 1000)
+                    if not 10_000 <= solve_ms <= 1_800_000:
+                        raise ValueError
+                else:
+                    skip = {int(c) for c in val.split(",") if c}
+            except (IndexError, ValueError):
+                print("--seconds takes 10-1800, --skip a comma list of card codes")
+                return
+            del args[at:at + 2]
+    if len(args) < 2 or args[1] not in {str(k) for k in trainer.STARTER_SIZES}:
+        print("usage: starters <deck> <1-3> [hours] [--seconds N] [--skip codes] "
+              "[--with-handtraps] | starters <deck> <k> status")
+        return
+    path = _resolve_deck(args[0], conn)
+    if not path:
+        print(f"no such deck: {args[0]}")
+        return
+    name, k, rest = path.stem, int(args[1]), args[2:]
+    if skip is None:
+        skip = trainer.starter_skip(path, with_ht)
+    if rest and rest[0] == "status":
+        from skills import card_db
+        rows = sorted(trainer.hands_table(conn, trainer.starter_key(trainer.deck_hash(path), k)),
+                      key=trainer.rank)
+        if not rows:
+            print(f"{name}: no {k}-card starter test yet")
+            return
+        for r in rows[:25]:
+            if not r["key"]:
+                break
+            print(f"  {r['on_field']:>4} on field  {r['interruptions']:>4} int  "
+                  + " + ".join(r["hand"]))
+        dead = sum(1 for r in rows if not r["key"])
+        print(f"{dead} of {len(rows)} hand(s) made no board")
+        return
+    hours = float(rest[0]) if rest else 8.0
+    n, est = trainer.starter_estimate(path, k, skip, solve_ms)
+    _warn_if_busy("the starter test")
+    print(f"starter test {name}: {n} {k}-card hand(s), {solve_ms // 1000} s a try, "
+          f"first generation ~{est:.1f} h, up to {hours:g} h (stop: train {name} stop)")
+    ran = trainer.train(conn, path, name, hours=hours, solve_ms=solve_ms,
+                        plateau=PLATEAU, starters=k, skip=skip)
+    print(f"{ran} generation(s) run")
+    cmd_starters(conn, [name, str(k), "status"])
+
+
 def cmd_impact(conn, args):
     """`impact <deck> [enemy]`: read every game not read yet, then print each
     card's impact on the win rate (skills/impact.py), per enemy deck."""
@@ -2354,6 +2416,7 @@ COMMANDS = {
     "train": cmd_train,
     "games": cmd_games,
     "impact": cmd_impact,
+    "starters": cmd_starters,
 }
 
 

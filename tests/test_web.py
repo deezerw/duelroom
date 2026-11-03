@@ -1191,3 +1191,26 @@ def test_train_card_value_reweights_the_board(loggedin):
         for zone in ("field", "grave"):
             loggedin.post("/train/kewl-tune/value", data={"code": code, "zone": zone, "value": ""})
     assert not any(c_ == code for c_, _z in trainer.prefs(c, "kewl-tune")["values"])
+
+
+def test_starter_test_page_and_start(loggedin, monkeypatch):
+    from web import jobs as J
+
+    page = loggedin.get("/starters/kewl-tune")
+    assert page.status_code == 200 and "Starter test" in page.get_data(as_text=True)
+    assert loggedin.get("/starters/kewl-tune?k=4").status_code == 404
+    assert loggedin.post("/starters/kewl-tune/start", data={"size": "5"}).status_code == 400
+    seen = {}
+    monkeypatch.setattr(J, "enqueue", lambda c, kind, deck=None, **p:
+                        seen.update(kind=kind, deck=deck, **p) or 999999)
+    monkeypatch.setattr("web.views._starter_job", lambda c, name: None)
+    monkeypatch.setattr("web.views._training_job", lambda c, name: None)
+    r = loggedin.post("/starters/kewl-tune/start",
+                      data={"size": "2", "hours": "1", "seconds": "5", "skip": ["14558127"]})
+    assert r.status_code == 302
+    # clamped: 15 s a try at least
+    assert seen == {"kind": "starters", "deck": "kewl-tune", "size": 2, "hours": 1.0,
+                    "seconds": 15, "skip": [14558127]}
+    argv = J.KINDS["starters"][0]("kewl-tune", {k: v for k, v in seen.items()
+                                                if k not in ("kind", "deck")})
+    assert argv == ["starters", "kewl-tune", "2", "1.0", "--seconds", "15", "--skip", "14558127"]

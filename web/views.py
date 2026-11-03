@@ -690,6 +690,97 @@ def train_value(name):
     return redirect(url_for("views.train_view", name=name))
 
 
+def _starter_job(c, name):
+    return c.execute(
+        "SELECT * FROM jobs WHERE kind='starters' AND deck=? "
+        "AND state IN ('queued','running') ORDER BY id LIMIT 1", (name,)).fetchone()
+
+
+@bp.route("/starters/<name>")
+@login_required
+def starters_view(name):
+    """The starter test: what every 1/2/3-card hand makes on its own."""
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    dh = trainer.deck_hash(path)
+    k = request.args.get("k", type=int) or 1
+    if k not in trainer.STARTER_SIZES:
+        abort(404)
+    rows = sorted(trainer.hands_table(c, trainer.starter_key(dh, k)), key=trainer.rank)
+    skip = trainer.starter_skip(path)
+    estimates = {n: trainer.starter_estimate(path, n, skip) for n in trainer.STARTER_SIZES}
+    done = {n: c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=?",
+                         (trainer.starter_key(dh, n),)).fetchone()[0]
+            for n in trainer.STARTER_SIZES}
+    gens = trainer.curve(c, trainer.starter_key(dh, k))
+    job = _starter_job(c, name)
+    return render_template(
+        "starters.html", name=name, k=k, rows=rows, sizes=trainer.STARTER_SIZES,
+        estimates=estimates, done=done, gens=gens, job=job,
+        job_size=json.loads(job["params"]).get("size") if job else None,
+        stopping=trainer.stop_requested(name), running=jobs.active(c),
+        cards=trainer.extender_options(c, path, trainer.prefs(c, name)), skip=skip,
+        solve_s=trainer.STARTER_MS // 1000)
+
+
+@bp.route("/starters/<name>/start", methods=["POST"])
+@login_required
+def starters_start(name):
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    k = request.form.get("size", type=int)
+    if k not in trainer.STARTER_SIZES:
+        abort(400)
+    if _starter_job(c, name) or _training_job(c, name):
+        flash("This deck already has a training or starter-test job.")
+        return redirect(url_for("views.starters_view", name=name, k=k))
+    hours = min(max(request.form.get("hours", type=float) or 8, 0.25), 200)
+    seconds = min(max(request.form.get("seconds", type=int) or trainer.STARTER_MS // 1000, 15), 900)
+    skip = sorted({int(x) for x in request.form.getlist("skip") if x.isdigit()})
+    jid = jobs.enqueue(c, "starters", name, size=k, hours=hours, seconds=seconds, skip=skip)
+    flash(f"Starter test queued (job {jid}).")
+    return redirect(url_for("views.starters_view", name=name, k=k))
+
+
+@bp.route("/starters/<name>/stop", methods=["POST"])
+@login_required
+def starters_stop(name):
+    c = conn()
+    if not deck_path(name):
+        abort(404)
+    job = _starter_job(c, name)
+    k = request.form.get("size", type=int) or 1
+    if job and job["state"] == "queued":
+        jobs.cancel(c, job["id"])
+        flash("Queued starter test cancelled.")
+    elif job:
+        trainer.request_stop(name)
+        flash("The starter test will stop after its current generation.")
+    return redirect(url_for("views.starters_view", name=name, k=k))
+
+
+@bp.route("/watch/starters/<name>/<int:k>/<int:i>")
+@login_required
+def watch_starter(name, k, i):
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists() or k not in trainer.STARTER_SIZES:
+        abort(404)
+    dh = trainer.starter_key(trainer.deck_hash(path), k)
+    rec = trainer.best_record(c, dh, i)
+    row = next((h for h in trainer.hands_table(c, dh) if h["i"] == i), None)
+    if not rec or not row:
+        abort(404)
+    return _watch(name, f"{name} · starter test · " + " + ".join(row["hand"]),
+                  f"{row['on_field']} on field, {row['interruptions']} interruption(s), "
+                  f"{row['actions']} actions · found in generation {row['gen']}",
+                  rec["start"], rec["lines"][0].get("responses") or [], [])
+
+
 @bp.route("/train/<name>/stop", methods=["POST"])
 @login_required
 def train_stop(name):

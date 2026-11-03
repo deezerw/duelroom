@@ -48,6 +48,10 @@ KINDS = {
                 + ([p["enemy"]] if p.get("enemy") else [])
                 + (["--seconds", str(p["seconds"])] if p.get("seconds") else []),
                 "deck trainer", "hours, stoppable"),
+    "starters": (lambda d, p: ["starters", d, str(p.get("size", 1)), str(p.get("hours", 8)),
+                                "--seconds", str(p.get("seconds", 60)),
+                                "--skip", ",".join(map(str, p.get("skip", []))) or "0"],
+                 "starter test", "hours, stoppable"),
     "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
                               str(p.get("runs", 10)), str(p.get("enemy_hands", 3))],
                 "finish the game vs a meta deck", "hours, resumable"),
@@ -59,7 +63,7 @@ DECKLESS = ("meta", "images")
 # Jobs started from their own page, because they need input the generic
 # "run" button cannot give: a pilot run without chosen cards is a job
 # that fails on its first line.
-OWN_PAGE = ("pilot", "train", "games")
+OWN_PAGE = ("pilot", "train", "games", "starters")
 
 
 def _now():

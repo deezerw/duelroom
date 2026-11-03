@@ -43,7 +43,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import engine, sweep
+from . import engine, scenarios, sweep
 
 STATE = engine.ROOT / "results" / "trainer"
 HANDS = 24          # the pool; the learning curve is measured over it
@@ -473,6 +473,78 @@ def ensure_pool(conn, deck_path, name, hands=HANDS):
     return dh
 
 
+# --- starter test: what k cards make on their own ------------------------------
+#
+# The same trainer over a different pool: every k-card hand the deck can
+# hold (k = 1..3), with the rest of the deck behind it as usual. A pool of
+# its own (`starter_key`), so it never mixes with the training hands. A hand
+# that makes nothing in its first generation gets no further tries (`plan`
+# has nothing to retry), so the dead hands cost one generation and the rest
+# of the time goes to the hands that do something.
+
+STARTER_SIZES = (1, 2, 3)
+STARTER_MS = 60_000
+
+
+def starter_key(dh, k):
+    return f"{dh}:starters{k}"
+
+
+def starter_hands(deck_path, k, skip=()):
+    """[(index, hand)] of every k-card hand the main deck can hold (copies
+    respected), indices stable whatever `skip` leaves out, in sorted order."""
+    from collections import Counter
+    from itertools import combinations_with_replacement
+
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    count = Counter(cards.canonical(c) for c in load_ydk(Path(deck_path)).main)
+    skip, out = {cards.canonical(c) for c in skip}, []
+    for i, hand in enumerate(h for h in combinations_with_replacement(sorted(count), k)
+                             if all(n <= count[c] for c, n in Counter(h).items())):
+        if not skip & set(hand):
+            out.append((i, list(hand)))
+    return out
+
+
+def starter_skip(deck_path, with_handtraps=False):
+    """The cards a starter test leaves out by default: the deck's hand traps,
+    which do nothing on your own turn."""
+    if with_handtraps:
+        return set()
+    from ygorl.cards.ydk import load_ydk
+    return set(scenarios.HANDTRAPS) & set(load_ydk(Path(deck_path)).main)
+
+
+def ensure_starter_pool(conn, deck_path, name, k, skip=()):
+    from ygorl.solver.batch import hand_seed
+
+    dh = starter_key(deck_hash(deck_path), k)
+    with conn:
+        for i, hand in starter_hands(deck_path, k, skip):
+            conn.execute(
+                "INSERT OR IGNORE INTO trainer_hands "
+                "(deck_hash, deck, hand_index, hand_seed, hand) VALUES (?,?,?,?,?)",
+                (dh, name, i, str(hand_seed(0, f"{name}:starters{k}", i)),
+                 json.dumps(hand)))
+    return dh
+
+
+def starter_estimate(deck_path, k, skip=(), solve_ms=STARTER_MS, workers=None):
+    """(hands, hours) of the first generation: every hand asks for every
+    piece once (about `breadth` goals each)."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import blocking_plan
+
+    deck = load_ydk(Path(deck_path))
+    goals = len(blocking_plan(deck.main, deck.extra, [], default_cards()).pieces) + 1
+    n = len(starter_hands(deck_path, k, skip))
+    return n, n * goals * solve_ms / 1000 / 3600 / (workers or engine.DEFAULT_WORKERS)
+
+
 def _set_best(conn, dh, hand_index, key, goal, compact, gen, source):
     conn.execute(
         "UPDATE trainer_hands SET best_key=?, best_goal=?, best_record=?, "
@@ -791,24 +863,27 @@ def plateaued(conn, dh, n):
 
 def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
           per_hand=PER_HAND, solve_ms=None, workers=None, say=print,
-          plateau=None):
+          plateau=None, starters=None, skip=()):
     """Run generations until `generations` are done, `hours` pass, a stop
     is requested, or -- with `plateau` -- that many generations in a row
     improved no hand ("as good as it'll get", STAGE8). Resumable: every
     attempt is committed as it lands, and a killed generation is simply
-    started again under a new number."""
+    started again under a new number. `starters=k`: the starter test's
+    pool of k-card hands (less `skip`) instead of the training hands."""
     import time
 
     engine.require()
     engine.preflight([Path(deck_path)])
-    dh = ensure_pool(conn, deck_path, name, hands)
+    dh = (ensure_starter_pool(conn, deck_path, name, starters, skip) if starters
+          else ensure_pool(conn, deck_path, name, hands))
     rescore_bests(conn, dh, name, say)
     clear_stop(name)
     with conn:   # an interrupted generation never finished: drop its row
         conn.execute("DELETE FROM trainer_gens WHERE deck_hash=? AND finished IS NULL",
                      (dh,))
     if not curve(conn, dh):
-        bootstrap(conn, dh, name, deck_path, say)
+        if not starters:    # stored results are 5-card hands
+            bootstrap(conn, dh, name, deck_path, say)
         _record_gen(conn, dh, name, 0, _now(), 0, 0, solve_ms or TRAIN_MS)
         say("generation 0 = the starting point (stored results only)")
     deadline = time.monotonic() + hours * 3600 if hours else None

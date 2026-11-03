@@ -53,6 +53,7 @@ READ_ONLY = [
     ("drift", ["Branded"]),
     ("games", []),      # usage only: a real run is hours of solver
     ("impact", ["no-such-deck"]),   # usage only: a real run reads every game replay
+    ("starters", ["no-such-deck", "1", "status"]),
 ]
 
 
