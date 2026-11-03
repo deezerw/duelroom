@@ -449,8 +449,7 @@ def train_view(name=None):
     dh = trainer.deck_hash(path)
     p = trainer.prefs(c, name)
     gens = trainer.curve(c, dh)
-    hands = sorted(trainer.hands_table(c, dh),
-                   key=lambda h: (-(h["on_field"] or -1), -(h["interruptions"] or 0)))
+    hands = sorted(trainer.hands_table(c, dh), key=trainer.rank)
     job = _training_job(c, name)
     return render_template(
         "train.html", name=name, gens=gens, hands=hands, job=job,
@@ -460,7 +459,8 @@ def train_view(name=None):
         big_stack=trainer.BIG_STACK, big_x=trainer.BIG_STACK_X,
         zone_words=_ZONE_WORDS,
         default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
-        solve_s=engine.SOLVE_MS // 1000, enemies=_enemy_decks(name), plateau=3)
+        solve_s=engine.SOLVE_MS // 1000, enemies=_enemy_decks(name), plateau=3,
+        has_best=any(h["watchable"] for h in hands))
 
 
 @bp.route("/train/<name>/start", methods=["POST"])
@@ -646,6 +646,21 @@ def train_stop(name):
         flash("The trainer will stop after its current generation — every "
               "line it has found is already saved.")
     return redirect(url_for("views.train_view", name=name))
+
+
+@bp.route("/watch/train/<name>/best")
+@login_required
+def watch_train_best(name):
+    """The best line so far, picked when clicked -- so a page left open
+    through a training run still opens the newest best."""
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    best = trainer.best_hand(conn(), trainer.deck_hash(path))
+    if not best:
+        flash("No line to watch yet — the trainer has not solved a hand.")
+        return redirect(url_for("views.train_view", name=name))
+    return redirect(url_for("views.watch_train", name=name, i=best["i"]))
 
 
 @bp.route("/watch/train/<name>/<int:i>")

@@ -1111,3 +1111,24 @@ def test_start_routes_refuse_a_missing_deck(client, route):
     r = client.post(route, data={"enemy": "snake_eye"})
     assert r.status_code == 404
     assert db.connect().execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == before
+
+
+def test_watch_current_best_opens_the_top_ranked_line(loggedin):
+    """The train page's "watch current best" resolves at click time to the
+    hand ranked first by the trainer's own key (the table's top row)."""
+    from skills import db, trainer
+    from web.views import deck_path
+
+    c = db.connect()
+    best = trainer.best_hand(c, trainer.deck_hash(deck_path("kewl-tune")))
+    r = loggedin.get("/watch/train/kewl-tune/best")
+    if best is None:
+        assert r.status_code == 302 and r.headers["Location"].endswith("/train/kewl-tune")
+    else:
+        assert r.status_code == 302
+        assert r.headers["Location"].endswith(f"/watch/train/kewl-tune/{best['i']}")
+        assert "Watch current best" in loggedin.get("/train/kewl-tune").get_data(as_text=True)
+    assert loggedin.get("/watch/train/no-such-deck/best").status_code == 404
+    rows = [{"key": None}, {"key": trainer.parts([0, 2, 3, 3, -50])},
+            {"key": trainer.parts([0, 3, 2, 2, -90])}, {"key": trainer.parts([0, 3, 2, 2, -80])}]
+    assert sorted(rows, key=trainer.rank) == [rows[3], rows[2], rows[1], rows[0]]

@@ -653,6 +653,22 @@ def curve(conn, dh):
         "ORDER BY gen", (dh,))]
 
 
+def rank(h):
+    """Sort key for a hands_table row, best line first: the trainer's own
+    line_key order, unsolved hands last."""
+    k = h["key"]
+    if not k:
+        return (1,)
+    return (0, k["avoided"], -k["on_field"], -k["interruptions"],
+            -k["negates"], k["actions"])
+
+
+def best_hand(conn, dh):
+    """The hands_table row holding the best watchable line, or None."""
+    rows = [h for h in hands_table(conn, dh) if h["watchable"]]
+    return min(rows, key=rank) if rows else None
+
+
 def hands_table(conn, dh):
     from . import card_db
     out = []

@@ -43,6 +43,8 @@
   <div class="sub"><b>{{ name }}</b> — plays a fixed pool of hands over and over,
     aims each attempt where a better board might be, and keeps every hand's
     best line ever found.</div>
+  {% if has_best %}<a class="btn primary" style="margin-top:10px;display:inline-block"
+     href="{{ url_for('views.watch_train_best', name=name) }}">▶ Watch current best</a>{% endif %}
 </div>
 
 <div class="panel">
