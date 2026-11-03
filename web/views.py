@@ -578,6 +578,26 @@ def games_start(name):
     return redirect(url_for("views.games_view", name=name))
 
 
+@bp.route("/watch/game/<name>/<enemy>/latest")
+@login_required
+def watch_game_latest(name, enemy):
+    """The newest finished game against `enemy`, picked when clicked -- so
+    a page left open through a run still opens the game just played."""
+    path = deck_path(name)
+    if not path or not path.exists():
+        abort(404)
+    for g in conn().execute(
+            "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
+            "outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
+            (trainer.deck_hash(path), enemy)):
+        if impact.source(name, enemy, g):
+            return redirect(url_for("views.watch_game", name=name, enemy=enemy,
+                                    hand=g["hand_index"], eseed=g["enemy_seed"],
+                                    run=g["run"]))
+    flash(f"No game against {enemy} to watch yet.")
+    return redirect(url_for("views.games_view", name=name))
+
+
 @bp.route("/watch/game/<name>/<enemy>/<int:hand>/<int:eseed>/<int:run>")
 @login_required
 def watch_game(name, enemy, hand, eseed, run):

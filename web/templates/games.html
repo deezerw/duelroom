@@ -91,6 +91,8 @@
 <div class="sec"><h2>vs {{ e.name }}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
 <div class="panel">
+  <a class="btn primary" style="margin-bottom:10px;display:inline-block"
+     href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name) }}">▶ Watch latest game</a>
   {% if e.openings %}
   <div class="openings">Enemy opening hands (identical for every one of your hands):
     <ul>{% for seed, cards in e.openings %}<li><b>{{ loop.index }}</b> — {{ cards|join(', ') }}</li>{% endfor %}</ul>

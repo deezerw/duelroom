@@ -1140,3 +1140,27 @@ def test_games_page_shows_card_impact(loggedin):
     if page.status_code != 200 or "vs " not in page.get_data(as_text=True):
         return      # no games stored for this deck on this machine
     assert "Card impact" in page.get_data(as_text=True)
+
+
+def test_watch_latest_game_opens_the_newest_one(loggedin):
+    """"Watch latest game" resolves at click time to the newest watchable game."""
+    from skills import db, impact, trainer
+    from web.views import deck_path
+
+    assert loggedin.get("/watch/game/no-such-deck/angelechy/latest").status_code == 404
+    path = deck_path("imported")
+    if not path or not path.exists():
+        return
+    c = db.connect()
+    g = next((g for g in c.execute(
+        "SELECT * FROM game_results WHERE deck_hash=? AND enemy='angelechy' AND "
+        "outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
+        (trainer.deck_hash(path),)) if impact.source("imported", "angelechy", g)), None)
+    r = loggedin.get("/watch/game/imported/angelechy/latest")
+    assert r.status_code == 302
+    if g is None:
+        assert r.headers["Location"].endswith("/games/imported")
+    else:
+        assert r.headers["Location"].endswith(
+            f"/watch/game/imported/angelechy/{g['hand_index']}/{g['enemy_seed']}/{g['run']}")
+        assert "Watch latest game" in loggedin.get("/games/imported").get_data(as_text=True)
