@@ -49,6 +49,7 @@ ROOTED_BIN = (engine.VENDOR / "build" / "combo-solver-rooted" / "bin"
               / "combosolver")
 RUNS = 10            # games per (hand, board, enemy hand): the solver is randomized
 ENEMY_HANDS = 3      # fixed enemy hands, shared by every one of your hands
+WORKERS = 4         # games at once; 2 solver threads each = 8 cores
 OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 GAMES = Path(__file__).resolve().parent.parent / "results" / "games"
@@ -309,10 +310,12 @@ def enemy_respond_codes(enemy_deck):
 
 
 def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
-        runs=RUNS, solve_ms=None, workers=3, say=print):
+        runs=RUNS, solve_ms=None, workers=WORKERS, from_end=False, say=print):
     """Play every (hand, enemy hand, run) game, resumable, and return the
     summary. `hands` = trainer hand indices (default: every hand the trainer
-    has a best goal for)."""
+    has a best goal for). `from_end` plays the list backwards: a second
+    runner started beside a running one meets it in the middle instead of
+    replaying its games (each game is skipped once stored)."""
     from concurrent.futures import ThreadPoolExecutor
 
     from ygorl.engine.duel import default_cards
@@ -463,6 +466,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     check_shared_enemy_hands(conn, dh, enemy_name)
     t1_for = t1_safe          # `one` reaches turn 1 through this name too
     jobs = [(dict(r), e, k) for k in range(runs) for r in rows for e in seeds]
+    if from_end:
+        jobs.reverse()
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(guarded(one), jobs))
     if failed:

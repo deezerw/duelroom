@@ -5173,3 +5173,14 @@ def test_game_solve_hung_solver_is_killed_not_scored(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="hung"):
         game._solve(tmp_path / "ref.yrpX", [], tmp_path, "t2", 60_000, 1)
     assert seen["timeout"] == game._hard_limit(60_000) == 240
+
+
+def test_games_cli_workers_flag_is_checked(capsys):
+    import daemon
+    from skills import db
+
+    c = db.connect()
+    for bad in (["--workers"], ["--workers", "x"], ["--workers", "0"]):
+        daemon.cmd_games(c, ["imported", "angelechy", *bad])
+        out = capsys.readouterr().out
+        assert "--workers" in out or "no such" in out

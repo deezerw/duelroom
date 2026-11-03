@@ -61,7 +61,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
-  games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
+  games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]  finish the game: win rate by turn 3
   impact <deck> [enemy]     card impact scores from the games played
   help / quit
 """
@@ -2270,16 +2270,32 @@ def cmd_impact(conn, args):
 
 
 def cmd_games(conn, args):
-    """`games <deck> <enemy> [runs] [enemy hands]` / `games <deck> <enemy> status`:
-    your turn 1, their turn 2, your turn 3 -- does the hand win by then?"""
+    """`games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]`
+    / `games <deck> <enemy> status`: your turn 1, their turn 2, your turn 3
+    -- does the hand win by then? `--from-end` plays the list backwards, so
+    a second runner beside a running one takes the games it has not reached."""
     if len(args) < 2:
-        print("usage: games <deck> <enemy> [runs] [enemy hands] | games <deck> <enemy> status")
+        print("usage: games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end] | games <deck> <enemy> status")
         return
     path = _resolve_deck(args[0], conn)
     if not path:
         print(f"no such deck: {args[0]}")
         return
     enemy, rest = args[1], args[2:]
+    from_end = "--from-end" in rest
+    rest = [a for a in rest if a != "--from-end"]
+    workers = game.WORKERS
+    if "--workers" in rest:
+        i = rest.index("--workers")
+        try:
+            workers = int(rest[i + 1])
+        except (IndexError, ValueError):
+            print("--workers takes a whole number")
+            return
+        if not 1 <= workers <= 16:
+            print("--workers must be 1-16")
+            return
+        del rest[i:i + 2]
     if not (engine.ROOT / "assets" / "decks" / f"{enemy}.ydk").exists():
         print(f"no such enemy deck: {enemy}")
         return
@@ -2297,7 +2313,7 @@ def cmd_games(conn, args):
         return
     _warn_if_busy("these games")
     _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
-                          enemy_hands=ehands))
+                          enemy_hands=ehands, workers=workers, from_end=from_end))
 
 
 COMMANDS = {
