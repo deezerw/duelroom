@@ -5184,3 +5184,31 @@ def test_games_cli_workers_flag_is_checked(capsys):
         daemon.cmd_games(c, ["imported", "angelechy", *bad])
         out = capsys.readouterr().out
         assert "--workers" in out or "no such" in out
+
+
+def test_line_key_weighs_interruptions_by_card_value():
+    """Two one-interruption boards tie at value 1; a value on one card
+    breaks the tie its way, on the field and in the total. Negates stay a count."""
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    from skills import trainer
+
+    cards = default_cards()
+    desirae, evolzar = 82135803, 74294676   # Fiendsmith's Desirae, Evolzar Laggia
+    for code in (desirae, evolzar):
+        if not any(i.where == "field" for i in card_interruptions(code, cards)):
+            pytest.skip("card scripts do not read these as field interruptions")
+
+    def line(code):
+        return {"board": {"players": [{"mzone": [{"code": code, "position": 1}],
+                                       "szone": [], "hand": [], "grave": []}, {}]},
+                "actions": [1, 2]}
+
+    base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
+    assert trainer.line_key(line(desirae), [], cards, p=base)[1:3] == \
+        trainer.line_key(line(evolzar), [], cards, p=base)[1:3] == [1, 1]
+    p = {**base, "values": {desirae: 2.5}}
+    kd, ke = trainer.line_key(line(desirae), [], cards, p=p), trainer.line_key(line(evolzar), [], cards, p=p)
+    assert kd[1:3] == [2.5, 2.5] and ke[1:3] == [1, 1] and kd > ke
+    assert kd[3] == trainer.line_key(line(desirae), [], cards, p=base)[3]

@@ -126,9 +126,11 @@ _SOLVER_ZONES = {"hand": ("hand",), "mz": ("mzone",), "sz": ("szone", "hand"),
 
 def prefs(conn, name):
     """{"avoid": {("activate", code, zone) | ("summon", code)},
-    "interrupters": {code}, "extenders": {code}} -- the shape
-    `playback.line_moves` speaks."""
-    out = {"avoid": set(), "interrupters": set(), "extenders": set()}
+    "interrupters": {code}, "extenders": {code}, "values": {code: worth}}
+    -- the shape `playback.line_moves` speaks."""
+    out = {"avoid": set(), "interrupters": set(), "extenders": set(),
+           "values": {r["code"]: r["value"] for r in conn.execute(
+               "SELECT code, value FROM card_values WHERE deck=?", (name,))}}
     for r in conn.execute("SELECT kind, code, zone FROM trainer_prefs WHERE deck=?",
                           (name,)):
         if r["kind"] == "avoid_activate":
@@ -153,6 +155,48 @@ def set_pref(conn, name, kind, code, zone="", on=True):
         else:
             conn.execute("DELETE FROM trainer_prefs WHERE deck=? AND kind=? AND "
                          "code=? AND zone=?", (name, kind, int(code), zone or ""))
+
+
+VALUE_MAX = 5
+
+
+def set_value(conn, name, code, value):
+    """What one interruption of `code` is worth, 0 .. VALUE_MAX in halves
+    (0: it does not count). None (or 1, the default) clears it."""
+    with conn:
+        conn.execute("DELETE FROM card_values WHERE deck=? AND code=?", (name, int(code)))
+        if value is not None and value != 1:
+            v = round(float(value) * 2) / 2
+            if not 0 <= v <= VALUE_MAX:
+                raise ValueError(value)
+            conn.execute("INSERT INTO card_values (deck, code, value, added) "
+                         "VALUES (?,?,?,?)", (name, int(code), v, _now()))
+
+
+def value_options(conn, deck_path, p):
+    """The deck's cards that can be an interruption -- read from their
+    scripts, or marked by the player -- for the values picker:
+    [{code, name, value, set}], highest value first."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    from . import card_db
+
+    cards, deck, out = default_cards(), load_ydk(Path(deck_path)), []
+    for code in dict.fromkeys(cards.canonical(c) for c in (*deck.extra, *deck.main)):
+        if not (card_interruptions(code, cards) or code in p["interrupters"]):
+            continue
+        v = p["values"].get(code)
+        out.append({"code": code, "value": _num(1 if v is None else v), "set": v is not None,
+                    "name": (card_db.resolve(conn, code) or {"name": f"#{code}"})["name"]})
+    return sorted(out, key=lambda o: (-o["value"], o["name"]))
+
+
+def _num(x):
+    """3.0 -> 3: keys and labels stay whole numbers until a value is not."""
+    x = round(x, 2)
+    return int(x) if float(x).is_integer() else x
 
 
 def prefs_table(conn, name):
@@ -279,6 +323,10 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     line that avoids them outranks any that does not. `p` is `prefs()`,
     whose interrupters also count -- on the field -- as interruptions.
 
+    `on_field` and `interruptions` add up what each piece is WORTH: 1,
+    unless the player set a value for the card (`card_values`) -- so a
+    Desirae can outrank an Evolzar. `negates` stays a plain count.
+
     `extenders` counts the player's extenders the line summoned or
     activated. A tiebreak, below the board: the same board THROUGH the
     bridge cards is the line with the follow-up, but no line is ever
@@ -308,7 +356,14 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     from .drill import _on_field
 
     cards = cards or default_cards()
-    p = {"avoid": set(), "interrupters": set(), "extenders": set(), **(p or {})}
+    p = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {},
+         **(p or {})}
+    vals = p["values"]
+
+    def worth(code):
+        v = vals.get(code)
+        return vals.get(cards.canonical(code), 1) if v is None else v
+
     board = line.get("board") or {}
     score = board_interruptions(board, cards)
     end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
@@ -318,9 +373,9 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         if where == "hand" and held[code] > 0:
             held[code] -= 1
             continue
-        n += 1
+        n += worth(code)
         neg += int(bool(negate))
-    extra = _extra_on_field(board, p["interrupters"], cards)
+    extra = _extra_on_field(board, p["interrupters"], cards, worth)
     avoided = used = 0
     if ((p["avoid"] or p["extenders"]) and start is not None
             and line.get("responses")):
@@ -328,13 +383,13 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         moves = line_moves(conn, start, line["responses"])
         avoided = len(moves & p["avoid"])
         used = len({m[1] for m in moves} & p["extenders"])
-    return [-avoided, _on_field(line) + extra, n + extra, neg, used,
-            -len(line.get("actions") or [])]
+    return [-avoided, _num(_on_field(line, worth if vals else None) + extra),
+            _num(n + extra), neg, used, -len(line.get("actions") or [])]
 
 
-def _extra_on_field(board, codes, cards):
+def _extra_on_field(board, codes, cards, worth=None):
     """The player's own interrupters face-up on the field that upstream's
-    script reading did not already count."""
+    script reading did not already count (`worth(code)` each, default 1)."""
     from ygorl.solver.blocking import card_interruptions
 
     if not codes:
@@ -345,7 +400,7 @@ def _extra_on_field(board, codes, cards):
         if (c["code"] in codes and c.get("position", 0) & 0x5
                 and not any(i.where == "field"
                             for i in card_interruptions(c["code"], cards))):
-            n += 1
+            n += worth(c["code"]) if worth else 1
     return n
 
 

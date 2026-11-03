@@ -121,6 +121,30 @@
   </form>
   {% endif %}
 
+  <h3 style="margin-top:16px">Card values</h3>
+  <div class="muted" style="font-size:12.5px">What one interruption of each card is worth when
+    boards are compared. Every card is worth 1 until you change it: set Fiendsmith's Desirae
+    to 2 and a board with Desirae beats the same-size board with Evolzar. 0 means it does
+    not count at all. Up to {{ value_max }}, in halves.</div>
+  {% if value_options %}
+  <table class="values">
+    <tbody>
+    {% for o in value_options %}
+      <tr><td>{{ o.name }}</td>
+        <td><form class="row" method="post" action="{{ url_for('views.train_value', name=name) }}">
+          <input type="hidden" name="code" value="{{ o.code }}">
+          <input type="number" name="value" min="0" max="{{ value_max }}" step="0.5"
+                 value="{{ o.value }}" aria-label="value of {{ o.name }}" style="width:5em">
+          <button>Set</button>
+          {% if o.set %}<span class="muted">changed</span>{% endif %}
+        </form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="muted">No card in this deck reads as an interruption yet.</div>
+  {% endif %}
+
   <h3 style="margin-top:16px">Extenders</h3>
   <div class="muted" style="font-size:12.5px">Cards a good line goes <i>through</i> — the bridge
     to the follow-up (the material that makes the rank 6, the card that mills). Every try

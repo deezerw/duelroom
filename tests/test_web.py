@@ -1164,3 +1164,24 @@ def test_watch_latest_game_opens_the_newest_one(loggedin):
         assert r.headers["Location"].endswith(
             f"/watch/game/imported/angelechy/{g['hand_index']}/{g['enemy_seed']}/{g['run']}")
         assert "Watch latest game" in loggedin.get("/games/imported").get_data(as_text=True)
+
+
+def test_train_card_value_reweights_the_board(loggedin):
+    """A card's value scales its interruptions in the trainer's key, and
+    the train page sets it (1 / blank clears it)."""
+    from skills import db, trainer
+
+    c = db.connect()
+    p = trainer.prefs(c, "kewl-tune")
+    opts = trainer.value_options(c, __import__("web.views", fromlist=["x"]).deck_path("kewl-tune"), p)
+    if not opts:
+        return
+    code = opts[0]["code"]
+    try:
+        assert loggedin.post("/train/kewl-tune/value", data={"code": code, "value": "2.5"}).status_code == 302
+        assert trainer.prefs(c, "kewl-tune")["values"][code] == 2.5
+        assert loggedin.post("/train/kewl-tune/value", data={"code": code, "value": "9"}).status_code == 400
+        assert "Card values" in loggedin.get("/train/kewl-tune").get_data(as_text=True)
+    finally:
+        loggedin.post("/train/kewl-tune/value", data={"code": code, "value": ""})
+    assert code not in trainer.prefs(c, "kewl-tune")["values"]

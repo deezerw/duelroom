@@ -96,8 +96,9 @@ def lines_from(jsonl_path, deck_name=None):
     return out
 
 
-def _on_field(line):
+def _on_field(line, weight=None):
     """Interruptions the end board holds on the FIELD, set or face-up.
+    `weight(code)`: what each one is worth (default 1 each).
 
     Cards in hand are real interaction but they are not a line you can
     practise -- you hold them whatever you drew. Ranking on them puts the
@@ -113,13 +114,13 @@ def _on_field(line):
     me, cards, n = players[0], default_cards(), 0
     for c in me.get("mzone") or []:
         if any(i.where == "field" for i in card_interruptions(c["code"], cards)):
-            n += 1
+            n += weight(c["code"]) if weight else 1
     for c in me.get("szone") or []:
         faceup = bool(c.get("position", 0) & 0x5)
         where = "field" if faceup else "set"
         if any(i.where == where
                for i in card_interruptions(c["code"], cards)):
-            n += 1
+            n += weight(c["code"]) if weight else 1
     return n
 
 

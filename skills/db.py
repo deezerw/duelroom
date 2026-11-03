@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS trainer_hands (
     hand_index  INTEGER NOT NULL,
     hand_seed   TEXT NOT NULL,          -- a u64: too big for SQLite INTEGER
     hand        TEXT NOT NULL,          -- JSON passcodes
-    best_key    TEXT,                   -- JSON [-avoided, on_field, interruptions, negates, extenders, -actions]
+    best_key    TEXT,                   -- JSON [-avoided, on_field, interruptions, negates, extenders, -actions]; on_field/interruptions weighted by card_values
     best_goal   TEXT,                   -- JSON targets of the best line
     best_record TEXT,                   -- JSON {start, lines:[best line]}: replayable
     best_gen    INTEGER,
@@ -293,6 +293,16 @@ CREATE TABLE IF NOT EXISTS trainer_prefs (
     zone   TEXT NOT NULL DEFAULT '',
     added  TEXT NOT NULL,
     PRIMARY KEY (deck, kind, code, zone)
+);
+
+-- What one interruption of a card is worth to the player (trainer.line_key);
+-- a card with no row is worth 1.
+CREATE TABLE IF NOT EXISTS card_values (
+    deck   TEXT NOT NULL,
+    code   INTEGER NOT NULL,
+    value  REAL NOT NULL,
+    added  TEXT NOT NULL,
+    PRIMARY KEY (deck, code)
 );
 """
 
