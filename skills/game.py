@@ -67,6 +67,12 @@ def _now():
 
 # --- running the rooted solver -----------------------------------------------
 
+def _hard_limit(ms):
+    """Seconds before a solver given `ms` counts as hung: its budget twice
+    over plus start-up, so a slow but working search is never cut off."""
+    return 2 * ms // 1000 + 120
+
+
 def _solve(ref, args, scratch, label, ms, seed, threads=2):
     """One rooted-solver run. Returns {"solution", "approach", "log"} paths."""
     from ygorl.solver.combo_solver import Workdir
@@ -82,7 +88,15 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2):
     cmd += [str(a) for a in args]
     cmd += ["--solve-ms", str(ms), "--threads", str(threads),
             "--seed", str(seed), "--outdir", str(out)]
-    r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env())
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env(),
+                           timeout=_hard_limit(ms))
+    except subprocess.TimeoutExpired as e:
+        # Measured 2026-11-03: a 60 s turn-2 solve still running after 10.5 h,
+        # ignoring SIGTERM, held one of the run's workers the whole time.
+        # subprocess.run SIGKILLs it; the game is not recorded, so the next
+        # run retries it -- never scored off a half-searched turn.
+        raise RuntimeError(f"{label}: solver hung past {_hard_limit(ms)} s, killed") from e
     log = scratch / f"{label}.log"
     log.write_text((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or ""),
                    encoding="utf-8")

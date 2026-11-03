@@ -5151,3 +5151,25 @@ def test_impact_reads_a_game_again_when_its_line_changed(monkeypatch):
     impact.fill(conn, "d", "deck", "e")
     assert reads == ["/a.yrp", "/b.yrp"], "re-recorded with another line: read again"
     assert [r["code"] for r in impact.scores(conn, "d", "e")] == [9]
+
+
+def test_game_solve_hung_solver_is_killed_not_scored(tmp_path, monkeypatch):
+    """A rooted solve that outlives its budget (one ran 10.5 h on a 60 s
+    budget, holding a games-run worker) is cut off and raises, so the game
+    goes unrecorded and is retried -- not scored off a half-searched turn."""
+    import subprocess
+
+    import pytest
+
+    from skills import game
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["timeout"] = kw.get("timeout")
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(game.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="hung"):
+        game._solve(tmp_path / "ref.yrpX", [], tmp_path, "t2", 60_000, 1)
+    assert seen["timeout"] == game._hard_limit(60_000) == 240
