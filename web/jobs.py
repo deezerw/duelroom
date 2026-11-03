@@ -45,7 +45,8 @@ KINDS = {
                 "solve one chosen hand", "~5 min"),
     "train":   (lambda d, p: ["train", d, str(p.get("hours", 8)),
                               str(p.get("hands", 24))]
-                + ([p["enemy"]] if p.get("enemy") else []),
+                + ([p["enemy"]] if p.get("enemy") else [])
+                + (["--seconds", str(p["seconds"])] if p.get("seconds") else []),
                 "deck trainer", "hours, stoppable"),
     "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
                               str(p.get("runs", 10)), str(p.get("enemy_hands", 3))],

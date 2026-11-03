@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS trainer_hands (
     hand_index  INTEGER NOT NULL,
     hand_seed   TEXT NOT NULL,          -- a u64: too big for SQLite INTEGER
     hand        TEXT NOT NULL,          -- JSON passcodes
-    best_key    TEXT,                   -- JSON [-avoided, on_field, interruptions, negates, -actions]
+    best_key    TEXT,                   -- JSON [-avoided, on_field, interruptions, negates, extenders, -actions]
     best_goal   TEXT,                   -- JSON targets of the best line
     best_record TEXT,                   -- JSON {start, lines:[best line]}: replayable
     best_gen    INTEGER,

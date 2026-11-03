@@ -51,6 +51,17 @@ PER_HAND = 3        # solves per hand per generation, after the first
 BIG_STACK = 3       # a goal of this many pieces or more gets...
 BIG_STACK_X = 2     # ...this many times the budget: 3-piece stacks never
                     # solved inside 60 s on the first deck trained
+# The trainer's per-attempt budget: three times sweep's. sweep's 60 s is
+# where the BRICK COUNT settles (engine.SOLVE_MS), which is a cheaper
+# question than "the best line this hand has": at 10 s -> 20 s the hard
+# goals went 10/24 -> 11/24 and never flattened (STAGE7), and the lines
+# the trainer misses are the long ones, where one early choice (which
+# materials) only pays off ten decisions later. Nobody waits on it.
+TRAIN_MS = 180_000
+PLATEAU = 6         # generations in a row with no hand improved = "as good
+                    # as it'll get" (train ... <enemy>); 3 stopped the first
+                    # deck after 9 attempts a hand
+EXT = "ext:"        # a goal's "this line must use <code>" requirement
 
 
 def _now():
@@ -106,6 +117,7 @@ def clear_stop(name):
 #   not count is neither scored nor ever asked for.
 
 AVOID = ("avoid_activate", "avoid_summon")
+KINDS = (*AVOID, "interrupter", "extender")
 # playback's zones -> the solver's. A spell shows as activated in the
 # spell & trap zone even when it was played from the hand, so "sz" bans both.
 _SOLVER_ZONES = {"hand": ("hand",), "mz": ("mzone",), "sz": ("szone", "hand"),
@@ -114,8 +126,9 @@ _SOLVER_ZONES = {"hand": ("hand",), "mz": ("mzone",), "sz": ("szone", "hand"),
 
 def prefs(conn, name):
     """{"avoid": {("activate", code, zone) | ("summon", code)},
-    "interrupters": {code}} -- the shape `playback.line_moves` speaks."""
-    out = {"avoid": set(), "interrupters": set()}
+    "interrupters": {code}, "extenders": {code}} -- the shape
+    `playback.line_moves` speaks."""
+    out = {"avoid": set(), "interrupters": set(), "extenders": set()}
     for r in conn.execute("SELECT kind, code, zone FROM trainer_prefs WHERE deck=?",
                           (name,)):
         if r["kind"] == "avoid_activate":
@@ -124,11 +137,13 @@ def prefs(conn, name):
             out["avoid"].add(("summon", r["code"]))
         elif r["kind"] == "interrupter":
             out["interrupters"].add(r["code"])
+        elif r["kind"] == "extender":
+            out["extenders"].add(r["code"])
     return out
 
 
 def set_pref(conn, name, kind, code, zone="", on=True):
-    if kind not in (*AVOID, "interrupter"):
+    if kind not in KINDS:
         raise ValueError(kind)
     with conn:
         if on:
@@ -171,6 +186,53 @@ def interrupter_options(conn, deck_path, p):
     return out
 
 
+def extender_options(conn, deck_path, p):
+    """Every card of the deck for the "extender" picker: [{code, name, on}].
+    Spells and traps too -- an extender is any card a line should go
+    through, and a spell is "used" by resolving it."""
+    from ygorl.cards.ydk import load_ydk
+    from ygorl.engine.duel import default_cards
+
+    from . import card_db
+
+    cards, deck, out = default_cards(), load_ydk(Path(deck_path)), []
+    for code in dict.fromkeys(cards.canonical(c) for c in (*deck.main, *deck.extra)):
+        if cards.get(code) is None:
+            continue
+        out.append({"code": code, "on": code in p["extenders"],
+                    "name": (card_db.resolve(conn, code) or {"name": f"#{code}"})["name"]})
+    return sorted(out, key=lambda o: o["name"])
+
+
+def split_goal(targets):
+    """(board targets, extender codes): an extender rides in a goal as
+    `ext:<code>` beside the board cards, so the goal's history, retries and
+    draw counting treat "this board, through Requiem" as its own goal."""
+    board = [t for t in targets if not str(t).startswith(EXT)]
+    ext = [int(str(t)[len(EXT):]) for t in targets if str(t).startswith(EXT)]
+    return board, ext
+
+
+def extender_args(p, required=(), cards=None):
+    """Solver flags for the extenders. Every one is a `--hint` on every
+    attempt (an NRPA sampling bonus for moves that engage it: a nudge, not
+    a rule). A REQUIRED one is a rule, checked at the goal: a monster must
+    be summoned (`--summon-min`), a spell or trap resolved (`--resolve`).
+    The solver watches at most four such cards."""
+    from ygorl.engine.duel import default_cards
+
+    args = []
+    for c in sorted(p["extenders"]):
+        args += ["--hint", str(c)]
+    if required:
+        cards = cards or default_cards()
+    for c in list(dict.fromkeys(required))[:4]:
+        card = cards.get(c)
+        args += (["--summon-min", str(c)] if card is not None and card.is_monster
+                 else ["--resolve", str(c)])
+    return args
+
+
 def solver_args(p):
     """The avoided activations as solver flags."""
     args, chained = [], set()
@@ -197,22 +259,30 @@ def _wants_banned(targets, banned):
 
 def parts(key):
     """A score key by name. Keys stored before 2026-11-01 had no leading
-    `avoided` term; `rescore_bests` rewrites them, this reads either."""
+    `avoided` term, and before 2026-11-02 no `extenders` term;
+    `rescore_bests` rewrites them, this reads any of them."""
     if key is None:
         return None
     if len(key) == 4:
         key = [0, *key]
+    if len(key) == 5:
+        key = [*key[:4], 0, key[4]]
     return {"avoided": -key[0], "on_field": key[1], "interruptions": key[2],
-            "negates": key[3], "actions": -key[4]}
+            "negates": key[3], "extenders": key[4], "actions": -key[5]}
 
 
 def line_key(line, opening, cards=None, start=None, p=None, conn=None):
-    """[-avoided, on_field, interruptions, negates, -actions] for one line.
+    """[-avoided, on_field, interruptions, negates, extenders, -actions].
 
     `avoided` counts the moves the player asked to avoid that the line
     makes (needs `start` and `conn` to replay it); it comes first, so any
     line that avoids them outranks any that does not. `p` is `prefs()`,
     whose interrupters also count -- on the field -- as interruptions.
+
+    `extenders` counts the player's extenders the line summoned or
+    activated. A tiebreak, below the board: the same board THROUGH the
+    bridge cards is the line with the follow-up, but no line is ever
+    preferred to a bigger board for summoning something on the way.
 
     On-field first, as `drill.lines_from` ranks: interruptions held in
     hand are real but they are not a line you can practise -- you hold
@@ -238,7 +308,7 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     from .drill import _on_field
 
     cards = cards or default_cards()
-    p = p or {"avoid": set(), "interrupters": set()}
+    p = {"avoid": set(), "interrupters": set(), "extenders": set(), **(p or {})}
     board = line.get("board") or {}
     score = board_interruptions(board, cards)
     end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
@@ -251,11 +321,14 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         n += 1
         neg += int(bool(negate))
     extra = _extra_on_field(board, p["interrupters"], cards)
-    avoided = 0
-    if p["avoid"] and start is not None and line.get("responses"):
+    avoided = used = 0
+    if ((p["avoid"] or p["extenders"]) and start is not None
+            and line.get("responses")):
         from .playback import line_moves
-        avoided = len(line_moves(conn, start, line["responses"]) & p["avoid"])
-    return [-avoided, _on_field(line) + extra, n + extra, neg,
+        moves = line_moves(conn, start, line["responses"])
+        avoided = len(moves & p["avoid"])
+        used = len({m[1] for m in moves} & p["extenders"])
+    return [-avoided, _on_field(line) + extra, n + extra, neg, used,
             -len(line.get("actions") or [])]
 
 
@@ -401,7 +474,8 @@ def _attempts(conn, dh, hand_index):
                 "ORDER BY rowid", (dh, hand_index))]
 
 
-def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=()):
+def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=(),
+         extenders=()):
     """[(targets, label, draw)] for one hand's next generation.
 
     Pure: history in, goals out, so the scheduling is testable without
@@ -409,7 +483,9 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=()):
     the caller from the deck): all of them while the hand has no history,
     and afterwards any never asked -- an interrupter the player adds later
     is asked for first. `banned` are target cards never to ask for (a
-    summon the player said to avoid).
+    summon the player said to avoid). `extenders` are the player's bridge
+    cards: once the hand has a best line, its best board THROUGH each one
+    is asked for, again whenever the best board grows.
     """
     def draws(targets):
         k = frozenset(targets)
@@ -441,6 +517,14 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=()):
     for targets, label in breadth:
         if frozenset(targets) not in tried:
             add(targets, label)
+
+    # 1b. the best board through each extender, never asked on this board
+    if best_goal:
+        board, _ = split_goal(best_goal)
+        for c in extenders:
+            targets = [*board, f"{EXT}{c}"]
+            if frozenset(targets) not in tried:
+                add(targets, f"{EXT}{c}")
 
     # 2. stacks nobody has asked this hand for
     for targets, label in sweep.combinations_to_try(attempts, max_new=per_hand):
@@ -494,6 +578,7 @@ def breadth_goals(deck_path, hand, p):
 
 
 def _budget(targets, base, solve_ms):
+    # An `ext:` requirement counts as a piece: it asks for more line.
     from collections import Counter
     pieces = sum((Counter(targets) - Counter(base)).values())
     return solve_ms * BIG_STACK_X if pieces >= BIG_STACK else solve_ms
@@ -521,7 +606,7 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
                    solve_ms=None, workers=None, say=print):
     from ygorl.engine.duel import default_cards
 
-    solve_ms = solve_ms or engine.SOLVE_MS
+    solve_ms = solve_ms or TRAIN_MS
     workers = workers or engine.DEFAULT_WORKERS
     started = _now()
     hands = conn.execute(
@@ -530,31 +615,37 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
     p = prefs(conn, name)
     extra = tuple(solver_args(p))
     banned = _banned_targets(p)
-    batch = []
+    cards = default_cards()
+    batch, goals = [], []
     for h in hands:
         hand = json.loads(h["hand"])
         hist = _attempts(conn, dh, h["hand_index"])
         base, breadth = breadth_goals(deck_path, hand, p)
         best_goal = json.loads(h["best_goal"]) if h["best_goal"] else None
         for targets, label, draw in plan(hist, breadth, best_goal, per_hand,
-                                         banned):
+                                         banned, sorted(p["extenders"])):
+            board, need = split_goal(targets)
             batch.append((str(deck_path), name, h["hand_index"], int(h["hand_seed"]),
-                          hand, targets, label, _budget(targets, base, solve_ms),
-                          draw, extra))
+                          hand, board, label, _budget(targets, base, solve_ms),
+                          draw, extra + tuple(extender_args(p, need, cards))))
+            goals.append(targets)
     big = sum(1 for b in batch if b[7] > solve_ms)
     say(f"generation {gen}: {len(batch)} solve(s) over {len(hands)} hand(s), "
         f"{solve_ms // 1000}s each ({big} big stack(s) at "
         f"{solve_ms * BIG_STACK_X // 1000}s) on {workers} worker(s)"
-        + (f"; avoiding {len(p['avoid'])} move(s)" if p["avoid"] else ""))
+        + (f"; avoiding {len(p['avoid'])} move(s)" if p["avoid"] else "")
+        + (f"; {len(p['extenders'])} extender(s)" if p["extenders"] else ""))
 
-    cards = default_cards()
     best = {h["hand_index"]: (json.loads(h["best_key"]) if h["best_key"] else None)
             for h in hands}
     opening = {h["hand_index"]: json.loads(h["hand"]) for h in hands}
     improved = done = 0
     for res in sweep._map_solves(batch, workers):
-        done += 1
         a, i = res["attempt"], res["hand_index"]
+        # The solver saw the board targets only; the goal is what was asked,
+        # `ext:` requirements included (results arrive in batch order).
+        a["targets"] = goals[done]
+        done += 1
         key, line = None, None
         if res.get("record"):
             # Every line the solver wrote, not just its own pick: it ranks
@@ -621,7 +712,7 @@ def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
                      (dh,))
     if not curve(conn, dh):
         bootstrap(conn, dh, name, deck_path, say)
-        _record_gen(conn, dh, name, 0, _now(), 0, 0, solve_ms or engine.SOLVE_MS)
+        _record_gen(conn, dh, name, 0, _now(), 0, 0, solve_ms or TRAIN_MS)
         say("generation 0 = the starting point (stored results only)")
     deadline = time.monotonic() + hours * 3600 if hours else None
     ran = 0
@@ -660,7 +751,7 @@ def rank(h):
     if not k:
         return (1,)
     return (0, k["avoided"], -k["on_field"], -k["interruptions"],
-            -k["negates"], k["actions"])
+            -k["negates"], -k["extenders"], k["actions"])
 
 
 def best_hand(conn, dh):
@@ -684,6 +775,7 @@ def hands_table(conn, dh):
                     "interruptions": key["interruptions"] if key else None,
                     "actions": key["actions"] if key else None,
                     "avoided": key["avoided"] if key else 0,
+                    "extenders": key["extenders"] if key else 0,
                     "gen": h["best_gen"], "source": h["best_source"],
                     "tries": h["tries"], "watchable": bool(h["best_record"])})
     return out

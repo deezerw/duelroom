@@ -456,10 +456,12 @@ def train_view(name=None):
         stopping=trainer.stop_requested(name), running=jobs.active(c),
         avoid=[r for r in trainer.prefs_table(c, name) if r["kind"] in trainer.AVOID],
         options=trainer.interrupter_options(c, path, p),
+        ext_options=trainer.extender_options(c, path, p),
         big_stack=trainer.BIG_STACK, big_x=trainer.BIG_STACK_X,
         zone_words=_ZONE_WORDS,
         default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
-        solve_s=engine.SOLVE_MS // 1000, enemies=_enemy_decks(name), plateau=3,
+        solve_s=trainer.TRAIN_MS // 1000, enemies=_enemy_decks(name),
+        plateau=trainer.PLATEAU,
         has_best=any(h["watchable"] for h in hands))
 
 
@@ -477,7 +479,8 @@ def train_start(name):
     hands = min(max(request.form.get("hands", type=int) or trainer.HANDS, 4), 80)
     # An enemy: train until a plateau, then play the games against it.
     enemy = request.form.get("enemy", "")
-    params = {"hours": hours, "hands": hands}
+    seconds = request.form.get("seconds", type=int) or trainer.TRAIN_MS // 1000
+    params = {"hours": hours, "hands": hands, "seconds": min(max(seconds, 30), 900)}
     if enemy in _enemy_decks(name):
         params["enemy"] = enemy
     job_id = jobs.enqueue(c, "train", deck=name, **params)
@@ -620,7 +623,7 @@ def train_pref(name):
     code = request.form.get("code", type=int)
     zone = request.form.get("zone", "")
     on = request.form.get("on", "1") == "1"
-    if (kind not in (*trainer.AVOID, "interrupter") or not code
+    if (kind not in trainer.KINDS or not code
             or (kind == "avoid_activate") != (zone in trainer._SOLVER_ZONES)
             or (kind != "avoid_activate" and zone)):
         abort(400)

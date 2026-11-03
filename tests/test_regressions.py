@@ -4918,7 +4918,85 @@ def test_trainer_key_ranks_avoiding_lines_first_and_reads_old_keys():
     clean, uses = [0, 1, 1, 1, -90], [-1, 3, 3, 3, -50]
     assert clean > uses, "a line without the avoided move beats a bigger board with it"
     assert parts([2, 3, 1, -40]) == {"avoided": 0, "on_field": 2, "interruptions": 3,
-                                     "negates": 1, "actions": 40}, "pre-2026-11-01 keys"
+                                     "negates": 1, "extenders": 0, "actions": 40}, \
+        "pre-2026-11-01 keys"
+    assert parts([-1, 2, 3, 1, -40]) == {"avoided": 1, "on_field": 2, "interruptions": 3,
+                                         "negates": 1, "extenders": 0, "actions": 40}, \
+        "pre-2026-11-02 keys (no extenders term)"
+
+
+def test_trainer_extenders_break_ties_below_the_board():
+    """Through more extenders wins only between equal boards."""
+    via, plain, bigger = [0, 2, 2, 1, 2, -90], [0, 2, 2, 1, 0, -40], [0, 3, 2, 1, 0, -40]
+    assert via > plain, "the same board through the bridge cards wins"
+    assert bigger > via, "never a smaller board for summoning something on the way"
+
+
+def test_trainer_plans_the_best_board_through_each_extender():
+    from skills.trainer import EXT, extender_args, plan, split_goal
+
+    hist = [{"label": "piece:1", "targets": ["B", "1"], "status": "solved", "best_placed": 2}]
+    breadth = [(["B", "1"], "piece:1")]
+    out = plan(hist, breadth, ["B", "1"], per_hand=3, extenders=[7, 8])
+    asked = [t for t, _, _ in out]
+    assert ["B", "1", f"{EXT}7"] in asked and ["B", "1", f"{EXT}8"] in asked, out
+    assert plan([], breadth, None, extenders=[7]) == [(["B", "1"], "piece:1", 0)], \
+        "no best board yet: nothing to go through"
+    hist.append({"label": f"{EXT}7", "targets": ["B", "1", f"{EXT}7"],
+                 "status": "unsolved", "best_placed": 0})
+    asked = [t for t, _, _ in plan(hist, breadth, ["B", "1"], per_hand=3, extenders=[7])]
+    assert ["B", "1", f"{EXT}7"] not in asked or asked.count(["B", "1", f"{EXT}7"]) == 1
+    asked = [t for t, _, _ in plan(hist, breadth, ["B", "1", "2"], per_hand=3, extenders=[7])]
+    assert ["B", "1", "2", f"{EXT}7"] in asked, "a bigger best is asked through it again"
+    assert split_goal(["B", "1@hand", f"{EXT}7"]) == (["B", "1@hand"], [7])
+
+    # Fiendsmith Engraver is a monster (summoned), Fiendsmith's Sanct a spell (resolved).
+    p = {"avoid": set(), "interrupters": set(), "extenders": {60764609, 35552985}}
+    assert extender_args(p) == ["--hint", "35552985", "--hint", "60764609"]
+    assert extender_args(p, [60764609, 35552985])[4:] == [
+        "--summon-min", "60764609", "--resolve", "35552985"]
+
+
+def test_trainer_generation_sends_extenders_to_the_solver_not_the_board(monkeypatch):
+    """An `ext:` goal reaches the solver as flags, never as a board target,
+    and is stored with its requirement so it is not asked twice."""
+    import json
+    from pathlib import Path
+    from skills import sweep, trainer
+
+    conn = _games_db()
+    deck = Path("assets/decks/kewl-tune.ydk").resolve()
+    dh = trainer.ensure_pool(conn, deck, "kewl-tune", hands=1)
+    hand = json.loads(conn.execute("SELECT hand FROM trainer_hands").fetchone()["hand"])
+    base, breadth = trainer.breadth_goals(deck, hand, trainer.prefs(conn, "kewl-tune"))
+    best = breadth[0][0]
+    conn.execute("INSERT INTO trainer_attempts (deck_hash, hand_index, gen, targets, label, "
+                 "draw, status, improved, at) VALUES (?,?,?,?,?,?,?,?,?)",
+                 (dh, 0, 1, json.dumps(best), breadth[0][1], 0, "solved", 1, "x"))
+    conn.execute("UPDATE trainer_hands SET best_goal=?, best_key=?", (json.dumps(best),
+                 json.dumps([0, 1, 1, 0, 0, -10])))
+    ext = int(hand[0])
+    trainer.set_pref(conn, "kewl-tune", "extender", ext)
+    seen = []
+
+    def fake_map(batch, workers):
+        for b in batch:
+            seen.append(b)
+            yield {"hand_index": b[2], "record": None,
+                   "attempt": {"label": b[6], "targets": list(b[5]), "draw": b[8],
+                               "status": "unsolved", "best_placed": 0}}
+    monkeypatch.setattr(sweep, "_map_solves", fake_map)
+    trainer.run_generation(conn, deck, "kewl-tune", dh, 2, say=lambda *_: None)
+    via = [b for b in seen if b[6] == f"{trainer.EXT}{ext}"]
+    assert via, [b[6] for b in seen]
+    b = via[0]
+    assert not any(str(t).startswith(trainer.EXT) for t in b[5]), "board targets only"
+    assert "--hint" in b[9] and ("--summon-min" in b[9] or "--resolve" in b[9]), b[9]
+    assert all("--hint" in x[9] for x in seen), "every try leans toward the extenders"
+    assert b[7] >= trainer.TRAIN_MS, "the per-attempt budget is the trainer's"
+    stored = [json.loads(r["targets"]) for r in conn.execute(
+        "SELECT targets FROM trainer_attempts WHERE label=?", (f"{trainer.EXT}{ext}",))]
+    assert stored == [[*best, f"{trainer.EXT}{ext}"]], stored
 
 
 def test_trainer_plan_asks_new_pieces_and_never_banned_summons():

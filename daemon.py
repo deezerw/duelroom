@@ -2164,8 +2164,21 @@ def cmd_decks(conn, args):
 
 
 def cmd_train(conn, args):
-    """The deck trainer (skills/trainer.py): `train <deck> [hours] [hands]`,
-    `train <deck> status`, `train <deck> stop`."""
+    """The deck trainer (skills/trainer.py): `train <deck> [hours] [hands]
+    [enemy] [--seconds N]`, `train <deck> status`, `train <deck> stop`."""
+    args = list(args)
+    solve_ms = None
+    if "--seconds" in args:
+        at = args.index("--seconds")
+        try:
+            solve_ms = int(float(args[at + 1]) * 1000)
+        except (IndexError, ValueError):
+            print("--seconds needs a number")
+            return
+        if not 10_000 <= solve_ms <= 1_800_000:
+            print("--seconds must be between 10 and 1800")
+            return
+        del args[at:at + 2]
     if not args and not db.get_meta(conn, "active_deck"):
         print("usage: train <deck> [hours] [hands] | train <deck> status | stop")
         return
@@ -2199,7 +2212,7 @@ def cmd_train(conn, args):
           f"(stop early: train {name} stop)"
           + (f"; at a plateau, games against {enemy}" if enemy else ""))
     n = trainer.train(conn, path, name, hours=hours, hands=hands,
-                      plateau=PLATEAU if enemy else None)
+                      solve_ms=solve_ms, plateau=PLATEAU if enemy else None)
     print(f"{n} generation(s) run")
     # Only a plateau starts the games. `train` clears the stop flag before it
     # returns, so asking it whether a stop was requested always said no and
@@ -2213,7 +2226,7 @@ def cmd_train(conn, args):
 
 # Generations in a row with no hand improved before `train ... <enemy>`
 # calls the deck as good as it will get and starts the games.
-PLATEAU = 3
+PLATEAU = trainer.PLATEAU
 
 
 def _print_games(rows):

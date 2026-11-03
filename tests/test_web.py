@@ -1050,7 +1050,8 @@ def test_train_page_start_and_stop(loggedin, monkeypatch):
     r = loggedin.post("/train/kewl-tune/start", data={"hours": "500", "hands": "2"})
     assert r.status_code == 302
     # clamped, never trusted: 72 h at most, a pool of at least 4
-    assert seen == {"kind": "train", "deck": "kewl-tune", "hours": 72, "hands": 4}
+    assert seen == {"kind": "train", "deck": "kewl-tune", "hours": 72, "hands": 4,
+                    "seconds": 180}
 
     try:
         assert loggedin.post("/train/kewl-tune/stop").status_code == 302

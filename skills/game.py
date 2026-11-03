@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import breaking, engine, scenarios
+from . import breaking, engine, scenarios, trainer
 
 ROOTED_BIN = (engine.VENDOR / "build" / "combo-solver-rooted" / "bin"
               / "combosolver")
@@ -342,7 +342,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / "t1"
         scratch.mkdir(parents=True, exist_ok=True)
         t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
-                   json.loads(row["best_goal"]), eseed, scratch, ms, eseed,
+                   trainer.split_goal(json.loads(row["best_goal"]))[0],
+                   eseed, scratch, ms, eseed,
                    theirs)
         rec = {"deck_hash": dh, "enemy": enemy_name,
                "hand_index": row["hand_index"], "board": 0,
@@ -408,7 +409,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                 out = {"outcome": "win", "damage": None, "line": t2["line"],
                        "enemy_reached": 0}
             else:
-                goal = json.loads(row["best_goal"])
+                goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
                 enemy_pieces = _pieces(t2["board"], 1, cards)
                 t3 = turn3(t2["start"], t2["prefix"], goal[0] if goal else
                            enemy_target, set(theirs) | set(enemy_pieces),

@@ -68,6 +68,7 @@
     <form class="startform" method="post" action="{{ url_for('views.train_start', name=name) }}">
       <label>hours <input type="number" name="hours" value="8" min="0.25" max="72" step="0.25"></label>
       <label>hands in the pool <input type="number" name="hands" value="{{ default_hands }}" min="4" max="80"></label>
+      <label>seconds per try <input type="number" name="seconds" value="{{ solve_s }}" min="30" max="900" step="30"></label>
       <label>then play games vs
         <select name="enemy" style="background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit">
           <option value="">— no, just train —</option>
@@ -76,12 +77,14 @@
       <button class="primary">Start training</button>
     </form>
     <details class="note"><summary>what one generation costs</summary>
-      Each generation gives every hand {{ per_hand }} solves at the full
-      {{ solve_s }}s budget (the first gives each hand one solve per
+      Each generation gives every hand {{ per_hand }} solves at the
+      seconds-per-try budget (default {{ solve_s }}s; the first gives each hand one solve per
       interrupter piece instead), six at a time; a goal of {{ big_stack }} or more
-      pieces gets {{ big_x }}× the time, since big stacks are the slow ones. With {{ default_hands }}
-      hands that is roughly 10–15 minutes a generation, so a night is
-      30–50 generations. With an enemy chosen, training stops by itself once
+      pieces — an extender requirement counts as one — gets {{ big_x }}× the time,
+      since big stacks are the slow ones. With {{ default_hands }} hands at {{ solve_s }}s
+      that is roughly {{ (default_hands * per_hand * solve_s * 1.3 / 6 / 60)|round|int }}
+      minutes a generation. Longer tries find the long combos — the ones where an
+      early choice only pays off many steps later — that short tries never reach. With an enemy chosen, training stops by itself once
       {{ plateau }} generations in a row improve no hand, and the
       <a href="{{ url_for('views.games_view', name=name) }}">games</a> start against
       that deck. It runs on the job worker, so other analyses
@@ -117,6 +120,38 @@
     <button>Count it</button>
   </form>
   {% endif %}
+
+  <h3 style="margin-top:16px">Extenders</h3>
+  <div class="muted" style="font-size:12.5px">Cards a good line goes <i>through</i> — the bridge
+    to the follow-up (the material that makes the rank 6, the card that mills). Every try
+    leans toward using them, each hand's best board is asked for again <i>through</i> each one,
+    and of two equal boards the one that used more of them wins.</div>
+  <div class="chips">
+    {% for o in ext_options if o.on %}
+      <span class="chip">{{ o.name }}
+        <form method="post" action="{{ url_for('views.train_pref', name=name) }}">
+          <input type="hidden" name="kind" value="extender"><input type="hidden" name="code" value="{{ o.code }}">
+          <input type="hidden" name="on" value="0">
+          <button title="not an extender" aria-label="remove {{ o.name }}">×</button></form></span>
+    {% endfor %}
+  </div>
+  {% set ext_addable = ext_options|rejectattr('on')|list %}
+  {% if ext_addable %}
+  <form class="row" method="post" action="{{ url_for('views.train_pref', name=name) }}">
+    <input type="hidden" name="kind" value="extender"><input type="hidden" name="on" value="1">
+    <select name="code" aria-label="card to mark as an extender">
+      {% for o in ext_addable %}<option value="{{ o.code }}">{{ o.name }}</option>{% endfor %}
+    </select>
+    <button>Mark it</button>
+  </form>
+  {% endif %}
+  <details class="note"><summary>how extenders work</summary>
+    A monster counts as used when the line summons it, a spell or trap when it is
+    activated. The asked-for tries are strict: a line that reaches the board without
+    summoning (or resolving) the extender does not count as solving them. Mark the few
+    cards that open the follow-up, not every card in the deck — too many and every try
+    is pulled in every direction at once.
+  </details>
 
   <h3 style="margin-top:16px">Moves to avoid</h3>
   {% if avoid %}

@@ -209,7 +209,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `sweep.py` | `TRIAGE_MS` (15 s), `DRAWS` |
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
-| `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2) |
+| `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2), `TRAIN_MS` (180 s per attempt; the page's "seconds per try"), `PLATEAU` (6) |
 | `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES` |
 
 Three of the old table's rows named constants that do not exist, and two named
@@ -445,6 +445,26 @@ stay flat. Bests are seeded from this exact deck's stored results (matched by ca
 not file name; `trainer_hands.deck_hash`). Stop = a request honoured between
 generations; every attempt is committed as it lands, so a killed run resumes with no
 repeated (hand, goal, draw).
+
+**Extenders** (`trainer_prefs` kind `extender`, train page): the player's bridge
+cards, the ones a line should go THROUGH (the material that makes the rank 6 and
+mills). Three effects: every attempt gets `--hint <code>` for each (an NRPA sampling
+bonus, a nudge); once a hand has a best line, `plan` step 1b asks for that best board
+through each extender as its own goal `[*board, "ext:<code>"]`, asked again whenever
+the best board changes, where the `ext:` requirement becomes `--summon-min` (monster)
+or `--resolve` (spell/trap) -- checked at the goal, so a line skipping it does not
+solve -- and counts as a piece for `BIG_STACK`; and the key gains an `extenders` term
+(distinct extenders summoned/activated, via `playback.line_moves`) as a tiebreak below
+the board: `[-avoided, on_field, interruptions, negates, extenders, -actions]`.
+`split_goal` strips `ext:` before anything that wants board targets (the solver's
+`--target`, `game.py`'s turns 1 and 3). Verified on a real solve 2026-11-02: imported
+hand 0's best board through Necroquip Princess solved in 68 s and the line summons it.
+
+**Budget: 180 s per attempt, not sweep's 60 s** (`TRAIN_MS`, changed 2026-11-02 at
+the player's request: "smart, however long it takes"). 60 s is where sweep's BRICK
+count settles, a cheaper question than a hand's best line; the misses the player
+reported are long lines where an early material choice pays off ten decisions later.
+`PLATEAU` went 3 -> 6: 3 stopped the first deck after 9 attempts a hand.
 
 **The solver does not get smarter; the deck's known lines do.** Measured before
 building, 2026-10-31: the combo solver's own policy warm-start from a corpus of past
