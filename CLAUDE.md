@@ -447,10 +447,12 @@ not file name; `trainer_hands.deck_hash`). Stop = a request honoured between
 generations; every attempt is committed as it lands, so a killed run resumes with no
 repeated (hand, goal, draw).
 
-**Card values** (`card_values`, train page "Card values", `trainer.set_value`): what one
+**Card values** (`card_values`, keyed by zone field/grave/hand, train page "Card values", `trainer.set_value`): what one
 interruption of a card is worth, 0-5 in halves, default 1. `line_key`'s `on_field` and
 `interruptions` are SUMS of those values (`negates` stays a count), so a Desirae set to 2
-outranks an Evolzar on an equal board. Setting one re-scores stored bests at once. It
+outranks an Evolzar on an equal board. A value in a zone the scripts do not read (a Tearlament
+in the GY) also counts the card there; hand copies held since the opening never count.
+Setting one re-scores stored bests at once. It
 steers which line is kept and which board is aimed at next, not the solver's search itself.
 
 **Extenders** (`trainer_prefs` kind `extender`, train page): the player's bridge

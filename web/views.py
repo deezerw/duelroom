@@ -459,6 +459,7 @@ def train_view(name=None):
         options=trainer.interrupter_options(c, path, p),
         ext_options=trainer.extender_options(c, path, p),
         value_options=trainer.value_options(c, path, p), value_max=trainer.VALUE_MAX,
+        value_zones=trainer.VALUE_ZONES,
         big_stack=trainer.BIG_STACK, big_x=trainer.BIG_STACK_X,
         zone_words=_ZONE_WORDS,
         default_hands=trainer.HANDS, per_hand=trainer.PER_HAND,
@@ -667,21 +668,24 @@ def train_pref(name):
 @bp.route("/train/<name>/value", methods=["POST"])
 @login_required
 def train_value(name):
-    """Set what one interruption of a card is worth (blank or 1 = default).
-    Stored bests are re-scored at once, as for every other preference."""
+    """Set what one interruption of a card is worth in one zone (field / GY
+    / hand); blank clears it. Stored bests are re-scored at once, as for
+    every other preference."""
     c = conn()
     path = deck_path(name)
     if not path or not path.exists():
         abort(404)
     code = request.form.get("code", type=int)
+    zone = request.form.get("zone", "field")
     raw = request.form.get("value", "").strip()
     try:
         value = None if raw == "" else float(raw)
-        if not code or (value is not None and not 0 <= value <= trainer.VALUE_MAX):
+        if (not code or zone not in trainer.VALUE_ZONES
+                or (value is not None and not 0 <= value <= trainer.VALUE_MAX)):
             raise ValueError
     except ValueError:
         abort(400)
-    trainer.set_value(c, name, code, value)
+    trainer.set_value(c, name, code, zone, value)
     trainer.rescore_bests(c, trainer.deck_hash(path), name, say=lambda *_: None)
     return redirect(url_for("views.train_view", name=name))
 

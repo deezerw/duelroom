@@ -295,14 +295,17 @@ CREATE TABLE IF NOT EXISTS trainer_prefs (
     PRIMARY KEY (deck, kind, code, zone)
 );
 
--- What one interruption of a card is worth to the player (trainer.line_key);
--- a card with no row is worth 1.
+-- What one interruption of a card is worth to the player, by where it ends
+-- (zone: field / grave / hand) (trainer.line_key). A card the scripts read
+-- as an interruption there and with no row is worth 1; a row also counts a
+-- card the scripts do not read there.
 CREATE TABLE IF NOT EXISTS card_values (
     deck   TEXT NOT NULL,
     code   INTEGER NOT NULL,
+    zone   TEXT NOT NULL DEFAULT 'field',
     value  REAL NOT NULL,
     added  TEXT NOT NULL,
-    PRIMARY KEY (deck, code)
+    PRIMARY KEY (deck, code, zone)
 );
 """
 
@@ -315,8 +318,21 @@ def connect(path=None):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    _migrate_card_values(conn)
     conn.executescript(SCHEMA)
     return conn
+
+
+def _migrate_card_values(conn):
+    """card_values had no zone (2026-11-03, one day): its values were field values."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(card_values)")]
+    if cols and "zone" not in cols:
+        with conn:
+            conn.execute("ALTER TABLE card_values RENAME TO card_values_old")
+            conn.executescript(SCHEMA)
+            conn.execute("INSERT INTO card_values (deck, code, zone, value, added) "
+                         "SELECT deck, code, 'field', value, added FROM card_values_old")
+            conn.execute("DROP TABLE card_values_old")
 
 
 def get_meta(conn, key, default=None):

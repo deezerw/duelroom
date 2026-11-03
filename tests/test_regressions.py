@@ -5208,7 +5208,52 @@ def test_line_key_weighs_interruptions_by_card_value():
     base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
     assert trainer.line_key(line(desirae), [], cards, p=base)[1:3] == \
         trainer.line_key(line(evolzar), [], cards, p=base)[1:3] == [1, 1]
-    p = {**base, "values": {desirae: 2.5}}
+    p = {**base, "values": {(desirae, "field"): 2.5}}
     kd, ke = trainer.line_key(line(desirae), [], cards, p=p), trainer.line_key(line(evolzar), [], cards, p=p)
     assert kd[1:3] == [2.5, 2.5] and ke[1:3] == [1, 1] and kd > ke
     assert kd[3] == trainer.line_key(line(desirae), [], cards, p=base)[3]
+
+
+
+def test_line_key_counts_a_card_valued_in_the_grave_or_hand():
+    """A value in the GY counts each copy there, even where the scripts read
+    no interruption; a hand value skips copies held since the opening;
+    neither adds to on-field."""
+    from ygorl.engine.duel import default_cards
+    from ygorl.solver.blocking import card_interruptions
+
+    from skills import trainer
+
+    cards = default_cards()
+    tear = 92731385     # Tearlaments Kitkallos -- read on the field, not in the GY
+    if any(trainer._value_zone(i.where) in ("grave", "hand")
+           for i in card_interruptions(tear, cards)):
+        pytest.skip("scripts read this card off the field")
+
+    def line(grave=(), hand=()):
+        return {"board": {"players": [{"mzone": [], "szone": [], "hand": list(hand),
+                                       "grave": list(grave)}, {}]}, "actions": [1]}
+
+    base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
+    assert trainer.line_key(line(grave=[tear, tear]), [], cards, p=base)[1:3] == [0, 0]
+    p = {**base, "values": {(tear, "grave"): 1.5}}
+    assert trainer.line_key(line(grave=[tear, tear]), [], cards, p=p)[1:3] == [0, 3]
+    p = {**base, "values": {(tear, "hand"): 2}}
+    assert trainer.line_key(line(hand=[tear, tear]), [tear], cards, p=p)[1:3] == [0, 2]
+
+
+def test_card_values_without_zone_migrate_as_field_values(tmp_path):
+    import sqlite3
+
+    from skills import db
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE card_values (deck TEXT NOT NULL, code INTEGER NOT NULL, "
+                "value REAL NOT NULL, added TEXT NOT NULL, PRIMARY KEY (deck, code))")
+    old.execute("INSERT INTO card_values VALUES ('d', 82135803, 2.0, 'x')")
+    old.commit()
+    old.close()
+    c = db.connect(path)
+    assert [tuple(r) for r in c.execute("SELECT deck, code, zone, value FROM card_values")] == \
+        [("d", 82135803, "field", 2.0)]

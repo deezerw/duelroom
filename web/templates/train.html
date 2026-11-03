@@ -122,28 +122,42 @@
   {% endif %}
 
   <h3 style="margin-top:16px">Card values</h3>
-  <div class="muted" style="font-size:12.5px">What one interruption of each card is worth when
-    boards are compared. Every card is worth 1 until you change it: set Fiendsmith's Desirae
-    to 2 and a board with Desirae beats the same-size board with Evolzar. 0 means it does
-    not count at all. Up to {{ value_max }}, in halves.</div>
+  <div class="muted" style="font-size:12.5px">What one interruption of a card is worth when boards
+    are compared, by where it ends the turn: on the field, in the GY or in the hand. Every card the
+    scripts read as an interruption is worth 1 there until you change it — set Fiendsmith's Desirae
+    on the field to 2 and a board with Desirae beats the same board with Evolzar. Add a card in a
+    place the scripts miss (a Tearlament in the GY) and it counts there too. 0 means it does not
+    count; up to {{ value_max }}, in halves.</div>
   {% if value_options %}
   <table class="values">
     <tbody>
     {% for o in value_options %}
-      <tr><td>{{ o.name }}</td>
+      <tr><td>{{ o.name }}</td><td class="muted">{{ o.where }}</td>
         <td><form class="row" method="post" action="{{ url_for('views.train_value', name=name) }}">
-          <input type="hidden" name="code" value="{{ o.code }}">
+          <input type="hidden" name="code" value="{{ o.code }}"><input type="hidden" name="zone" value="{{ o.zone }}">
           <input type="number" name="value" min="0" max="{{ value_max }}" step="0.5"
-                 value="{{ o.value }}" aria-label="value of {{ o.name }}" style="width:5em">
-          <button>Set</button>
-          {% if o.set %}<span class="muted">changed</span>{% endif %}
-        </form></td></tr>
+                 value="{{ o.value }}" aria-label="value of {{ o.name }} {{ o.where }}" style="width:5em">
+          <button>Set</button></form></td>
+        <td>{% if o.set %}<form method="post" action="{{ url_for('views.train_value', name=name) }}">
+          <input type="hidden" name="code" value="{{ o.code }}"><input type="hidden" name="zone" value="{{ o.zone }}">
+          <input type="hidden" name="value" value="">
+          <button title="{{ 'back to 1' if o.known else 'stop counting it here' }}"
+                  aria-label="reset {{ o.name }} {{ o.where }}">×</button></form>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <div class="muted">No card in this deck reads as an interruption yet.</div>
   {% endif %}
+  <form class="row" method="post" action="{{ url_for('views.train_value', name=name) }}">
+    <select name="code" aria-label="card to value">
+      {% for o in ext_options %}<option value="{{ o.code }}">{{ o.name }}</option>{% endfor %}
+    </select>
+    <select name="zone" aria-label="where it counts">
+      {% for z, words in value_zones.items() %}<option value="{{ z }}">{{ words }}</option>{% endfor %}
+    </select>
+    <input type="number" name="value" min="0" max="{{ value_max }}" step="0.5" value="1"
+           aria-label="value" style="width:5em">
+    <button>Add</button>
+  </form>
 
   <h3 style="margin-top:16px">Extenders</h3>
   <div class="muted" style="font-size:12.5px">Cards a good line goes <i>through</i> — the bridge

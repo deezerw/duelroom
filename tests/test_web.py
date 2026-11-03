@@ -1167,21 +1167,27 @@ def test_watch_latest_game_opens_the_newest_one(loggedin):
 
 
 def test_train_card_value_reweights_the_board(loggedin):
-    """A card's value scales its interruptions in the trainer's key, and
-    the train page sets it (1 / blank clears it)."""
+    """A card's value per zone is set from the train page (blank clears it)."""
     from skills import db, trainer
+    from web.views import deck_path
 
     c = db.connect()
-    p = trainer.prefs(c, "kewl-tune")
-    opts = trainer.value_options(c, __import__("web.views", fromlist=["x"]).deck_path("kewl-tune"), p)
+    opts = trainer.value_options(c, deck_path("kewl-tune"), trainer.prefs(c, "kewl-tune"))
     if not opts:
         return
     code = opts[0]["code"]
     try:
-        assert loggedin.post("/train/kewl-tune/value", data={"code": code, "value": "2.5"}).status_code == 302
-        assert trainer.prefs(c, "kewl-tune")["values"][code] == 2.5
-        assert loggedin.post("/train/kewl-tune/value", data={"code": code, "value": "9"}).status_code == 400
-        assert "Card values" in loggedin.get("/train/kewl-tune").get_data(as_text=True)
+        for zone in ("field", "grave"):
+            assert loggedin.post("/train/kewl-tune/value",
+                                 data={"code": code, "zone": zone, "value": "2.5"}).status_code == 302
+            assert trainer.prefs(c, "kewl-tune")["values"][(code, zone)] == 2.5
+        assert loggedin.post("/train/kewl-tune/value",
+                             data={"code": code, "zone": "field", "value": "9"}).status_code == 400
+        assert loggedin.post("/train/kewl-tune/value",
+                             data={"code": code, "zone": "deck", "value": "1"}).status_code == 400
+        page = loggedin.get("/train/kewl-tune").get_data(as_text=True)
+        assert "Card values" in page and "in the GY" in page
     finally:
-        loggedin.post("/train/kewl-tune/value", data={"code": code, "value": ""})
-    assert code not in trainer.prefs(c, "kewl-tune")["values"]
+        for zone in ("field", "grave"):
+            loggedin.post("/train/kewl-tune/value", data={"code": code, "zone": zone, "value": ""})
+    assert not any(c_ == code for c_, _z in trainer.prefs(c, "kewl-tune")["values"])

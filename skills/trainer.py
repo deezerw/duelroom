@@ -126,11 +126,11 @@ _SOLVER_ZONES = {"hand": ("hand",), "mz": ("mzone",), "sz": ("szone", "hand"),
 
 def prefs(conn, name):
     """{"avoid": {("activate", code, zone) | ("summon", code)},
-    "interrupters": {code}, "extenders": {code}, "values": {code: worth}}
+    "interrupters": {code}, "extenders": {code}, "values": {(code, zone): worth}}
     -- the shape `playback.line_moves` speaks."""
     out = {"avoid": set(), "interrupters": set(), "extenders": set(),
-           "values": {r["code"]: r["value"] for r in conn.execute(
-               "SELECT code, value FROM card_values WHERE deck=?", (name,))}}
+           "values": {(r["code"], r["zone"]): r["value"] for r in conn.execute(
+               "SELECT code, zone, value FROM card_values WHERE deck=?", (name,))}}
     for r in conn.execute("SELECT kind, code, zone FROM trainer_prefs WHERE deck=?",
                           (name,)):
         if r["kind"] == "avoid_activate":
@@ -158,25 +158,36 @@ def set_pref(conn, name, kind, code, zone="", on=True):
 
 
 VALUE_MAX = 5
+VALUE_ZONES = {"field": "on the field", "grave": "in the GY", "hand": "in the hand"}
 
 
-def set_value(conn, name, code, value):
-    """What one interruption of `code` is worth, 0 .. VALUE_MAX in halves
-    (0: it does not count). None (or 1, the default) clears it."""
+def _value_zone(where):
+    """A `board_interruptions` place -> a card_values zone (set cards are on the field)."""
+    return "field" if where in ("field", "set") else where
+
+
+def set_value(conn, name, code, zone, value):
+    """What one interruption of `code` in `zone` is worth, 0 .. VALUE_MAX in
+    halves (0: it does not count there). None clears it back to the
+    scripts' reading (1 where they see an interruption, else nothing)."""
+    if zone not in VALUE_ZONES:
+        raise ValueError(zone)
     with conn:
-        conn.execute("DELETE FROM card_values WHERE deck=? AND code=?", (name, int(code)))
-        if value is not None and value != 1:
+        conn.execute("DELETE FROM card_values WHERE deck=? AND code=? AND zone=?",
+                     (name, int(code), zone))
+        if value is not None:
             v = round(float(value) * 2) / 2
             if not 0 <= v <= VALUE_MAX:
                 raise ValueError(value)
-            conn.execute("INSERT INTO card_values (deck, code, value, added) "
-                         "VALUES (?,?,?,?)", (name, int(code), v, _now()))
+            conn.execute("INSERT INTO card_values (deck, code, zone, value, added) "
+                         "VALUES (?,?,?,?,?)", (name, int(code), zone, v, _now()))
 
 
 def value_options(conn, deck_path, p):
-    """The deck's cards that can be an interruption -- read from their
-    scripts, or marked by the player -- for the values picker:
-    [{code, name, value, set}], highest value first."""
+    """One row per (card, zone) that counts: every place the scripts read
+    the card as an interruption (worth 1 unless set), every place the
+    player gave it a value, and the field for a marked interrupter.
+    [{code, name, zone, where, value, set, known}], highest value first."""
     from ygorl.cards.ydk import load_ydk
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import card_interruptions
@@ -185,12 +196,17 @@ def value_options(conn, deck_path, p):
 
     cards, deck, out = default_cards(), load_ydk(Path(deck_path)), []
     for code in dict.fromkeys(cards.canonical(c) for c in (*deck.extra, *deck.main)):
-        if not (card_interruptions(code, cards) or code in p["interrupters"]):
-            continue
-        v = p["values"].get(code)
-        out.append({"code": code, "value": _num(1 if v is None else v), "set": v is not None,
-                    "name": (card_db.resolve(conn, code) or {"name": f"#{code}"})["name"]})
-    return sorted(out, key=lambda o: (-o["value"], o["name"]))
+        known = {_value_zone(i.where) for i in card_interruptions(code, cards)}
+        zones = known | {z for (c, z) in p["values"] if c == code}
+        if code in p["interrupters"]:
+            zones.add("field")
+        name = (card_db.resolve(conn, code) or {"name": f"#{code}"})["name"]
+        for z in sorted(zones, key=list(VALUE_ZONES).index):
+            v = p["values"].get((code, z))
+            out.append({"code": code, "name": name, "zone": z, "where": VALUE_ZONES[z],
+                        "value": _num(1 if v is None else v), "set": v is not None,
+                        "known": z in known})
+    return sorted(out, key=lambda o: (-o["value"], o["name"], list(VALUE_ZONES).index(o["zone"])))
 
 
 def _num(x):
@@ -323,9 +339,11 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     line that avoids them outranks any that does not. `p` is `prefs()`,
     whose interrupters also count -- on the field -- as interruptions.
 
-    `on_field` and `interruptions` add up what each piece is WORTH: 1,
-    unless the player set a value for the card (`card_values`) -- so a
-    Desirae can outrank an Evolzar. `negates` stays a plain count.
+    `on_field` and `interruptions` add up what each piece is WORTH where
+    it ended -- field, GY or hand: 1, unless the player set a value for
+    the card there (`card_values`) -- so a Desirae can outrank an
+    Evolzar. A value also counts a card the scripts do not read there (a
+    Tearlament in the GY). `negates` stays a plain count.
 
     `extenders` counts the player's extenders the line summoned or
     activated. A tiebreak, below the board: the same board THROUGH the
@@ -360,9 +378,9 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
          **(p or {})}
     vals = p["values"]
 
-    def worth(code):
-        v = vals.get(code)
-        return vals.get(cards.canonical(code), 1) if v is None else v
+    def worth(code, zone="field"):
+        v = vals.get((code, zone))
+        return vals.get((cards.canonical(code), zone), 1) if v is None else v
 
     board = line.get("board") or {}
     score = board_interruptions(board, cards)
@@ -373,9 +391,11 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         if where == "hand" and held[code] > 0:
             held[code] -= 1
             continue
-        n += worth(code)
+        n += worth(code, _value_zone(where))
         neg += int(bool(negate))
-    extra = _extra_on_field(board, p["interrupters"], cards, worth)
+    field_marked = set(p["interrupters"]) | {c for (c, z), v in vals.items() if z == "field"}
+    extra = _extra_on_field(board, field_marked, cards, worth)
+    other = _extra_off_field(board, vals, cards, held, worth)
     avoided = used = 0
     if ((p["avoid"] or p["extenders"]) and start is not None
             and line.get("responses")):
@@ -384,7 +404,7 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         avoided = len(moves & p["avoid"])
         used = len({m[1] for m in moves} & p["extenders"])
     return [-avoided, _num(_on_field(line, worth if vals else None) + extra),
-            _num(n + extra), neg, used, -len(line.get("actions") or [])]
+            _num(n + extra + other), neg, used, -len(line.get("actions") or [])]
 
 
 def _extra_on_field(board, codes, cards, worth=None):
@@ -401,6 +421,28 @@ def _extra_on_field(board, codes, cards, worth=None):
                 and not any(i.where == "field"
                             for i in card_interruptions(c["code"], cards))):
             n += worth(c["code"]) if worth else 1
+    return n
+
+
+def _extra_off_field(board, vals, cards, held, worth):
+    """Cards the player valued in the GY or hand where the scripts read no
+    interruption: each copy there counts its value. A hand copy held since
+    the opening is left out, as for every hand piece (`held` is what is
+    left of that count after the scripts' own hand pieces took theirs)."""
+    from ygorl.solver.blocking import card_interruptions
+
+    me = (board.get("players") or [{}])[0]
+    n = 0
+    for zone, key in (("grave", "grave"), ("hand", "hand")):
+        for code in me.get(key) or []:
+            if (code, zone) not in vals and (cards.canonical(code), zone) not in vals:
+                continue
+            if any(_value_zone(i.where) == zone for i in card_interruptions(code, cards)):
+                continue        # already a scripts' piece
+            if zone == "hand" and held[code] > 0:
+                held[code] -= 1
+                continue
+            n += worth(code, zone)
     return n
 
 
