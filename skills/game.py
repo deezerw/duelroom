@@ -66,6 +66,21 @@ ENEMY_HANDS = 3      # fixed enemy hands, shared by every one of your hands
 WORKERS = 4         # games at once; 2 solver threads each = 8 cores
 OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
+# A --goal-win search stops once this many winning lines exist (patch 0003).
+# The question it answers is yes/no; the rest of the budget only picked a
+# cheaper winning line. A/B on 36 stored turn-3 positions (2026-11-06,
+# tools/experiments/stop_on_win_ab.py): 24/36 wins full budget, 25/36 at 4,
+# 26/36 at 1, no win lost by either; won searches 46 s -> 25 s. 4, not 1: a
+# written line is still re-verified by replay, and one is a thin margin.
+STOP_ON_WIN = 4
+# The kernel page tracker (patch 0003, R2V_ARENA_UFFD=1) in place of the
+# SIGSEGV + mprotect-per-page one, which spent more CPU in the kernel than in
+# the search. Proven the same search: deterministic runs give identical
+# counters and byte-identical solutions (tools/experiments/uffd_identity.py).
+# At the games' settings it searches 1.88x the states in the same 60 s, 8/12
+# -> 9/12 wins, none lost (uffd_throughput.py, 2026-11-06). It falls back to
+# the old tracker by itself if userfaultfd is unavailable.
+ARENA_ENV = {"R2V_ARENA_UFFD": "1"}
 GAMES = Path(__file__).resolve().parent.parent / "results" / "games"
 
 
@@ -88,8 +103,11 @@ def _hard_limit(ms):
     return 2 * ms // 1000 + 120
 
 
-def _solve(ref, args, scratch, label, ms, seed, threads=2):
-    """One rooted-solver run. Returns {"solution", "approach", "log"} paths."""
+def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
+           env_extra=None):
+    """One rooted-solver run. Returns {"solution", "approach", "log"} paths.
+    `binary`: another build of it (an A/B arm); default ROOTED_BIN.
+    `env_extra`: environment overrides for this run only."""
     from ygorl.solver.combo_solver import Workdir
 
     scratch = Path(scratch)
@@ -97,14 +115,15 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2):
     wd = Workdir.create(scratch / f"wd-{label}")
     out = scratch / f"out-{label}"
     out.mkdir(parents=True, exist_ok=True)
-    cmd = [str(ROOTED_BIN), str(ref), "--workdir", str(wd.path)]
+    cmd = [str(binary or ROOTED_BIN), str(ref), "--workdir", str(wd.path)]
     for d in wd.scriptdirs:
         cmd += ["--scriptdir", str(d)]
     cmd += [str(a) for a in args]
     cmd += ["--solve-ms", str(ms), "--threads", str(threads),
             "--seed", str(seed), "--outdir", str(out)]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env(),
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
                            timeout=_hard_limit(ms))
     except subprocess.TimeoutExpired as e:
         # Measured 2026-11-03: a 60 s turn-2 solve still running after 10.5 h,
@@ -277,8 +296,8 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
             "--target", enemy_target, "--player", "1", "--turns", "2",
             "--opp-greedy"] + _respond(our_respond)
     if otk_ms:
-        k = _solve(prefix, base + ["--goal-win"], scratch, "t2-otk", otk_ms,
-                   seed)
+        k = _solve(prefix, base + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
+                   scratch, "t2-otk", otk_ms, seed)
         if k["solution"] and _winner(k["solution"]) == 1:
             return {"lost": True, "line": str(k["solution"])}
     r = _solve(prefix, base, scratch, "t2", ms, seed)
@@ -296,14 +315,17 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
 
 
 def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
-          player=0, turn=3):
+          player=0, turn=3, extra=(), binary=None, env_extra=None):
     """Your lethal turn: turn 3 as player 0 going first, turn 2 as player 1
-    going second. Returns {won, damage, line}."""
+    going second. Returns {won, damage, line}. `extra` / `binary`: more
+    solver flags / another build (A/B arms)."""
     scratch = Path(scratch)
     args = ["--start", start, "--root", prefix, "--no-ref",
             "--target", our_target, "--player", str(player), "--turns", str(turn),
-            "--goal-win", "--opp-greedy"] + _respond(enemy_respond)
-    r = _solve(prefix, args, scratch, f"t{turn}", ms, seed)
+            "--goal-win", "--stop-on-win", str(STOP_ON_WIN), "--opp-greedy"] \
+        + _respond(enemy_respond) + list(extra)
+    r = _solve(prefix, args, scratch, f"t{turn}", ms, seed, binary=binary,
+               env_extra=env_extra)
     if r["solution"] and _winner(r["solution"]) == player:
         return {"won": True, "damage": None, "line": str(r["solution"])}
     damage = 0

@@ -14,8 +14,11 @@ cp -a "$src" "$dst"
 rm -f "$dst"/obj/solver/search_patched.o "$dst"/bin/combosolver-patched
 sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0002-rooted-search.patch" >&2)
+# 0003: --stop-on-win, and the R2V_ARENA_UFFD=1 kernel page tracker.
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0003-stop-on-win-uffd-tracker.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "$(nproc)" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
 "$dst/bin/combosolver" --help 2>&1 | grep -q -- "--root" || { echo "built binary lacks --root" >&2; exit 1; }
+"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--stop-on-win" || { echo "built binary lacks --stop-on-win" >&2; exit 1; }
 echo "$dst/bin/combosolver"

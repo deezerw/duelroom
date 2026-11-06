@@ -215,7 +215,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 | `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2), `TRAIN_MS` (180 s per attempt; the page's "seconds per try"), `PLATEAU` (6) |
-| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES` |
+| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV` |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
@@ -573,6 +573,36 @@ Fairness, checked rather than assumed: the enemy's OPENING hand per seed is asse
 identical across your hands (`check_shared_enemy_hands`). Their turn-2 draw is not, by
 design -- Maxx "C" during your turn draws them cards off the top. Turn 1 is solved once
 per (hand, board, enemy hand) and reused by every run.
+
+### Search speed: patch 0003 (2026-11-06)
+
+Asked: faster searches, quality first. Two changes, each gated on a measurement that
+could have rejected it; both on the ROOTED binary only (the pinned one is untouched).
+
+- **`--stop-on-win 4`** (`game.STOP_ON_WIN`) on every `--goal-win` search (your lethal
+  turn, their turn-2 kill check). A worker used to stop only after 16 solutions of its
+  own, and winning rollouts repeat the same lines, so a WON search still burned the
+  whole budget. Win/lose is a yes/no; the rest only picked a cheaper line. Never set
+  on the probe (its lines are not written: a probe win stopping the rollouts would end
+  with NO line). A/B on 36 stored turn-3 positions (`tools/experiments/stop_on_win_ab.py`):
+  full budget 24/36, at 4 25/36, at 1 26/36, no win lost; won searches 46 s -> 25 s.
+  Non-wins still use the full budget, by design.
+- **Kernel page tracker, `R2V_ARENA_UFFD=1`** (`game.ARENA_ENV`). The arena snapshots by
+  write-protecting itself; the POSIX port did it with SIGSEGV + one mprotect per page per
+  generation -- measured ~100k signals and ~100k mprotect per 8 s per solver, MORE kernel
+  CPU than search CPU, plus a cross-CPU TLB flush per mprotect with 2 threads. Linux 6.7+
+  has GetWriteWatch for real: userfaultfd async write-protect (`UFFD_USER_MODE_ONLY`, so no
+  root and `unprivileged_userfaultfd=0` is fine) + the `PAGEMAP_SCAN` ioctl, which reads
+  and re-arms the marks in one call. Proven the SAME search: deterministic mode gives
+  identical counters and byte-identical solutions (`uffd_identity.py`; the later finisher
+  phase is wall-clock, so it differs -- it did 2.1x the expansions per root). At the
+  games' settings: **1.88x the states in the same 60 s**, wins 8/12 -> 9/12, none lost
+  (`uffd_throughput.py`); a batch went user 3m44/sys 5m09 -> user 11m05/sys 2m09. Falls
+  back to the old tracker by itself if userfaultfd is unavailable.
+- `R2V_ARENA_VERIFY=1` reports "barrier INCOMPLETE: page 1154" with BOTH trackers, same
+  page and offset: pre-existing, not from 0003. Unexplained; worth a look.
+- Not done: the trainer, sweep and every turn-1 solve use the PINNED binary, which still
+  has the old tracker. Porting the arena half of 0003 there is the next big saving.
 
 ### Going second (2026-11-06)
 

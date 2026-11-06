@@ -1,0 +1,356 @@
+--- combo-solver-rooted/solver-patched/arena.cpp
++++ combo-solver-rooted/solver-patched/arena.cpp
+@@ -68,6 +68,16 @@
+ #include <csignal>
+ #include <sys/mman.h>
+ #include <unistd.h>
++#if defined(__linux__)
++#include <fcntl.h>
++#include <linux/fs.h>
++#include <linux/userfaultfd.h>
++#include <sys/ioctl.h>
++#include <sys/syscall.h>
++#if defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC)
++#define R2V_UFFD 1
++#endif
++#endif
+ static inline unsigned long long r2v_tsc_ns() {
+ 	return static_cast<unsigned long long>(
+ 		std::chrono::duration_cast<std::chrono::nanoseconds>(
+@@ -488,11 +498,58 @@
+ 		// Sized for the full reserve, once: the fault handler writes into
+ 		// this bitmap, so it must never reallocate while the arena is live.
+ 		fault_dirty.assign(reserve / page_size / 64 + 2, 0);
++#if defined(R2V_UFFD)
++		// R2V_ARENA_UFFD=1 (duelroom): the measured cost of the fault-handler
++		// tracker is one SIGSEGV + one mprotect per page per generation (~100k
++		// of each in 8 s per solver, more kernel time than user time), plus a
++		// cross-CPU TLB flush per mprotect as soon as there are two workers.
++		// Async userfaultfd write-protect lets the KERNEL record the first
++		// write to a page with no signal and no syscall, and PAGEMAP_SCAN reads
++		// and re-arms those marks in one ioctl -- GetWriteWatch(RESET), for
++		// real. Any setup failure falls back to the fault handler below.
++		static const bool want_uffd = [] {
++			const char* e = std::getenv("R2V_ARENA_UFFD");
++			return e && *e && *e != '0';
++		}();
++		if(want_uffd) {
++			const int fd = static_cast<int>(syscall(SYS_userfaultfd,
++				O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY));
++			uffdio_api api{};
++			api.api = UFFD_API;
++			api.features = UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED;
++			uffdio_register reg{};
++			reg.range.start = reinterpret_cast<std::uintptr_t>(base);
++			reg.range.len = reserve;
++			reg.mode = UFFDIO_REGISTER_MODE_WP;
++			// One 4 KiB page per mark: a transparent huge page would make a
++			// single store dirty 2 MiB.
++			madvise(base, reserve, MADV_NOHUGEPAGE);
++			if(fd >= 0 && ioctl(fd, UFFDIO_API, &api) == 0 &&
++			   ioctl(fd, UFFDIO_REGISTER, &reg) == 0) {
++				uffd = fd;
++				write_watch = true;
++			} else {
++				if(fd >= 0)
++					close(fd);
++				static std::atomic<bool> said{ false };
++				if(!said.exchange(true))
++					std::fprintf(stderr, "!! R2V_ARENA_UFFD: userfaultfd "
++								 "write-protect unavailable, using the fault "
++								 "handler\n");
++			}
++		}
++		if(uffd >= 0) {
++			// No handler, no registry: the kernel tracks.
++		} else {
++#endif
+ 		pagefault::Install();
+ 		pagefault::Register(reinterpret_cast<std::uintptr_t>(base),
+ 							reinterpret_cast<std::uintptr_t>(base),
+ 							fault_dirty.data(), page_size);
+ 		write_watch = true;
++#if defined(R2V_UFFD)
++		}
++#endif
+ 	}
+ #else
+ 	SYSTEM_INFO si{};
+@@ -564,7 +621,10 @@
+ #if defined(R2V_WASM)
+ 		std::free(base);
+ #elif defined(R2V_POSIX)
+-		if(write_watch)
++		if(uffd >= 0) {
++			close(uffd);   // unregisters the range
++			uffd = -1;
++		} else if(write_watch)
+ 			pagefault::Deregister(reinterpret_cast<std::uintptr_t>(base));
+ 		munmap(base, reserved);
+ #else
+@@ -595,7 +655,8 @@
+ 	if(mprotect(base + committed, want - committed, PROT_READ | PROT_WRITE) != 0)
+ 		return false;
+ 	if(write_watch) {
+-		pagefault::UpdateEnd(base_addr, base_addr + want);
++		if(uffd < 0)
++			pagefault::UpdateEnd(base_addr, base_addr + want);
+ 		// Fresh pages are writable and untracked until the next arming;
+ 		// declare them dirty now. Over-marking is safe, a missed page is
+ 		// silent corruption.
+@@ -872,6 +933,10 @@
+ 		if(bits)
+ 			(*bits)[w] |= v;
+ 	}
++#if defined(R2V_UFFD)
++	if(uffd >= 0)
++		return count + UffdCollect(bits);
++#endif
+ 	// Re-arm: the first store to each page in the new generation traps once.
+ 	mprotect(base, committed, PROT_READ);
+ 	return count;
+@@ -915,6 +980,54 @@
+ #endif
+ }
+ 
++#if defined(R2V_UFFD)
++size_t Arena::UffdCollect(std::vector<uint64_t>* bits) {
++	// /proc/self/pagemap, once per process: PAGEMAP_SCAN is an ioctl on it.
++	static const int pagemap = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
++	if(pagemap < 0) {
++		// Cannot read the marks: everything committed is dirty (correct, slow).
++		if(bits)
++			std::fill(bits->begin(), bits->end(), ~uint64_t(0));
++		return committed / page_size + 1;
++	}
++	page_region regions[256];
++	pm_scan_arg arg{};
++	arg.size = sizeof(arg);
++	arg.flags = PM_SCAN_WP_MATCHING | PM_SCAN_CHECK_WPASYNC;
++	arg.end = base_addr + committed;
++	arg.vec = reinterpret_cast<std::uintptr_t>(regions);
++	arg.vec_len = sizeof(regions) / sizeof(regions[0]);
++	arg.category_mask = PAGE_IS_WRITTEN;
++	arg.return_mask = PAGE_IS_WRITTEN;
++	size_t count = 0;
++	for(std::uintptr_t at = base_addr; at < arg.end;) {
++		arg.start = at;
++		arg.walk_end = 0;
++		const long n = ioctl(pagemap, PAGEMAP_SCAN, &arg);
++		if(n < 0) {
++			// A failed scan may have re-armed part of the range already:
++			// over-mark everything, never under-mark.
++			if(bits)
++				std::fill(bits->begin(), bits->end(), ~uint64_t(0));
++			return committed / page_size + 1;
++		}
++		for(long i = 0; i < n; ++i) {
++			const size_t p0 = (regions[i].start - base_addr) / page_size;
++			const size_t p1 = (regions[i].end - base_addr) / page_size;
++			count += p1 - p0;
++			if(bits)
++				for(size_t p = p0; p < p1; ++p)
++					(*bits)[p >> 6] |= uint64_t(1) << (p & 63);
++		}
++		// walk_end < end only when the region buffer filled up.
++		if(arg.walk_end <= at)
++			break;
++		at = arg.walk_end;
++	}
++	return count;
++}
++#endif
++
+ #if defined(R2V_WASM) || defined(R2V_POSIX)
+ namespace {
+ std::atomic<uint64_t> g_verify_checked{ 0 }, g_verify_missed{ 0 };
+@@ -1107,7 +1220,7 @@
+ 	// SyncDirty just re-armed the traps; the copies below would fault once
+ 	// per page. The epilogue re-arms anyway, so open the whole window in one
+ 	// syscall instead.
+-	if(write_watch && committed)
++	if(write_watch && committed && uffd < 0)
+ 		mprotect(base, committed, PROT_READ | PROT_WRITE);
+ #endif
+ 	size_t pages = 0;
+@@ -1133,6 +1246,11 @@
+ 	// writes just made, and re-arm for the next generation.
+ 	if(write_watch && committed) {
+ 		std::fill(fault_dirty.begin(), fault_dirty.end(), 0);
++#if defined(R2V_UFFD)
++		if(uffd >= 0)
++			UffdCollect(nullptr);   // the restore's own writes: re-arm, drop
++		else
++#endif
+ 		mprotect(base, committed, PROT_READ);
+ 	}
+ #else
+@@ -1223,7 +1341,7 @@
+ 	}
+ #if defined(R2V_POSIX)
+ 	// Same as Restore: one syscall instead of one fault per copied page.
+-	if(write_watch && committed)
++	if(write_watch && committed && uffd < 0)
+ 		mprotect(base, committed, PROT_READ | PROT_WRITE);
+ #endif
+ 	// The arena from the mirror, each page ONCE. The bound is the in_use of the
+@@ -1252,6 +1370,11 @@
+ 	// writes just made, and re-arm for the next generation.
+ 	if(write_watch && committed) {
+ 		std::fill(fault_dirty.begin(), fault_dirty.end(), 0);
++#if defined(R2V_UFFD)
++		if(uffd >= 0)
++			UffdCollect(nullptr);   // the restore's own writes: re-arm, drop
++		else
++#endif
+ 		mprotect(base, committed, PROT_READ);
+ 	}
+ #else
+--- combo-solver-rooted/solver-patched/arena.h
++++ combo-solver-rooted/solver-patched/arena.h
+@@ -207,6 +207,13 @@
+ 	// sized once at Init (the handler writes into it, so it must never
+ 	// reallocate while the arena is live). Unused on the other arms.
+ 	std::vector<uint64_t> fault_dirty;
++	// Linux R2V_ARENA_UFFD=1 (duelroom): the kernel's own write tracking --
++	// a userfaultfd in ASYNC write-protect mode plus the PAGEMAP_SCAN ioctl --
++	// in place of the SIGSEGV + mprotect-per-page tracker. -1 = not in use.
++	int uffd = -1;
++	// Pours the pages written since the last call into `bits` (if any) and
++	// write-protects them again, in one ioctl per batch of ranges.
++	size_t UffdCollect(std::vector<uint64_t>* bits);
+ 	CheckpointCost last_push, last_restore;
+ };
+ 
+--- combo-solver-rooted/solver-patched/main.cpp
++++ combo-solver-rooted/solver-patched/main.cpp
+@@ -1470,6 +1470,8 @@
+ 	// (MSG_WIN). Board targets are not the goal; --target still feeds the
+ 	// guidance heuristics and is required by --no-ref.
+ 	bool goal_win = false;
++	// --stop-on-win <k> (duelroom): see SearchConfig::win_stop.
++	uint32_t stop_on_win = 0;
+ 	// --opp-greedy (patch 0002): the non-searching player is a GREEDY DEFENDER
+ 	// instead of a wall that always passes -- at a chain window it plays its
+ 	// first eligible effect (never onto its own link), and its follow-up
+@@ -2004,6 +2006,8 @@
+ 				"  --opp-respond <c>  codes (a|b|...) the greedy opponent may use\n"
+ 				"  --goal-win         the goal is WINNING: a line is a solution when the\n"
+ 				"                     duel ends with --player as the winner (patch 0002)\n"
++				"  --stop-on-win <k>  with --goal-win: the rollouts stop once k winning\n"
++				"                     lines exist across all workers (duelroom)\n"
+ 				"  --mp1-only         the whole combo lives in Main Phase 1: "
+ 				"entering the\n                     Battle Phase is removed "
+ 				"from the enumeration\n                     (\"-> End Phase\" "
+@@ -2547,6 +2551,9 @@
+ 		} else if(a == "--solve-ms") {
+ 			const char* v = next("--solve-ms"); if(!v) return false;
+ 			o.solve_ms = std::atof(v);
++		} else if(a == "--stop-on-win") {
++			const char* v = next("--stop-on-win"); if(!v) return false;
++			o.stop_on_win = static_cast<uint32_t>(std::atoi(v));
+ 		} else if(a == "--threads") {
+ 			const char* v = next("--threads"); if(!v) return false;
+ 			o.threads = static_cast<unsigned>(std::atoi(v));
+@@ -4126,6 +4133,7 @@
+ 	// (Omega's second rip lives there). 0 = default = 1 turn.
+ 	cfg.max_turns = opt.turns ? static_cast<uint32_t>(opt.turns) : 1u;
+ 	cfg.goal_win = opt.goal_win;
++	cfg.win_stop = opt.goal_win ? opt.stop_on_win : 0;
+ 	cfg.opp_greedy = opt.opp_greedy;
+ 	for(uint32_t c : opt.opp_respond)
+ 		cfg.opp_respond.push_back(c);
+@@ -8416,6 +8424,7 @@
+ 					if(opt.stop_gc)
+ 						probe.SetLuaGc(false);
+ 					SearchConfig pcfg = cfg;
++					pcfg.win_stop = 0;    // the probe's lines are never written
+ 					pcfg.time_limit_ms = (std::min)(opt.solve_ms / 6.0, 20000.0);
+ 					pcfg.archive_k = opt.archive_k;
+ 					Search s(probe, probe_arena, start_yrp, pcfg);
+@@ -9197,6 +9206,16 @@
+ 		std::printf("  total: %.1f s, at best %u of the %zu target "
+ 							"cards, %u monster(s)\n", secs, best_overlap, target.codes.size(),
+ 					best_monsters);
++		if(cfg.win_stop) {
++			const int64_t fw = g_first_win_us.load();
++			if(fw < 0)
++				std::printf("  stop-on-win %u: no win in the rollouts\n",
++							cfg.win_stop);
++			else
++				std::printf("  stop-on-win %u: first win at %.1f s (process "
++									"clock), %u win(s) recorded\n", cfg.win_stop,
++							fw / 1e6, g_wins.load());
++		}
+ 		if(!cfg.hint_cards.empty()) {
+ 			const uint64_t hs = nrpa.hint_seen + greedy.hint_seen;
+ 			const uint64_t hx = nrpa.hint_exact + greedy.hint_exact;
+--- combo-solver-rooted/solver-patched/search.cpp
++++ combo-solver-rooted/solver-patched/search.cpp
+@@ -15,6 +15,13 @@
+ namespace solver {
+ 
+ std::atomic<bool> g_stop_requested{ false };
++std::atomic<uint32_t> g_wins{ 0 };
++std::atomic<int64_t> g_first_win_us{ -1 };
++static const auto g_process_t0 = std::chrono::steady_clock::now();
++int64_t UsSinceStart() {
++	return std::chrono::duration_cast<std::chrono::microseconds>(
++			   std::chrono::steady_clock::now() - g_process_t0).count();
++}
+ 
+ // (SerialProgress is declared in search.h: it also serves the finisher root
+ // probe. Definition further down in this file.)
+@@ -302,6 +309,8 @@
+ 	// load on a path that already reads a clock.
+ 	if(g_stop_requested.load(std::memory_order_relaxed))
+ 		return true;
++	if(cfg.win_stop && g_wins.load(std::memory_order_relaxed) >= cfg.win_stop)
++		return true;
+ 	// POISONED ARENA: an allocation escaped the arena, so Restore() no longer
+ 	// reconstitutes the duel. Anything that followed would describe a divergent
+ 	// state, so we stop here and the worker says so. One relaxed atomic load per
+@@ -1765,7 +1774,14 @@
+ 	if(!cfg.goal_win || !won_this_step)
+ 		return false;
+ 	++stats.board_reached;
+-	return RecordSolution(depth, actions, false);
++	const size_t had = solutions.size();
++	const bool stop = RecordSolution(depth, actions, false);
++	if(cfg.win_stop && solutions.size() > had) {
++		int64_t none = -1;
++		g_first_win_us.compare_exchange_strong(none, UsSinceStart());
++		g_wins.fetch_add(1, std::memory_order_relaxed);
++	}
++	return stop;
+ }
+ 
+ bool Search::RecordSolution(uint32_t depth, uint32_t actions, bool alt_hit) {
+--- combo-solver-rooted/solver-patched/search.h
++++ combo-solver-rooted/solver-patched/search.h
+@@ -35,6 +35,12 @@
+ // through its normal exit, and the run writes whatever it has found. The
+ // process then terminates by finishing, not by being killed.
+ extern std::atomic<bool> g_stop_requested;
++// --stop-on-win (duelroom): winning lines recorded so far by every worker that
++// has cfg.win_stop set, and when the first one landed (us since process start,
++// -1 = none yet).
++extern std::atomic<uint32_t> g_wins;
++extern std::atomic<int64_t> g_first_win_us;
++int64_t UsSinceStart();
+ 
+ // Target board in the sense of the equivalence criterion we use: same cards per
+ // zone TYPE, same materials, same counters, same FACE (up/down). The exact
+@@ -2674,6 +2680,12 @@
+ 	// --goal-win (duelroom patch 0002): a solution is a duel the target player
+ 	// WINS; board matches are not goals.
+ 	bool goal_win = false;
++	// --stop-on-win <k> (duelroom): this worker stops once k winning lines exist
++	// across ALL workers that set it. Whether the duel can be won is answered by
++	// the first; the rest only pick a cheaper winning line. 0 = off. Never set on
++	// the probe, whose lines are not written: a probe win stopping the rollouts
++	// would end the search with no line at all.
++	uint32_t win_stop = 0;
+ 	// --opp-greedy / --opp-respond (duelroom patch 0002).
+ 	bool opp_greedy = false;
+ 	std::vector<uint32_t> opp_respond;
