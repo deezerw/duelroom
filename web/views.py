@@ -920,6 +920,40 @@ def activate(name):
     return redirect(url_for("views.deck", name=name))
 
 
+@bp.route("/deck/<name>/delete", methods=["POST"])
+@login_required
+def delete_deck(name):
+    """Take a deck off every list. The file moves to `decks/deleted/`
+    rather than being unlinked, so a mis-tap on a phone is one `mv` from
+    undone. Measured results stay: they are keyed by the card list, not
+    the file, and come back if the same list is imported again."""
+    c = conn()
+    path = deck_path(name)
+    if not path or not path.exists():
+        flash("No such deck")
+        return redirect(url_for("views.index"))
+    # A job reads the .ydk when it STARTS (and games re-read the enemy's),
+    # so a queued job would fail later with nobody watching.
+    for j in c.execute("SELECT id, kind, deck, params FROM jobs "
+                       "WHERE state IN ('queued', 'running')"):
+        if j["deck"] == name or json.loads(j["params"] or "{}").get("enemy") == name:
+            flash(f"{name} is used by job {j['id']} ({j['kind']}) — cancel it "
+                  f"or let it finish first.")
+            return redirect(url_for("views.deck", name=name))
+    bin_ = DECKS / "deleted"
+    bin_.mkdir(exist_ok=True)
+    dest = bin_ / path.name
+    if dest.exists():   # deleted before: keep the older copy too
+        dest = bin_ / f"{path.stem}.{datetime.now():%Y%m%d-%H%M%S}.ydk"
+    path.rename(dest)
+    if db.get_meta(c, "active_deck") == name:
+        c.execute("DELETE FROM meta WHERE key = 'active_deck'")
+        c.commit()
+    flash(f"Deleted {name}. Its results are kept; the file is in "
+          f"assets/decks/deleted/ if you want it back.")
+    return redirect(url_for("views.index"))
+
+
 @bp.route("/deck/<name>/ydk")
 @login_required
 def download_ydk(name):

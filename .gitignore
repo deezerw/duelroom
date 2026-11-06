@@ -11,3 +11,4 @@ data/cardimg/
 certs/key.pem
 certs/*.srl
 data/web.env
+assets/decks/deleted/

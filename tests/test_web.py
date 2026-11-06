@@ -1235,3 +1235,34 @@ def test_full_art_falls_back_to_small_art(loggedin, monkeypatch):
 def test_starter_page_shows_card_art(loggedin):
     body = loggedin.get("/starters/kewl-tune").get_data(as_text=True)
     assert "/img/small/" in body
+
+
+def test_delete_deck_moves_it_aside_and_respects_jobs(client, tmp_path, monkeypatch):
+    """Delete moves the .ydk into decks/deleted/ (undoable), clears the
+    active deck if it pointed there, and refuses while a queued job --
+    as your deck or as the enemy -- still needs the file."""
+    from skills import db
+    from web import views, jobs
+    monkeypatch.setattr(views, "DECKS", tmp_path)
+    (tmp_path / "gone.ydk").write_text("#main\n#extra\n!side\n")
+    (tmp_path / "busy.ydk").write_text("#main\n#extra\n!side\n")
+    client.post("/login", data={"password": "pw"})
+    c = db.connect()
+    db.set_meta(c, "active_deck", "gone")
+    c.commit()
+
+    r = client.post("/deck/gone/delete")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/")
+    assert not (tmp_path / "gone.ydk").exists()
+    assert (tmp_path / "deleted" / "gone.ydk").exists()
+    assert db.get_meta(db.connect(), "active_deck") is None
+
+    job = jobs.enqueue(c, "games", "imported", enemy="busy")
+    try:
+        client.post("/deck/busy/delete")
+        assert (tmp_path / "busy.ydk").exists()
+    finally:
+        c.execute("DELETE FROM jobs WHERE id = ?", (job,))
+        c.commit()
+
+    assert client.post("/deck/../etc/delete").status_code in (302, 404)

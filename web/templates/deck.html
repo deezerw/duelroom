@@ -13,6 +13,10 @@
     <a class="btn" href="{{ url_for('views.report', name=name) }}">Report</a>
     <a class="btn" href="{{ url_for('views.build', name=name) }}">Edit</a>
     <a class="btn" href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a>
+    <form method="post" action="{{ url_for('views.delete_deck', name=name) }}" style="margin:0"
+          onsubmit="return confirm('Delete the deck {{ name }}? Its results are kept.')">
+      <button class="btn danger">Delete deck</button>
+    </form>
   </div>
   {% if archetype %}
     <details class="note"><summary>how this archetype was identified</summary>
