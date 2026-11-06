@@ -131,6 +131,42 @@ def fill(conn, dh, name, enemy, budget_s=None, say=None):
     return 0
 
 
+def compare(strata, min_side=MIN_SIDE):
+    """Win rate with a thing vs without it, compared only inside each
+    stratum: `strata` is [(wins with, wins without), ...], lists of bools.
+
+    {impact, ci, compared, n_yes, yes_win, no_win, status}: the
+    Mantel-Haenszel risk difference with an Agresti-Caffo 95% interval
+    (module docstring). `yes_win` / `no_win` are raw rates over the
+    compared games only (over every "yes" game when nothing compares)."""
+    num = den = var = 0.0
+    compared = n_yes = n_y = n_n = w_yes = w_y = w_n = 0
+    for u, n in strata:
+        n_yes, w_yes = n_yes + len(u), w_yes + sum(u)
+        if not u or not n:
+            continue
+        pu, pn = sum(u) / len(u), sum(n) / len(n)
+        w = len(u) * len(n) / (len(u) + len(n))
+        num += w * (pu - pn)
+        den += w
+        au, an = (sum(u) + 1) / (len(u) + 2), (sum(n) + 1) / (len(n) + 2)
+        var += w * w * (au * (1 - au) / (len(u) + 2) + an * (1 - an) / (len(n) + 2))
+        compared += len(u) + len(n)
+        n_y, w_y = n_y + len(u), w_y + sum(u)
+        n_n, w_n = n_n + len(n), w_n + sum(n)
+    if not den:
+        status, impact, ci = "every game", None, None
+    else:
+        impact = num / den
+        ci = 1.96 * math.sqrt(var) / den
+        status = "scored" if min(n_y, n_n) >= min_side else "few games"
+    return {"impact": impact, "ci": ci, "compared": compared, "n_yes": n_yes,
+            # both over the COMPARED games: the raw rates beside the
+            # score, on the same footing as it
+            "yes_win": w_y / n_y if n_y else w_yes / n_yes if n_yes else None,
+            "no_win": w_n / n_n if n_n else None, "status": status}
+
+
 def scores(conn, dh, enemy, min_side=MIN_SIDE, own=None):
     """One row per card you used in any game against `enemy`:
 
@@ -165,44 +201,15 @@ def scores(conn, dh, enemy, min_side=MIN_SIDE, own=None):
 
     out = []
     for c in cards:
-        num = den = var = 0.0
-        compared = n_u_all = n_u_cmp = n_n_cmp = 0
-        w_u_all = w_u_cmp = w_n_cmp = 0
-        turns = Counter()
-        for h, rows in by_hand.items():
-            u = [won for won, used in rows if c in used]
-            n = [won for won, used in rows if c not in used]
-            for _won, used in rows:
-                if c in used:
-                    turns[used[c]] += 1
-            n_u_all += len(u)
-            w_u_all += sum(u)
-            if not u or not n:
-                continue
-            pu, pn = sum(u) / len(u), sum(n) / len(n)
-            w = len(u) * len(n) / (len(u) + len(n))
-            num += w * (pu - pn)
-            den += w
-            au, an = (sum(u) + 1) / (len(u) + 2), (sum(n) + 1) / (len(n) + 2)
-            var += w * w * (au * (1 - au) / (len(u) + 2) + an * (1 - an) / (len(n) + 2))
-            compared += len(u) + len(n)
-            n_u_cmp, w_u_cmp = n_u_cmp + len(u), w_u_cmp + sum(u)
-            n_n_cmp, w_n_cmp = n_n_cmp + len(n), w_n_cmp + sum(n)
-        if not den:
-            status, impact, ci = "every game", None, None
-        else:
-            impact = num / den
-            ci = 1.96 * math.sqrt(var) / den
-            status = "scored" if min(n_u_cmp, n_n_cmp) >= min_side else "few games"
-        out.append({"code": c, "games": len(games), "used": n_u_all,
-                    "impact": impact, "ci": ci, "compared": compared,
-                    # both over the COMPARED games: the raw rates beside
-                    # the score, on the same footing as it
-                    "used_win": (w_u_cmp / n_u_cmp if n_u_cmp
-                                 else w_u_all / n_u_all if n_u_all else None),
-                    "not_win": w_n_cmp / n_n_cmp if n_n_cmp else None,
-                    "turn": turns.most_common(1)[0][0] if turns else None,
-                    "status": status})
+        turns = Counter(used[c] for rows in by_hand.values()
+                        for _won, used in rows if c in used)
+        r = compare([([won for won, used in rows if c in used],
+                       [won for won, used in rows if c not in used])
+                      for rows in by_hand.values()], min_side)
+        used_n, used_win, not_win = r.pop("n_yes"), r.pop("yes_win"), r.pop("no_win")
+        out.append({"code": c, "games": len(games), "used": used_n, **r,
+                    "used_win": used_win, "not_win": not_win,
+                    "turn": turns.most_common(1)[0][0] if turns else None})
     order = {"scored": 0, "few games": 1, "every game": 2}
     out.sort(key=lambda r: (order[r["status"]], -(r["impact"] or 0), -r["used"]))
     return out
