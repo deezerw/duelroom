@@ -238,21 +238,23 @@ CREATE TABLE IF NOT EXISTS trainer_gens (
 -- kind: 'avoid_activate' (code + zone), 'avoid_summon' (code),
 --       'interrupter' (code: counts as an interruption on the field)
 -- STAGE9 games (skills/game.py). Turn 1 is solved once per (hand, board,
--- enemy hand) and reused by every run; one row per game played.
+-- enemy hand, side) and reused by every run; one row per game played. Going
+-- second, turn 1 is THEIRS and `pieces` are the interruptions on their board.
 CREATE TABLE IF NOT EXISTS game_turn1 (
     deck_hash   TEXT NOT NULL,
     enemy       TEXT NOT NULL,          -- enemy deck name (assets/decks)
     hand_index  INTEGER NOT NULL,       -- trainer_hands.hand_index
     board       INTEGER NOT NULL,       -- which kept board (0 = the best)
     enemy_seed  INTEGER NOT NULL,       -- fixes the enemy's hand
+    first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
     ok          INTEGER NOT NULL,       -- 0: no line at all came back
     start       TEXT,                   -- .yrpX paths of the closed turn 1
     prefix      TEXT,
-    reached     INTEGER,                -- the goal itself, through their hand traps
-    pieces      TEXT,                   -- JSON interruption codes on your board
+    reached     INTEGER,                -- turn 1's goal itself, through the hand traps
+    pieces      TEXT,                   -- JSON interruption codes on turn 1's board
     enemy_hand  TEXT,                   -- JSON sorted codes: the fairness check
     created     TEXT NOT NULL,
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first)
 );
 
 CREATE TABLE IF NOT EXISTS game_results (
@@ -261,6 +263,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     hand_index    INTEGER NOT NULL,
     board         INTEGER NOT NULL,
     enemy_seed    INTEGER NOT NULL,
+    first         INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
     run           INTEGER NOT NULL,
     outcome       TEXT NOT NULL,        -- win / no_win / lost_t2 / no_t1
     damage        INTEGER,              -- best damage on turn 3 when no win
@@ -268,7 +271,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     line          TEXT,                 -- replay of the deciding turn
     seconds       REAL,
     created       TEXT NOT NULL,
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
 );
 
 -- What you summoned or activated in each game (skills/impact.py), read once
@@ -280,10 +283,11 @@ CREATE TABLE IF NOT EXISTS game_used (
     hand_index  INTEGER NOT NULL,
     board       INTEGER NOT NULL,
     enemy_seed  INTEGER NOT NULL,
+    first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
     run         INTEGER NOT NULL,
     line        TEXT NOT NULL,          -- '' when the game had none
     used        TEXT,                   -- JSON {code: first turn}; NULL = unreadable
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
 );
 
 -- What you stopped of the enemy's in each game (skills/stops.py), read once
@@ -295,10 +299,11 @@ CREATE TABLE IF NOT EXISTS game_stops (
     hand_index  INTEGER NOT NULL,
     board       INTEGER NOT NULL,
     enemy_seed  INTEGER NOT NULL,
+    first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
     run         INTEGER NOT NULL,
     line        TEXT NOT NULL,          -- '' when the game had none
     stops       TEXT,                   -- NULL = unreadable
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
 );
 
 CREATE TABLE IF NOT EXISTS trainer_prefs (
@@ -334,6 +339,7 @@ def connect(path=None):
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     _migrate_card_values(conn)
+    _migrate_game_first(conn)
     conn.executescript(SCHEMA)
     return conn
 
@@ -348,6 +354,26 @@ def _migrate_card_values(conn):
             conn.execute("INSERT INTO card_values (deck, code, zone, value, added) "
                          "SELECT deck, code, 'field', value, added FROM card_values_old")
             conn.execute("DROP TABLE card_values_old")
+
+
+def _migrate_game_first(conn):
+    """The game tables had no `first` (2026-11-06: going second added): every
+    game stored before then went first. The key changes, so the tables are
+    rebuilt, not altered."""
+    tables = ("game_turn1", "game_results", "game_used", "game_stops")
+    old = [t for t in tables
+           if (cols := [r[1] for r in conn.execute(f"PRAGMA table_info({t})")])
+           and "first" not in cols]
+    if not old:
+        return
+    with conn:
+        for t in old:
+            conn.execute(f"ALTER TABLE {t} RENAME TO {t}_old")
+        conn.executescript(SCHEMA)
+        for t in old:
+            cols = ", ".join(r[1] for r in conn.execute(f"PRAGMA table_info({t}_old)"))
+            conn.execute(f"INSERT INTO {t} ({cols}, first) SELECT {cols}, 1 FROM {t}_old")
+            conn.execute(f"DROP TABLE {t}_old")
 
 
 def get_meta(conn, key, default=None):

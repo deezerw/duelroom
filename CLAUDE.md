@@ -53,9 +53,9 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   gauntlet <deck> <hand>    rank this hand's end boards by what they STOP
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
-  games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
-  impact <deck> [enemy]     card impact scores from the games played
-  stops <deck> [enemy]      which of their cards you stopped, with what, and what it won
+  games <deck> <enemy> [runs] [enemy hands] [--second]  finish the game: win rate by turn 3 (going 2nd: turn 2)
+  impact <deck> [enemy] [--first|--second]  card impact scores from the games played
+  stops <deck> [enemy] [--first|--second]  which of their cards you stopped, with what, and what it won
   starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 ```
@@ -573,6 +573,34 @@ Fairness, checked rather than assumed: the enemy's OPENING hand per seed is asse
 identical across your hands (`check_shared_enemy_hands`). Their turn-2 draw is not, by
 design -- Maxx "C" during your turn draws them cards off the top. Turn 1 is solved once
 per (hand, board, enemy hand) and reused by every run.
+
+### Going second (2026-11-06)
+
+`games <deck> <enemy> --second`, or "you go: second" on the games page (and on the
+train page for the games at a plateau). **Their turn 1, your turn 2; a win = their LP 0
+on your turn 2**, i.e. breaking their board and killing through it. Every game table
+carries `first` in its key (1 = you went first; `db._migrate_game_first` marked every
+older game 1), so both sides of a matchup sit side by side and never mix in summary,
+impact or stops. Files: `results/games/<deck>/<enemy>/second/`.
+
+- **The enemy faces the SAME opening hands as going first.** `game.enemy_hand` deals the
+  going-first template and reads player 1's hand -- checked equal to the stored going-first
+  hands for seeds 1000/1001/1005. The enemy is side a (`--deck`/`--hand`).
+- **Your hand is seated on side b** by `breaking.deck_with_hand` on your deck shuffled by
+  the enemy seed (`--hand` never reaches side b), so your turn-2 draw is fixed per
+  (hand, enemy hand). `enemy_turn1` asserts BOTH dealt hands from the position itself.
+- Your hand traps answer their turn 1 (`--opp-greedy` with HANDTRAPS + your interrupters);
+  their board's pieces + their hand traps answer your turn 2. No line at all on their
+  turn 1 = `no_t1` (the bare template would deal them the bottom of their list).
+- **Your turn 2 is steered by the first goal piece NOT held in hand.** Hand 4's goal opens
+  `42141493@hand` (keep Fuwalos): as a target it posts 0 cards, all 9 lines the search
+  reached were rejected, no approach was written, and the game read "0 damage". Going
+  FIRST still steers turn 3 with `goal[0]`, the same quirk; it was left alone so the 300
+  stored hand-4 games stay comparable -- decide before the next going-first run.
+- Playmat: you are engine player 1, so `playback.frames(me=1)` swaps the sides and you
+  sit at the bottom with your hand shown (`/watch/game/...?second=1`).
+- First run (4 hands x 1 enemy hand, 60 s): no lethal, 5700 / 4800 / 5900 / 2500 damage;
+  a game is ~1 search (their turn 1 is shared by the runs).
 
 ## Known limitations
 

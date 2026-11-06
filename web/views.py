@@ -345,8 +345,8 @@ def drill_view(name=None):
 
 # --- watching a line on the playmat (STAGE6) -----------------------------
 
-def _watch(name, title, subtitle, start, responses, lines, whole=False):
-    data = playback.frames(conn(), start, responses, cut_at_turn=not whole)
+def _watch(name, title, subtitle, start, responses, lines, whole=False, me=0):
+    data = playback.frames(conn(), start, responses, cut_at_turn=not whole, me=me)
     if not data["frames"]:
         abort(404)
     # Moves already avoided, in the step list's own key format.
@@ -486,6 +486,7 @@ def train_start(name):
     params = {"hours": hours, "hands": hands, "seconds": min(max(seconds, 30), 900)}
     if enemy in _enemy_decks(name):
         params["enemy"] = enemy
+        params["second"] = request.form.get("side") == "second"
     job_id = jobs.enqueue(c, "train", deck=name, **params)
     flash(f"Training queued as job {job_id}.")
     return redirect(url_for("views.train_view", name=name))
@@ -523,36 +524,39 @@ def games_view(name=None):
     own = impact.deck_codes(path)
     nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
     enemies = []
-    for (enemy,) in c.execute("SELECT DISTINCT enemy FROM game_results "
-                              "WHERE deck_hash=? ORDER BY enemy", (dh,)):
+    for enemy, first in c.execute("SELECT DISTINCT enemy, first FROM game_results "
+                                  "WHERE deck_hash=? ORDER BY enemy, first DESC", (dh,)).fetchall():
         games = {}
         for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND "
-                           "enemy=? ORDER BY enemy_seed, run", (dh, enemy)):
+                           "enemy=? AND first=? ORDER BY enemy_seed, run",
+                           (dh, enemy, first)):
             games.setdefault(g["hand_index"], []).append(dict(g))
         rows = []
-        for r in game.summary(c, dh, enemy):
+        for r in game.summary(c, dh, enemy, first=first):
             h = hand_rows.get(r["hand_index"])
             rows.append({**r, "hand": h["hand"] if h else [],
                          "games_list": games.get(r["hand_index"], [])})
         openings = {}
         for t in c.execute("SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE "
-                           "deck_hash=? AND enemy=? AND ok=1", (dh, enemy)):
+                           "deck_hash=? AND enemy=? AND first=? AND ok=1",
+                           (dh, enemy, first)):
             openings[t["enemy_seed"]] = [nm(x) for x in json.loads(t["enemy_hand"] or "[]")]
         # Reading a game's replay takes ~0.05 s; a page load reads at most
         # a few seconds' worth, so a big backlog fills over a few visits
         # (or at once with `daemon.py impact`).
-        unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S)
+        unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S, first=first)
         cards = [{**r, "name": nm(r["code"])}
-                 for r in impact.scores(c, dh, enemy, own=own)]
-        unread_stops = stops.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S)
+                 for r in impact.scores(c, dh, enemy, own=own, first=first)]
+        unread_stops = stops.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S,
+                                  first=first)
         snm = lambda code: ("a field effect" if code == stops.FIELD
                             else "a set card" if not code else nm(code))
-        st = stops.scores(c, dh, enemy, own=own)
+        st = stops.scores(c, dh, enemy, own=own, first=first)
         theirs = [{**r, "name": snm(r["code"]),
                    "by": [(snm(b), n) for b, n in r["by"]]} for r in st["theirs"]]
         yours = [{**r, "name": snm(r["code"]),
                   "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
-        enemies.append({"name": enemy, "rows": rows,
+        enemies.append({"name": enemy, "first": first, "rows": rows,
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours,
@@ -584,9 +588,11 @@ def games_start(name):
         return redirect(url_for("views.games_view", name=name))
     runs = min(max(request.form.get("runs", type=int) or game.RUNS, 1), 30)
     ehands = min(max(request.form.get("enemy_hands", type=int) or game.ENEMY_HANDS, 1), 10)
+    second = request.form.get("side") == "second"
     job_id = jobs.enqueue(c, "games", deck=name, enemy=enemy, runs=runs,
-                          enemy_hands=ehands)
-    flash(f"Games against {enemy} queued as job {job_id}.")
+                          enemy_hands=ehands, second=second)
+    flash(f"Games against {enemy} going {'second' if second else 'first'} "
+          f"queued as job {job_id}.")
     return redirect(url_for("views.games_view", name=name))
 
 
@@ -598,14 +604,15 @@ def watch_game_latest(name, enemy):
     path = deck_path(name)
     if not path or not path.exists():
         abort(404)
+    first = 0 if request.args.get("second") else 1
     for g in conn().execute(
-            "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
+            "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND "
             "outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
-            (trainer.deck_hash(path), enemy)):
+            (trainer.deck_hash(path), enemy, first)):
         if impact.source(name, enemy, g):
             return redirect(url_for("views.watch_game", name=name, enemy=enemy,
                                     hand=g["hand_index"], eseed=g["enemy_seed"],
-                                    run=g["run"]))
+                                    run=g["run"], **({} if first else {"second": 1})))
     flash(f"No game against {enemy} to watch yet.")
     return redirect(url_for("views.games_view", name=name))
 
@@ -613,7 +620,8 @@ def watch_game_latest(name, enemy):
 @bp.route("/watch/game/<name>/<enemy>/<int:hand>/<int:eseed>/<int:run>")
 @login_required
 def watch_game(name, enemy, hand, eseed, run):
-    """A whole game on the playmat: turns 1-3, ending where it was decided."""
+    """A whole game on the playmat: turns 1-3 (going second: 1-2), ending
+    where it was decided. `?second=1` picks the going-second game."""
     from ygorl.engine.replay import Replay
     from ygorl.solver.demo import start_identity
 
@@ -622,24 +630,25 @@ def watch_game(name, enemy, hand, eseed, run):
     if not path or not path.exists():
         abort(404)
     dh = trainer.deck_hash(path)
+    first = 0 if request.args.get("second") else 1
     g = c.execute("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
-                  "hand_index=? AND enemy_seed=? AND run=?",
-                  (dh, enemy, hand, eseed, run)).fetchone()
+                  "hand_index=? AND enemy_seed=? AND first=? AND run=?",
+                  (dh, enemy, hand, eseed, first, run)).fetchone()
     if not g:
         abort(404)
-    src = g["line"]
-    if not src:   # no turn-3 line at all: show the game up to turn 3
-        t2 = game.GAMES / name / enemy / f"h{hand}" / f"e{eseed}" / f"run{run}" / "t2" / "prefix.yrpX"
-        src = str(t2) if t2.exists() else None
+    src = impact.source(name, enemy, g)   # no lethal-turn line: up to that turn
     if not src or not Path(src).exists():
         abort(404)
     rep = Replay.from_yrp(Path(src))
-    words = {"win": "won on turn 3", "no_win": "no win by turn 3",
-             "lost_t2": "lost on turn 2", "no_t1": "no turn 1"}
-    return _watch(name, f"{name} vs {enemy} · hand {hand + 1} · game {run + 1}",
+    words = ({"win": "won on turn 3", "no_win": "no win by turn 3",
+              "lost_t2": "lost on turn 2", "no_t1": "no turn 1"} if first else
+             {"win": "won on turn 2", "no_win": "no win on turn 2",
+              "no_t1": "no enemy turn 1"})
+    return _watch(name, f"{name} vs {enemy} going {'first' if first else 'second'} · "
+                  f"hand {hand + 1} · game {run + 1}",
                   f"enemy hand {eseed - 999} · {words.get(g['outcome'], g['outcome'])}",
                   start_identity(rep), [r.hex() for r in rep.responses], [],
-                  whole=True)
+                  whole=True, me=1 - first)
 
 
 _ZONE_WORDS = {"hand": "the hand", "mz": "the field", "sz": "the spell & trap zone",

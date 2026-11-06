@@ -29,7 +29,8 @@ Delete this file once the gates pass and the win-rate run is built and verified.
   not by hand alone -- see CLAUDE.md.
 - Rank top-3 boards per hand (needs STAGE8 item 1).
 - Measured cost of a full run (the 2.5 min/game estimate is unmeasured at 60 s).
-- Going-second variant (their T1 board, your T2 lethal) -- the user liked it; same pieces.
+- ~~Going-second variant (their T1 board, your T2 lethal)~~ -- done 2026-11-06
+  (`games ... --second`, a side choice on the games/train pages; CLAUDE.md "Going second").
 
 ## Why this is a separate stage: it is blocked today
 

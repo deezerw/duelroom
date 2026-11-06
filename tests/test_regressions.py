@@ -5143,7 +5143,7 @@ def test_impact_reads_a_game_again_when_its_line_changed(monkeypatch):
                  "run, outcome, line, created) VALUES ('d','e',0,0,1000,1,'no_t1',NULL,'x')")
     reads = []
     monkeypatch.setattr(impact, "source", lambda name, enemy, g: g["line"])
-    monkeypatch.setattr(impact, "used_cards", lambda p: reads.append(p) or {9: 1})
+    monkeypatch.setattr(impact, "used_cards", lambda p, player=0: reads.append(p) or {9: 1})
     assert impact.fill(conn, "d", "deck", "e") == 0
     assert impact.fill(conn, "d", "deck", "e") == 0
     assert reads == ["/a.yrp"], "read once; a game with no turn 1 is never read"
@@ -5406,3 +5406,90 @@ def test_stop_value_compares_stopped_with_through_among_games_it_was_played():
     assert yours[500]["hit"] == [(100, 5)] and yours[500]["impact"] > 0
     assert stops.scores(conn, "d", "e", own={999})["yours"] == [], \
         "a stopper not in your list is theirs while you held it"
+
+
+# --- going second (2026-11-06) -------------------------------------------------
+
+def test_game_tables_migrate_to_going_first(tmp_path):
+    """Games stored before `first` existed all went first; the rebuilt key
+    lets the same (hand, enemy hand, run) be played from both sides."""
+    import sqlite3
+    from skills import db
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE game_results (deck_hash TEXT NOT NULL, enemy TEXT NOT NULL, "
+                "hand_index INTEGER NOT NULL, board INTEGER NOT NULL, enemy_seed INTEGER NOT NULL, "
+                "run INTEGER NOT NULL, outcome TEXT NOT NULL, damage INTEGER, enemy_reached INTEGER, "
+                "line TEXT, seconds REAL, created TEXT NOT NULL, PRIMARY KEY (deck_hash, enemy, "
+                "hand_index, board, enemy_seed, run))")
+    old.execute("INSERT INTO game_results VALUES ('d','e',0,0,1000,0,'win',NULL,1,'/x',1.0,'t')")
+    old.commit()
+    old.close()
+    conn = db.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT first, outcome FROM game_results")] == [(1, "win")]
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                 "first, run, outcome, created) VALUES ('d','e',0,0,1000,0,0,'no_win','t')")
+    assert conn.execute("SELECT COUNT(*) FROM game_results").fetchone()[0] == 2
+
+
+def test_going_first_and_second_never_mix():
+    """summary, impact and stops each read one side only."""
+    import json
+    from skills import game, impact, stops
+
+    conn = _games_db()
+    for first, won in ((1, True), (0, False)):
+        for k in range(6):
+            line = f"/x/{first}/{k}.yrp"
+            conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                         "enemy_seed, first, run, outcome, line, created) "
+                         "VALUES ('d','e',0,0,1000,?,?,?,?,'t')",
+                         (first, k, "win" if won else "no_win", line))
+            conn.execute("INSERT INTO game_used (deck_hash, enemy, hand_index, board, "
+                         "enemy_seed, first, run, line, used) VALUES ('d','e',0,0,1000,?,?,?,?)",
+                         (first, k, line, json.dumps({"5": 1})))
+            conn.execute("INSERT INTO game_stops (deck_hash, enemy, hand_index, board, "
+                         "enemy_seed, first, run, line, stops) VALUES ('d','e',0,0,1000,?,?,?,?)",
+                         (first, k, line, json.dumps({"played": {"100": 1},
+                                                      "stops": [[1, "negated", 5, 100]]})))
+    assert [r["wins"] for r in game.summary(conn, "d", "e", first=True)] == [6]
+    assert [r["wins"] for r in game.summary(conn, "d", "e", first=False)] == [0]
+    assert impact.scores(conn, "d", "e", first=True)[0]["used_win"] == 1.0
+    assert impact.scores(conn, "d", "e", first=False)[0]["used_win"] == 0.0
+    assert stops.scores(conn, "d", "e", first=False)["games"] == 6
+    assert stops.scores(conn, "d", "e", first=False)["theirs"][0]["stopped_win"] == 0.0
+
+
+def test_stops_read_from_the_second_seat():
+    """Going second you are engine player 1: the enemy is player 0."""
+    from skills import stops
+
+    m = _chain_msgs()
+    rd = stops.Reader(me=1)
+    for x in [m["turn"](), m["chain"](100, 0, 1), m["chain"](500, 1, 2),
+              m["solving"](2), m["disabled"](1), m["solved"](2), m["end"]()]:
+        rd.feed(x)
+    assert rd.stops == [[1, "negated", 500, 100]] and set(rd.played) == {100}
+
+
+def test_playmat_seats_you_at_the_bottom_going_second():
+    from skills import playback
+
+    f = {"board": [{"lp": 1}, {"lp": 2}], "turn": 1, "phase": "", "events": [],
+         "moves": [{"c": 7, "from": {"p": 0, "z": "hand", "s": 0},
+                    "to": {"p": 1, "z": "gy", "s": 0}}],
+         "focus": {"p": 1, "z": "mz", "s": 2}}
+    g = playback._seat(f)
+    assert g["board"] == [{"lp": 2}, {"lp": 1}]
+    assert g["moves"][0]["from"]["p"] == 1 and g["moves"][0]["to"]["p"] == 0
+    assert g["focus"]["p"] == 0
+    assert playback._seat({**f, "focus": None})["focus"] is None
+
+
+def test_games_job_passes_the_side():
+    from web import jobs
+
+    argv = jobs.KINDS["games"][0]
+    assert "--second" in argv("deck", {"enemy": "e", "second": True})
+    assert "--second" not in argv("deck", {"enemy": "e", "second": False})

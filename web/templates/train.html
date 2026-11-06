@@ -76,6 +76,10 @@
           <option value="">— no, just train —</option>
           {% for o in enemies %}<option>{{ o }}</option>{% endfor %}
         </select></label>
+      <label>going
+        <select name="side" style="background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit">
+          <option value="first">first</option><option value="second">second</option>
+        </select></label>
       <button class="primary">Start training</button>
     </form>
     <details class="note"><summary>what one generation costs</summary>

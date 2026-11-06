@@ -41,9 +41,11 @@
 
 <div class="page-head">
   <h1>Games</h1>
-  <div class="sub"><b>{{ name }}</b> — going first: your turn 1, the enemy's turn 2
-    into your board, your turn 3. A hand <b>wins</b> if their LP hits 0 by the end
-    of turn 3; a hand that never does is a <b>dud</b>.</div>
+  <div class="sub"><b>{{ name }}</b> — <b>going first</b>: your turn 1, the enemy's turn 2
+    into your board, your turn 3; a hand <b>wins</b> if their LP hits 0 by the end of
+    turn 3. <b>Going second</b>: the enemy's turn 1 into your hand traps, then your
+    turn 2; a hand wins if it kills through their board that turn. A hand that never
+    wins is a <b>dud</b>.</div>
 </div>
 
 <div class="panel">
@@ -68,6 +70,8 @@
     <form class="startform" method="post" action="{{ url_for('views.games_start', name=name) }}">
       <label>enemy deck
         <select name="enemy">{% for o in options %}<option>{{ o }}</option>{% endfor %}</select></label>
+      <label>you go
+        <select name="side"><option value="first">first</option><option value="second">second</option></select></label>
       <label>games per hand pairing <input type="number" name="runs" value="{{ runs }}" min="1" max="30"></label>
       <label>enemy hands <input type="number" name="enemy_hands" value="{{ enemy_hands }}" min="1" max="10"></label>
       <button class="primary">Play the games</button>
@@ -75,38 +79,41 @@
     <details class="note"><summary>what this costs, and how fair it is</summary>
       Every one of your {{ trained }} trained hands faces the <b>same</b> enemy
       opening hands (checked from the games themselves before any is played), and
-      plays each pairing several times because the search is randomized. Your turn 1
-      is solved once per pairing and reused, so the repeats differ only in turns 2
-      and 3. A game is two {{ solve_s }}s searches plus a {{ otk_s }}s kill check,
-      three games at a time; with
+      plays each pairing several times because the search is randomized. Turn 1
+      is solved once per pairing and reused, so the repeats differ only in the turns
+      after it. Going first, a game is two {{ solve_s }}s searches plus a {{ otk_s }}s
+      kill check, three games at a time; with
       {{ trained }} hands × {{ enemy_hands }} enemy hands × {{ runs }} games that is
       {{ trained * enemy_hands * runs }} games, roughly
       {{ ((trained * enemy_hands * (runs * (2 * solve_s + otk_s) + solve_s)) / 3600 / 3)|round(1) }}
-      hours on the worker. It resumes where it stopped.
+      hours on the worker. Going second is one {{ solve_s }}s search a game, about
+      {{ ((trained * enemy_hands * (runs * solve_s + solve_s)) / 3600 / 3)|round(1) }} hours.
+      Going second faces the same enemy opening hands as going first, and your
+      hand is the trained hand plus one draw. It resumes where it stopped.
     </details>
   {% endif %}
 </div>
 
 {% for e in enemies %}
-<div class="sec"><h2>vs {{ e.name }}</h2>
+<div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
 <div class="panel">
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
-     href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name) }}">▶ Watch latest game</a>
+     href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **({} if e.first else {'second': 1})) }}">▶ Watch latest game</a>
   {% if e.openings %}
   <div class="openings">Enemy opening hands (identical for every one of your hands):
     <ul>{% for seed, cards in e.openings %}<li><b>{{ loop.index }}</b> — {{ cards|join(', ') }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
   <div class="legend">
-    <span><i class="dot win"></i>won by turn 3</span>
+    <span><i class="dot win"></i>won {{ 'by turn 3' if e.first else 'on turn 2' }}</span>
     <span><i class="dot no_win"></i>no win</span>
-    <span><i class="dot lost_t2"></i>killed on turn 2</span>
+    {% if e.first %}<span><i class="dot lost_t2"></i>killed on turn 2</span>{% endif %}
     <span><i class="dot no_t1"></i>no turn-1 line</span>
     <span>click a square to watch that game</span>
   </div>
   <table class="games">
-    <thead><tr><th>hand</th><th>won</th><th class="extra">killed T2</th><th>games</th></tr></thead>
+    <thead><tr><th>hand</th><th>won</th><th class="extra">{{ 'killed T2' if e.first else 'best damage' }}</th><th>games</th></tr></thead>
     <tbody>
     {% for r in e.rows %}
       <tr>
@@ -115,13 +122,13 @@
         <td><span class="rate">{{ (r.win_rate * 100)|round|int }}%</span>
           <span class="muted">{{ r.wins }}/{{ r.games }}</span>
           {% if not r.complete %}<span class="muted">· running</span>{% endif %}</td>
-        <td class="extra">{{ r.lost_t2 }}</td>
+        <td class="extra">{{ r.lost_t2 if e.first else (r.best_damage or 0) }}</td>
         <td class="dotscell"><div class="dots">
           {% for g in r.games_list %}
             {% set tip %}enemy hand {{ g.enemy_seed - 999 }}, game {{ g.run + 1 }}: {{ g.outcome|replace('_', ' ') }}{% if g.damage %} ({{ g.damage }} damage){% endif %}{% endset %}
             {% if g.outcome == 'no_t1' %}<span class="dot no_t1" title="{{ tip }} — nothing to watch"></span>
             {% else %}<a class="dot {{ g.outcome }}" title="{{ tip }}"
-               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run) }}"></a>{% endif %}
+               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run, **({} if e.first else {'second': 1})) }}"></a>{% endif %}
           {% endfor %}
         </div></td>
       </tr>
@@ -159,7 +166,7 @@
     crosses 0 is not yet a finding. Compared only within the same pair of hands, so a card is
     not credited for the good hands it turns up in, nor blamed for the strong enemy hands it
     gets used against (a hand trap is used exactly when they have a big turn). <b>every
-    game</b> = never played without it in a comparable game; your turn 1 is solved once per
+    game</b> = never played without it in a comparable game; turn 1 is solved once per
     enemy hand and reused, so cards used only on turn 1 land here. Most cards score above 0,
     because a game where more of your deck came out is a game that went well — compare cards
     with each other. A card you never used is not listed: "not measured", not "bad". It is
@@ -214,8 +221,9 @@
   </table>
   <details class="note"><summary>reading these numbers</summary>
     <b>Their cards:</b> +18 means that, among games where they played the card, you won 18
-    points more often when it was stopped than when it resolved. Turn 2 is their turn (your
-    board interrupting them); turn 3 is yours (breaking what they left). <b>Your cards:</b>
+    points more often when it was stopped than when it resolved. {% if e.first %}Turn 2 is their
+    turn (your board interrupting them); turn 3 is yours (breaking what they left).{% else %}Turn 1
+    is their turn (your hand traps interrupting them); turn 2 is yours (breaking their board).{% endif %} <b>Your cards:</b>
     games where the card stopped something against games where it did not. A negation is
     credited to your chain link above theirs; <b>a field effect</b> = negated with no link of
     yours above it (a continuous negate on the field). Not counted: battle, and floodgates

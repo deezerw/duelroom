@@ -61,7 +61,7 @@ def _side(player):
     }
 
 
-def frames(conn, start, responses, trim=True, cut_at_turn=True):
+def frames(conn, start, responses, trim=True, cut_at_turn=True, me=0):
     """Replay a line and return {"frames": [...], "names": {code: name}}.
 
     `start` is the record's ``start`` dict and `responses` the line's
@@ -71,6 +71,10 @@ def frames(conn, start, responses, trim=True, cut_at_turn=True):
     (headline sentences: activations, summons, sets, LP changes),
     ``moves`` (card movements, for animation only) and ``focus`` (the
     slot of the card the headline is about, to highlight it).
+
+    `me`: the engine player whose side is drawn at the bottom with its hand
+    shown. The playmat draws player 0 there, so `me=1` (a game you played
+    going second) swaps the two sides in every frame.
     """
     from ygorl.engine import constants as C
     from ygorl.engine.replay import Replay
@@ -192,7 +196,18 @@ def frames(conn, start, responses, trim=True, cut_at_turn=True):
     # A whole game (STAGE9) keeps every turn: `cut_at_turn=False`.
     if trim and cut_at_turn and end is not None:
         out = out[:end + 1]
+    if me:
+        out = [_seat(f) for f in out]
     return {"frames": out, "names": {str(k): v for k, v in names.items()}}
+
+
+def _seat(frame):
+    """One frame with the two players' sides swapped (`frames(me=1)`)."""
+    flip = lambda a: a and {**a, "p": 1 - a["p"]}
+    return {**frame, "board": frame["board"][::-1],
+            "moves": [{**m, "from": flip(m["from"]), "to": flip(m["to"])}
+                      for m in frame["moves"]],
+            "focus": flip(frame["focus"])}
 
 
 def line_moves(conn, start, responses):

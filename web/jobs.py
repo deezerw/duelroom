@@ -46,14 +46,16 @@ KINDS = {
     "train":   (lambda d, p: ["train", d, str(p.get("hours", 8)),
                               str(p.get("hands", 24))]
                 + ([p["enemy"]] if p.get("enemy") else [])
-                + (["--seconds", str(p["seconds"])] if p.get("seconds") else []),
+                + (["--seconds", str(p["seconds"])] if p.get("seconds") else [])
+                + (["--second"] if p.get("second") else []),
                 "deck trainer", "hours, stoppable"),
     "starters": (lambda d, p: ["starters", d, str(p.get("size", 1)), str(p.get("hours", 8)),
                                 "--seconds", str(p.get("seconds", 60)),
                                 "--skip", ",".join(map(str, p.get("skip", []))) or "0"],
                  "starter test", "hours, stoppable"),
     "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
-                              str(p.get("runs", 10)), str(p.get("enemy_hands", 3))],
+                              str(p.get("runs", 10)), str(p.get("enemy_hands", 3))]
+                + (["--second"] if p.get("second") else []),
                 "finish the game vs a meta deck", "hours, resumable"),
 }
 

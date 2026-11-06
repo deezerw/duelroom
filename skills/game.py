@@ -1,8 +1,11 @@
-"""Finish the game (STAGE9): your turn 1, their turn 2, your turn 3.
+"""Finish the game (STAGE9): your turn 1, their turn 2, your turn 3 --
+or, going second, their turn 1 and your turn 2.
 
 Going first, a hand WINS if the opponent's LP reaches 0 by the end of
-turn 3 (your second turn). A hand that wins no game against any enemy
-hand is a DUD; one that wins under `NEAR_DUD_RATE` of them a NEAR-DUD.
+turn 3 (your second turn). Going second it wins if their LP reaches 0 on
+turn 2 (your first): you break their turn-1 board and kill through it. A
+hand that wins no game against any enemy hand is a DUD; one that wins
+under `NEAR_DUD_RATE` of them a NEAR-DUD.
 
 Every turn is a search by the ROOTED solver (patches/0002, built by
 tools/build_rooted_solver.sh). Each turn starts from the position the
@@ -13,6 +16,17 @@ not do (ISSUES.md #4):
   T2  the enemy, into your board: first "can they kill you" (`--goal-win`,
       `OTK_MS`), then their own payoff target. A kill is a loss.
   T3  you, `--goal-win`: did you find lethal?
+
+Going second (`first=False`):
+
+  T1  the enemy, from the SAME opening hand per seed as going first
+      (`enemy_hand`), toward its payoff target; your hand traps respond.
+  T2  you, `--goal-win` as player 1, from your real hand plus your draw.
+
+Your hand is seated on player 1 by putting it at the bottom of your
+decklist (`--hand` reaches side a only; see breaking.deck_with_hand), the
+rest of the deck shuffled by the enemy seed, so your turn-2 draw is fixed
+per (hand, enemy hand) like everything else turn 1 decides.
 
 THE OPPONENT MODEL, stated because every number inherits it: whoever is
 not searching is a GREEDY DEFENDER (`--opp-greedy`). At each chain window
@@ -281,23 +295,83 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
             "log": str(r["log"])}
 
 
-def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed):
-    """Your second turn: lethal or not. Returns {won, damage, line}."""
+def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
+          player=0, turn=3):
+    """Your lethal turn: turn 3 as player 0 going first, turn 2 as player 1
+    going second. Returns {won, damage, line}."""
     scratch = Path(scratch)
     args = ["--start", start, "--root", prefix, "--no-ref",
-            "--target", our_target, "--player", "0", "--turns", "3",
+            "--target", our_target, "--player", str(player), "--turns", str(turn),
             "--goal-win", "--opp-greedy"] + _respond(enemy_respond)
-    r = _solve(prefix, args, scratch, "t3", ms, seed)
-    if r["solution"] and _winner(r["solution"]) == 0:
+    r = _solve(prefix, args, scratch, f"t{turn}", ms, seed)
+    if r["solution"] and _winner(r["solution"]) == player:
         return {"won": True, "damage": None, "line": str(r["solution"])}
     damage = 0
     if r["approach"]:
-        before = replay(prefix).lp[1]
+        before = replay(prefix).lp[1 - player]
         pos = replay(r["approach"])
-        low = pos.min_lp[1] if pos.min_lp[1] is not None else pos.lp[1]
+        low = (pos.min_lp[1 - player] if pos.min_lp[1 - player] is not None
+               else pos.lp[1 - player])
         damage = max(0, before - low)
     return {"won": False, "damage": damage,
             "line": str(r["approach"]) if r["approach"] else None}
+
+
+def enemy_hand(our_deck, enemy_deck, enemy_seed, scratch):
+    """The enemy's opening hand for `enemy_seed`, sorted -- exactly the one
+    it holds going first (checked against stored games 2026-11-06), so both
+    sides of a matchup face the same enemy hands."""
+    tpl = breaking.template_vs(Path(scratch) / "deal.yrpX", our_deck, enemy_deck,
+                               seed=enemy_seed, shuffle=True)
+    return sorted(_hand(replay(tpl).board, 1))
+
+
+def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
+                ms, seed, our_respond):
+    """Going second: the enemy's turn 1 into your hand, closed at turn 2.
+
+    Returns {start, prefix, board, reached, enemy_hand}, or None when not
+    even a partial line came back -- the bare template would deal them the
+    bottom of their unshuffled list, not their hand, so there is no honest
+    position to play from (recorded as no_t1, as going first)."""
+    import random
+
+    from ygorl.engine.replay import Replay
+
+    from .deck import Deck
+
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    ehand = enemy_hand(our_deck, enemy_deck, enemy_seed, scratch)
+    # Your deck, shuffled by the enemy seed, with the hand at the bottom
+    # where the unshuffled side b draws it (breaking.deck_with_hand).
+    d = Deck.from_ydk(Path(our_deck))
+    shuffled = scratch / "ours-shuffled.ydk"
+    main = list(d.main)
+    random.Random(enemy_seed).shuffle(main)
+    Deck(name=d.name, main=main, extra=list(d.extra), side=list(d.side)).write_ydk(shuffled)
+    ours = breaking.deck_with_hand(shuffled, hand, scratch / "ours.ydk")
+    tpl = breaking.template_vs(scratch / "tpl.yrpX", enemy_deck, ours,
+                               seed=enemy_seed, shuffle=False)
+    args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
+            "--hand", "|".join(map(str, ehand)), "--target", enemy_target,
+            "--opp-greedy"] + _respond(our_respond)
+    r = _solve(tpl, args, scratch, "t1", ms, seed)
+    src = r["solution"] or r["approach"]
+    if src is None:
+        return None
+    dealt = replay(src, []).board
+    for player, want in ((1, hand), (0, ehand)):
+        if sorted(_hand(dealt, player)) != sorted(want):
+            raise RuntimeError(f"player {player}'s hand was not seated: wanted "
+                               f"{sorted(want)}, the duel dealt "
+                               f"{sorted(_hand(dealt, player))}")
+    pos = replay(src, until_turn=2)
+    start, prefix = breaking.split_position(Replay.from_yrp(src), pos.responses,
+                                            scratch / "t1")
+    return {"start": start, "prefix": prefix, "board": pos.board,
+            "reached": r["solution"] is not None, "enemy_hand": ehand,
+            "log": str(r["log"])}
 
 
 # --- one matchup run -----------------------------------------------------------
@@ -309,13 +383,22 @@ def enemy_respond_codes(enemy_deck):
     return [c for c in scenarios.HANDTRAPS if c in set(d.main)]
 
 
+def games_dir(name, enemy_name, first=True):
+    """Where a matchup's game files live (going second: a `second/` beside
+    the going-first hand folders)."""
+    root = GAMES / name / enemy_name
+    return root if first else root / "second"
+
+
 def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
-        runs=RUNS, solve_ms=None, workers=WORKERS, from_end=False, say=print):
+        runs=RUNS, solve_ms=None, workers=WORKERS, from_end=False, first=True,
+        say=print):
     """Play every (hand, enemy hand, run) game, resumable, and return the
     summary. `hands` = trainer hand indices (default: every hand the trainer
     has a best goal for). `from_end` plays the list backwards: a second
     runner started beside a running one meets it in the middle instead of
-    replaying its games (each game is skipped once stored)."""
+    replaying its games (each game is skipped once stored). `first=False`
+    plays going second (module docstring)."""
     from concurrent.futures import ThreadPoolExecutor
 
     from ygorl.engine.duel import default_cards
@@ -343,42 +426,49 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     ours_extra = trainer.prefs(conn, name)["interrupters"]
     theirs = enemy_respond_codes(enemy_deck)
     seeds = [1000 + k for k in range(enemy_hands)]
-    root = GAMES / name / enemy_name
-    say(f"{name} vs {enemy_name}: {len(rows)} hand(s) x {enemy_hands} enemy "
-        f"hand(s) x {runs} run(s), {ms // 1000} s per search, target "
-        f"{enemy_target}")
+    first = int(bool(first))
+    root = games_dir(name, enemy_name, first)
+    say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
+        f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
+        f"{ms // 1000} s per search, target {enemy_target}")
 
     def t1_for(row, eseed):
         conn = db.connect()   # one per thread: sqlite3 binds a connection to it
         hit = conn.execute(
             "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND "
-            "hand_index=? AND board=0 AND enemy_seed=?",
-            (dh, enemy_name, row["hand_index"], eseed)).fetchone()
+            "hand_index=? AND board=0 AND enemy_seed=? AND first=?",
+            (dh, enemy_name, row["hand_index"], eseed, first)).fetchone()
         if hit:
             return dict(hit)
         scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / "t1"
         scratch.mkdir(parents=True, exist_ok=True)
-        t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
-                   trainer.split_goal(json.loads(row["best_goal"]))[0],
-                   eseed, scratch, ms, eseed,
-                   theirs)
+        if first:
+            t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
+                       trainer.split_goal(json.loads(row["best_goal"]))[0],
+                       eseed, scratch, ms, eseed,
+                       theirs)
+        else:
+            t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
+                             eseed, enemy_target, scratch, ms, eseed,
+                             set(ours_extra) | set(scenarios.HANDTRAPS))
         rec = {"deck_hash": dh, "enemy": enemy_name,
                "hand_index": row["hand_index"], "board": 0,
                "enemy_seed": eseed, "ok": int(t1 is not None)}
         if t1:
             # The OPENING hand: by turn 2 it legitimately differs (Maxx "C"
             # draws scale with your summons, used hand traps are gone).
-            ehand = _hand(replay(t1["start"]).board, 1)
+            ehand = (_hand(replay(t1["start"]).board, 1) if first
+                     else t1["enemy_hand"])
             rec.update(start=str(t1["start"]), prefix=str(t1["prefix"]),
                        reached=int(t1["reached"]),
-                       pieces=json.dumps(_pieces(t1["board"], 0, cards)),
+                       pieces=json.dumps(_pieces(t1["board"], 0, cards)),  # turn 1's player
                        enemy_hand=json.dumps(sorted(ehand)))
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO game_turn1 (deck_hash, enemy, "
-                "hand_index, board, enemy_seed, ok, start, prefix, reached, "
-                "pieces, enemy_hand, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (dh, enemy_name, rec["hand_index"], 0, eseed, rec["ok"],
+                "hand_index, board, enemy_seed, first, ok, start, prefix, reached, "
+                "pieces, enemy_hand, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (dh, enemy_name, rec["hand_index"], 0, eseed, first, rec["ok"],
                  rec.get("start"), rec.get("prefix"), rec.get("reached"),
                  rec.get("pieces"), rec.get("enemy_hand"), _now()))
         return rec
@@ -403,8 +493,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         conn = db.connect()
         done = conn.execute(
             "SELECT 1 FROM game_results WHERE deck_hash=? AND enemy=? AND "
-            "hand_index=? AND board=0 AND enemy_seed=? AND run=?",
-            (dh, enemy_name, row["hand_index"], eseed, k)).fetchone()
+            "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND run=?",
+            (dh, enemy_name, row["hand_index"], eseed, first, k)).fetchone()
         if done:
             return None
         t1 = t1_for(row, eseed)
@@ -412,7 +502,23 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             return None
         t0 = time.time()
         out = {"outcome": "no_t1"}
-        if t1.get("ok"):
+        if t1.get("ok") and not first:
+            scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / f"run{k}"
+            scratch.mkdir(parents=True, exist_ok=True)
+            goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
+            # The steer for the lethal search: a BOARD piece of the hand's
+            # goal. A goal that opens with hand traps kept in hand
+            # ("42141493@hand") posts an empty target, and every line the
+            # search reached was then rejected -- no line, no damage read.
+            steer = next((t for t in goal if not t.endswith("@hand")),
+                         enemy_target)
+            t2 = turn3(t1["start"], t1["prefix"], steer,
+                       set(theirs) | set(json.loads(t1["pieces"])),
+                       scratch, ms, eseed * 100 + k, player=1, turn=2)
+            out = {"outcome": "win" if t2["won"] else "no_win",
+                   "damage": t2["damage"], "line": t2["line"],
+                   "enemy_reached": int(t1["reached"])}
+        elif t1.get("ok"):
             scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / f"run{k}"
             scratch.mkdir(parents=True, exist_ok=True)
             seed = eseed * 100 + k
@@ -437,18 +543,18 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO game_results (deck_hash, enemy, "
-                "hand_index, board, enemy_seed, run, outcome, damage, "
+                "hand_index, board, enemy_seed, first, run, outcome, damage, "
                 "enemy_reached, line, seconds, created) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (dh, enemy_name, row["hand_index"], 0, eseed, k,
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (dh, enemy_name, row["hand_index"], 0, eseed, first, k,
                  out["outcome"], out.get("damage"), out.get("enemy_reached"),
                  out.get("line"), round(time.time() - t0, 1), _now()))
         if out["outcome"] != "no_t1":
             from . import impact, stops
             g = conn.execute(
                 "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
-                "hand_index=? AND board=0 AND enemy_seed=? AND run=?",
-                (dh, enemy_name, row["hand_index"], eseed, k)).fetchone()
+                "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND run=?",
+                (dh, enemy_name, row["hand_index"], eseed, first, k)).fetchone()
             for mod in (impact, stops):
                 try:    # the replay caches; a miss is read again by fill()
                     mod.record(conn, dh, name, enemy_name, g)
@@ -465,7 +571,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(lambda j: t1_safe(*j),
                     [(dict(r), e) for r in rows for e in seeds]))
-    check_shared_enemy_hands(conn, dh, enemy_name)
+    check_shared_enemy_hands(conn, dh, enemy_name, first)
     t1_for = t1_safe          # `one` reaches turn 1 through this name too
     jobs = [(dict(r), e, k) for k in range(runs) for r in rows for e in seeds]
     if from_end:
@@ -475,7 +581,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     if failed:
         say(f"{len(failed)} step(s) failed and were not recorded; run the "
             f"same command again to retry them")
-    return summary(conn, dh, enemy_name, runs * enemy_hands)
+    return summary(conn, dh, enemy_name, runs * enemy_hands, first)
 
 
 def check_enemy_list(conn, dh, enemy_name, enemy_deck):
@@ -494,12 +600,13 @@ def check_enemy_list(conn, dh, enemy_name, enemy_deck):
         raise RuntimeError(
             f"{enemy_name}.ydk has changed since the stored games against it "
             f"were played (list {was} -> {now}); delete them first: "
-            f"DELETE FROM game_turn1/game_results WHERE deck_hash='{dh}' AND "
+            f"DELETE FROM game_turn1/game_results/game_used/game_stops WHERE deck_hash='{dh}' AND "
             f"enemy='{enemy_name}'")
 
 
-def check_shared_enemy_hands(conn, dh, enemy_name):
-    """Every one of your hands must face the SAME enemy hand per seed."""
+def check_shared_enemy_hands(conn, dh, enemy_name, first=None):
+    """Every one of your hands must face the SAME enemy hand per seed --
+    going first and second alike (`first=None` checks across both)."""
     by_seed = {}
     for r in conn.execute(
             "SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE deck_hash=? "
@@ -512,7 +619,7 @@ def check_shared_enemy_hands(conn, dh, enemy_name):
     return by_seed
 
 
-def summary(conn, dh, enemy_name, games_per_hand=None):
+def summary(conn, dh, enemy_name, games_per_hand=None, first=True):
     """Per hand: games, wins, win rate, tier (dud / near-dud / -).
 
     `games_per_hand` default: what the stored games imply (enemy hands
@@ -521,15 +628,16 @@ def summary(conn, dh, enemy_name, games_per_hand=None):
     if games_per_hand is None:
         r = conn.execute(
             "SELECT COUNT(DISTINCT enemy_seed) s, MAX(run) + 1 k FROM "
-            "game_results WHERE deck_hash=? AND enemy=?",
-            (dh, enemy_name)).fetchone()
+            "game_results WHERE deck_hash=? AND enemy=? AND first=?",
+            (dh, enemy_name, int(bool(first)))).fetchone()
         games_per_hand = (r["s"] or 0) * (r["k"] or 0)
     out = []
     for r in conn.execute(
             "SELECT hand_index, COUNT(*) n, SUM(outcome='win') w, "
             "SUM(outcome='lost_t2') l, MAX(damage) best_dmg "
-            "FROM game_results WHERE deck_hash=? AND enemy=? "
-            "GROUP BY hand_index ORDER BY hand_index", (dh, enemy_name)):
+            "FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+            "GROUP BY hand_index ORDER BY hand_index",
+            (dh, enemy_name, int(bool(first)))):
         n, w = r["n"], r["w"] or 0
         rate = w / n if n else 0.0
         complete = n >= games_per_hand

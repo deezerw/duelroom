@@ -61,9 +61,9 @@ duelroom — Yu-Gi-Oh! deck laboratory
   draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
-  games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]  finish the game: win rate by turn 3
-  impact <deck> [enemy]     card impact scores from the games played
-  stops <deck> [enemy]      which of their cards you stopped, with what, and what it won
+  games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N] [--from-end]  finish the game: win rate by turn 3 (going 2nd: turn 2)
+  impact <deck> [enemy] [--first|--second]  card impact scores from the games played
+  stops <deck> [enemy] [--first|--second]  which of their cards you stopped, with what, and what it won
   starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 """
@@ -2168,9 +2168,12 @@ def cmd_decks(conn, args):
 
 def cmd_train(conn, args):
     """The deck trainer (skills/trainer.py): `train <deck> [hours] [hands]
-    [enemy] [--seconds N]`, `train <deck> status`, `train <deck> stop`."""
+    [enemy] [--seconds N] [--second]`, `train <deck> status`, `train <deck>
+    stop`. `--second`: the games at the plateau are played going second."""
     args = list(args)
     solve_ms = None
+    first = "--second" not in args
+    args = [a for a in args if a != "--second"]
     if "--seconds" in args:
         at = args.index("--seconds")
         try:
@@ -2221,10 +2224,11 @@ def cmd_train(conn, args):
     # returns, so asking it whether a stop was requested always said no and
     # a stopped training went straight into hours of games.
     if enemy and trainer.plateaued(conn, trainer.deck_hash(path), PLATEAU):
-        _print_games(game.run(conn, path, name, enemy))
+        _print_games(game.run(conn, path, name, enemy, first=first), first)
     elif enemy:
         print(f"no plateau yet (stopped or out of time): games against {enemy} "
-              f"not started -- `games {name} {enemy}` plays them anyway")
+              f"not started -- `games {name} {enemy}"
+              f"{'' if first else ' --second'}` plays them anyway")
 
 
 # Generations in a row with no hand improved before `train ... <enemy>`
@@ -2232,13 +2236,27 @@ def cmd_train(conn, args):
 PLATEAU = trainer.PLATEAU
 
 
-def _print_games(rows):
-    print("\nwin rate by turn 3 (going first):")
+def _print_games(rows, first=True):
+    print("\nwin rate by turn 3 (going first):" if first else
+          "\nwin rate on turn 2 (going second, through their turn-1 board):")
     for r in rows:
         tier = f"  {r['tier'].upper()}" if r["tier"] else ""
         print(f"  hand {r['hand_index'] + 1:>2}  {r['wins']:>2}/{r['games']:<2} "
-              f"{r['win_rate']:>5.0%}  lost on turn 2: {r['lost_t2']}{tier}"
-              + ("" if r["complete"] else "  (incomplete)"))
+              f"{r['win_rate']:>5.0%}"
+              + (f"  lost on turn 2: {r['lost_t2']}" if first
+                 else f"  best damage: {r['best_damage'] or 0}")
+              + tier + ("" if r["complete"] else "  (incomplete)"))
+
+
+def _sides(conn, dh, args):
+    """[(enemy, first)] a deck has games for, narrowed to `args[0]` (an
+    enemy) and `--first` / `--second` when given."""
+    side = (1 if "--first" in args else 0 if "--second" in args else None)
+    args = [a for a in args if a not in ("--first", "--second")]
+    rows = conn.execute("SELECT DISTINCT enemy, first FROM game_results WHERE "
+                        "deck_hash=? ORDER BY enemy, first DESC", (dh,)).fetchall()
+    return [(e, f) for e, f in rows
+            if (not args or e == args[0]) and (side is None or f == side)]
 
 
 def cmd_starters(conn, args):
@@ -2303,24 +2321,25 @@ def cmd_starters(conn, args):
 
 
 def cmd_impact(conn, args):
-    """`impact <deck> [enemy]`: read every game not read yet, then print each
-    card's impact on the win rate (skills/impact.py), per enemy deck."""
+    """`impact <deck> [enemy] [--first|--second]`: read every game not read
+    yet, then print each card's impact on the win rate (skills/impact.py),
+    per enemy deck and per side."""
     from skills import card_db, impact
 
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
-        print("usage: impact <deck> [enemy]")
+        print("usage: impact <deck> [enemy] [--first|--second]")
         return
     dh, name = trainer.deck_hash(path), path.stem
-    enemies = args[1:2] or [r[0] for r in conn.execute(
-        "SELECT DISTINCT enemy FROM game_results WHERE deck_hash=? ORDER BY enemy", (dh,))]
-    if not enemies:
+    sides = _sides(conn, dh, args[1:])
+    if not sides:
         print(f"no games played for {name} yet: games {name} <enemy>")
         return
-    for enemy in enemies:
-        impact.fill(conn, dh, name, enemy, say=print)
-        rows = impact.scores(conn, dh, enemy, own=impact.deck_codes(path))
-        print(f"\n{name} vs {enemy}: {rows[0]['games'] if rows else 0} game(s) read")
+    for enemy, first in sides:
+        impact.fill(conn, dh, name, enemy, say=print, first=first)
+        rows = impact.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first)
+        print(f"\n{name} vs {enemy} going {'first' if first else 'second'}: "
+              f"{rows[0]['games'] if rows else 0} game(s) read")
         for r in rows:
             nm = (card_db.resolve(conn, r["code"]) or {"name": str(r["code"])})["name"]
             if r["status"] == "every game":
@@ -2333,19 +2352,18 @@ def cmd_impact(conn, args):
 
 
 def cmd_stops(conn, args):
-    """`stops <deck> [enemy]`: which of the enemy's cards you stopped, with
-    which of yours, and how much each stop was worth to the win rate
-    (skills/stops.py), per enemy deck."""
+    """`stops <deck> [enemy] [--first|--second]`: which of the enemy's cards
+    you stopped, with which of yours, and how much each stop was worth to
+    the win rate (skills/stops.py), per enemy deck and per side."""
     from skills import card_db, impact, stops
 
     path = _resolve_deck(args[0] if args else None, conn)
     if not path:
-        print("usage: stops <deck> [enemy]")
+        print("usage: stops <deck> [enemy] [--first|--second]")
         return
     dh, name = trainer.deck_hash(path), path.stem
-    enemies = args[1:2] or [r[0] for r in conn.execute(
-        "SELECT DISTINCT enemy FROM game_results WHERE deck_hash=? ORDER BY enemy", (dh,))]
-    if not enemies:
+    sides = _sides(conn, dh, args[1:])
+    if not sides:
         print(f"no games played for {name} yet: games {name} <enemy>")
         return
     nm = lambda code: ("a field effect" if code == stops.FIELD else "a set card" if not code
@@ -2353,10 +2371,11 @@ def cmd_stops(conn, args):
     score = lambda r: ("every game" if r["status"] == "every game" else
                        f"{r['impact'] * 100:+4.0f} ±{r['ci'] * 100:3.0f}")
     flag = lambda r: "  few games" if r["status"] == "few games" else ""
-    for enemy in enemies:
-        stops.fill(conn, dh, name, enemy, say=print)
-        res = stops.scores(conn, dh, enemy, own=impact.deck_codes(path))
-        print(f"\n{name} vs {enemy}: {res['games']} game(s) read")
+    for enemy, first in sides:
+        stops.fill(conn, dh, name, enemy, say=print, first=first)
+        res = stops.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first)
+        print(f"\n{name} vs {enemy} going {'first' if first else 'second'}: "
+              f"{res['games']} game(s) read")
         print("\n  THEIR cards -- win-rate points when stopped vs when it went through")
         for r in res["theirs"]:
             rate = (f"won {r['stopped_win']:.0%} stopped / "
@@ -2375,12 +2394,14 @@ def cmd_stops(conn, args):
 
 
 def cmd_games(conn, args):
-    """`games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]`
-    / `games <deck> <enemy> status`: your turn 1, their turn 2, your turn 3
-    -- does the hand win by then? `--from-end` plays the list backwards, so
-    a second runner beside a running one takes the games it has not reached."""
+    """`games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N]
+    [--from-end]` / `games <deck> <enemy> status [--second]`: your turn 1,
+    their turn 2, your turn 3 -- does the hand win by then? `--second`: their
+    turn 1, your turn 2 -- do you kill through their board? `--from-end`
+    plays the list backwards, so a second runner beside a running one takes
+    the games it has not reached."""
     if len(args) < 2:
-        print("usage: games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end] | games <deck> <enemy> status")
+        print("usage: games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N] [--from-end] | games <deck> <enemy> status [--second]")
         return
     path = _resolve_deck(args[0], conn)
     if not path:
@@ -2388,7 +2409,8 @@ def cmd_games(conn, args):
         return
     enemy, rest = args[1], args[2:]
     from_end = "--from-end" in rest
-    rest = [a for a in rest if a != "--from-end"]
+    first = "--second" not in rest
+    rest = [a for a in rest if a not in ("--from-end", "--second", "--first")]
     workers = game.WORKERS
     if "--workers" in rest:
         i = rest.index("--workers")
@@ -2405,7 +2427,8 @@ def cmd_games(conn, args):
         print(f"no such enemy deck: {enemy}")
         return
     if rest and rest[0] == "status":
-        _print_games(game.summary(conn, trainer.deck_hash(path), enemy))
+        _print_games(game.summary(conn, trainer.deck_hash(path), enemy,
+                                  first=first), first)
         return
     try:
         runs = int(rest[0]) if rest else game.RUNS
@@ -2418,7 +2441,8 @@ def cmd_games(conn, args):
         return
     _warn_if_busy("these games")
     _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
-                          enemy_hands=ehands, workers=workers, from_end=from_end))
+                          enemy_hands=ehands, workers=workers, from_end=from_end,
+                          first=first), first)
 
 
 COMMANDS = {

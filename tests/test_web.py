@@ -1152,18 +1152,20 @@ def test_watch_latest_game_opens_the_newest_one(loggedin):
     if not path or not path.exists():
         return
     c = db.connect()
-    g = next((g for g in c.execute(
-        "SELECT * FROM game_results WHERE deck_hash=? AND enemy='angelechy' AND "
-        "outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
-        (trainer.deck_hash(path),)) if impact.source("imported", "angelechy", g)), None)
-    r = loggedin.get("/watch/game/imported/angelechy/latest")
-    assert r.status_code == 302
-    if g is None:
-        assert r.headers["Location"].endswith("/games/imported")
-    else:
-        assert r.headers["Location"].endswith(
-            f"/watch/game/imported/angelechy/{g['hand_index']}/{g['enemy_seed']}/{g['run']}")
-        assert "Watch latest game" in loggedin.get("/games/imported").get_data(as_text=True)
+    for first, q in ((1, ""), (0, "?second=1")):    # each side's own newest game
+        g = next((g for g in c.execute(
+            "SELECT * FROM game_results WHERE deck_hash=? AND enemy='angelechy' AND "
+            "first=? AND outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
+            (trainer.deck_hash(path), first)) if impact.source("imported", "angelechy", g)),
+            None)
+        r = loggedin.get("/watch/game/imported/angelechy/latest" + q)
+        assert r.status_code == 302
+        if g is None:
+            assert r.headers["Location"].endswith("/games/imported")
+        else:
+            assert r.headers["Location"].endswith(
+                f"/watch/game/imported/angelechy/{g['hand_index']}/{g['enemy_seed']}/{g['run']}{q}")
+            assert "Watch latest game" in loggedin.get("/games/imported").get_data(as_text=True)
 
 
 def test_train_card_value_reweights_the_board(loggedin):
