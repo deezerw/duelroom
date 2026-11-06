@@ -5493,3 +5493,40 @@ def test_games_job_passes_the_side():
     argv = jobs.KINDS["games"][0]
     assert "--second" in argv("deck", {"enemy": "e", "second": True})
     assert "--second" not in argv("deck", {"enemy": "e", "second": False})
+
+
+def test_released_prerelease_cards_load_under_their_official_passcode(tmp_path, monkeypatch):
+    """Angelechy-Meta (2026-11-06): YGOPRODeck lists Angelechy Verdict as
+    48340269, BabelCDB has it only as pre-release 101402096. The merged db
+    gets a copy under the official code; a card BabelCDB already has, and a
+    pre-release card nobody has released, are left alone."""
+    import sqlite3
+    from skills import carddb
+
+    def cdb(path, rows):
+        c = sqlite3.connect(path)
+        c.execute("CREATE TABLE datas (id INTEGER PRIMARY KEY, alias INTEGER, setcode INTEGER)")
+        c.execute("CREATE TABLE texts (id INTEGER PRIMARY KEY, name TEXT, desc TEXT)")
+        for code, name in rows:
+            c.execute("INSERT INTO datas VALUES (?,0,7)", (code,))
+            c.execute("INSERT INTO texts VALUES (?,?,'x')", (code, name))
+        c.commit()
+        return c
+
+    (tmp_path / "BabelCDB").mkdir()
+    cdb(tmp_path / "BabelCDB" / "prerelease-x.cdb",
+        [(101402096, "Verdict"), (101402097, "Unreleased"), (101402098, "Old Card")]).close()
+    mirror = tmp_path / "mirror.db"
+    m = sqlite3.connect(mirror)
+    m.execute("CREATE TABLE cards (id INTEGER, name TEXT)")
+    m.executemany("INSERT INTO cards VALUES (?,?)", [(48340269, "Verdict"), (555, "Old Card")])
+    m.commit()
+    m.close()
+    merged = cdb(tmp_path / "merged.cdb", [(555, "Old Card")])
+    monkeypatch.setattr(carddb, "UPSTREAM", tmp_path)
+    done = carddb.official_prereleases(merged, mirror)
+    assert done == [(48340269, 101402096, "Verdict")]
+    assert merged.execute("SELECT name FROM texts WHERE id=48340269").fetchone() == ("Verdict",)
+    assert merged.execute("SELECT setcode FROM datas WHERE id=48340269").fetchone() == (7,)
+    assert merged.execute("SELECT COUNT(*) FROM datas").fetchone()[0] == 2, \
+        "the unreleased card and the card BabelCDB already has stay out"

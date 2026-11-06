@@ -30,6 +30,19 @@ directories for BabelCDB, symlinks for everything else, and
 
 Pre-release sets are excluded by default -- they are not tournament legal in
 the formats we analyse and their scripts can be provisional.
+
+ONE EXCEPTION, found 2026-11-06 on an "Angelechy-Meta" list: a card can be
+out and in tournament lists (YGOPRODeck gives it its official passcode) while
+BabelCDB still carries it ONLY as a pre-release card under a placeholder
+passcode (Angelechy Verdict: official 48340269, BabelCDB 101402096). The list
+then fails preflight although the card is fully scripted. `build` therefore
+brings in exactly those cards: a pre-release card whose NAME the YGOPRODeck
+mirror knows under a different, official passcode gets a copy of its rows
+under that passcode, and the shadow CardScripts gets `c<official>.lua`
+pointing at its script. The core loads a script by the card's own code
+(an alias only counts within 10, for alternate art) and `GetID()` returns
+the code it was loaded under, so the copy behaves as the card. Nothing else
+from the pre-release sets comes in.
 """
 
 import shutil
@@ -42,7 +55,8 @@ VENDOR = ROOT / "vendor" / "ygorl"
 UPSTREAM = VENDOR / "third_party"
 SHADOW = ROOT / "vendor" / "third_party_merged"
 
-LINKED = ("ygopro-core", "CardScripts", "LFLists")
+LINKED = ("ygopro-core", "LFLists")
+MIRROR = ROOT / "data" / "duelroom.db"     # the YGOPRODeck card mirror (card_db)
 TABLES = ("datas", "texts")
 
 
@@ -83,6 +97,8 @@ def build(include_prerelease=False, force=False):
         if not (link.is_symlink() or link.exists()):
             link.symlink_to(f)
 
+    _link_scripts(SHADOW / "CardScripts", force)
+
     shutil.copy2(base, merged)
     added = {}
     conn = sqlite3.connect(merged)
@@ -104,10 +120,88 @@ def build(include_prerelease=False, force=False):
             conn.commit()
             conn.execute("DETACH DATABASE src")
             added[extra.name] = n
+        released = official_prereleases(conn)
+        if released:
+            added[f"{len(released)} released pre-release card(s)"] = len(released)
+        _script_aliases(SHADOW / "CardScripts", released)
         total = conn.execute("SELECT COUNT(*) FROM datas").fetchone()[0]
     finally:
         conn.close()
     return SHADOW, added, total
+
+
+def _link_scripts(shadow_scripts, force=False):
+    """The shadow CardScripts: a REAL directory of symlinks to every upstream
+    entry, so released pre-release cards can get a script under their
+    official passcode without touching the submodule. (It used to be one
+    symlink to upstream; that is replaced here.)"""
+    up = UPSTREAM / "CardScripts"
+    if shadow_scripts.is_symlink():
+        shadow_scripts.unlink()
+    shadow_scripts.mkdir(exist_ok=True)
+    for f in up.iterdir():
+        if f.name.startswith("."):
+            continue
+        link = shadow_scripts / f.name
+        if link.is_symlink() and (force or not link.exists()):
+            link.unlink()
+        if not (link.is_symlink() or link.exists()):
+            link.symlink_to(f)
+    # Aliases from an earlier build: rewritten by _script_aliases.
+    for old in shadow_scripts.glob("c*.lua"):
+        if old.is_symlink() and "pre-release" in str(old.readlink()):
+            old.unlink()
+
+
+def official_prereleases(conn, mirror=None):
+    """Copy every pre-release card YGOPRODeck already lists under an OFFICIAL
+    passcode into the merged db (open as `conn`) under that passcode.
+    Returns [(official, placeholder, name)] (module docstring)."""
+    mirror = Path(mirror or MIRROR)
+    if not mirror.exists():
+        return []
+    m = sqlite3.connect(f"file:{mirror}?mode=ro", uri=True)
+    try:
+        official = {}
+        for code, name in m.execute("SELECT id, name FROM cards"):
+            official.setdefault(name, code)
+    finally:
+        m.close()
+    done = []
+    for pre in sorted((UPSTREAM / "BabelCDB").glob("prerelease-*.cdb")):
+        conn.execute("ATTACH DATABASE ? AS pre", (str(pre),))
+        try:
+            rows = conn.execute("SELECT d.id, t.name FROM pre.datas d "
+                                "JOIN pre.texts t ON t.id = d.id").fetchall()
+            for placeholder, name in rows:
+                code = official.get(name)
+                if not code or code == placeholder:
+                    continue
+                if conn.execute("SELECT 1 FROM main.datas WHERE id=?",
+                                (code,)).fetchone():
+                    continue    # BabelCDB has the real card already: it wins
+                for table in TABLES:
+                    cols = [r[1] for r in conn.execute(f"PRAGMA pre.table_info({table})")]
+                    sel = ", ".join("?" if c == "id" else c for c in cols)
+                    conn.execute(f"INSERT OR REPLACE INTO main.{table} ({', '.join(cols)}) "
+                                 f"SELECT {sel} FROM pre.{table} WHERE id=?",
+                                 (code, placeholder))
+                done.append((code, placeholder, name))
+            conn.commit()
+        finally:
+            conn.execute("DETACH DATABASE pre")
+    return done
+
+
+def _script_aliases(shadow_scripts, released):
+    """`c<official>.lua` -> the placeholder's script, at the CardScripts
+    root (searched first). A card with no script stays without one, and
+    preflight's script check reports it."""
+    for code, placeholder, _name in released:
+        src = UPSTREAM / "CardScripts" / "pre-release" / f"c{placeholder}.lua"
+        link = shadow_scripts / f"c{code}.lua"
+        if src.exists() and not link.exists():
+            link.symlink_to(src)
 
 
 def source_revision():
