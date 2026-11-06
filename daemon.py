@@ -63,6 +63,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]  finish the game: win rate by turn 3
   impact <deck> [enemy]     card impact scores from the games played
+  stops <deck> [enemy]      which of their cards you stopped, with what, and what it won
   starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 """
@@ -2331,6 +2332,48 @@ def cmd_impact(conn, args):
                       f"{r['compared']} compared){flag}")
 
 
+def cmd_stops(conn, args):
+    """`stops <deck> [enemy]`: which of the enemy's cards you stopped, with
+    which of yours, and how much each stop was worth to the win rate
+    (skills/stops.py), per enemy deck."""
+    from skills import card_db, impact, stops
+
+    path = _resolve_deck(args[0] if args else None, conn)
+    if not path:
+        print("usage: stops <deck> [enemy]")
+        return
+    dh, name = trainer.deck_hash(path), path.stem
+    enemies = args[1:2] or [r[0] for r in conn.execute(
+        "SELECT DISTINCT enemy FROM game_results WHERE deck_hash=? ORDER BY enemy", (dh,))]
+    if not enemies:
+        print(f"no games played for {name} yet: games {name} <enemy>")
+        return
+    nm = lambda code: ("a field effect" if code == stops.FIELD else "a set card" if not code
+                       else (card_db.resolve(conn, code) or {"name": str(code)})["name"])
+    score = lambda r: ("every game" if r["status"] == "every game" else
+                       f"{r['impact'] * 100:+4.0f} ±{r['ci'] * 100:3.0f}")
+    flag = lambda r: "  few games" if r["status"] == "few games" else ""
+    for enemy in enemies:
+        stops.fill(conn, dh, name, enemy, say=print)
+        res = stops.scores(conn, dh, enemy, own=impact.deck_codes(path))
+        print(f"\n{name} vs {enemy}: {res['games']} game(s) read")
+        print("\n  THEIR cards -- win-rate points when stopped vs when it went through")
+        for r in res["theirs"]:
+            rate = (f"won {r['stopped_win']:.0%} stopped / "
+                    + (f"{r['through_win']:.0%} through" if r["through_win"] is not None
+                       else "never through"))
+            by = ", ".join(f"{nm(b)} {n}" for b, n in r["by"][:3])
+            print(f"  {score(r):>14}  {nm(r['code'])}  (stopped {r['stopped']} of "
+                  f"{r['played']} games played, turn {r['turn']}; {rate}){flag(r)}")
+            print(f"  {'':>14}    by {by}")
+        print("\n  YOUR cards -- win-rate points in games it stopped something vs not")
+        for r in res["yours"]:
+            hit = ", ".join(f"{nm(c)} {n}" for c, n in r["hit"][:3])
+            print(f"  {score(r):>14}  {nm(r['code'])}  ({r['stops']} stop(s) in "
+                  f"{r['games_with']} games, turn {r['turn']}){flag(r)}")
+            print(f"  {'':>14}    stopped {hit}")
+
+
 def cmd_games(conn, args):
     """`games <deck> <enemy> [runs] [enemy hands] [--workers N] [--from-end]`
     / `games <deck> <enemy> status`: your turn 1, their turn 2, your turn 3
@@ -2416,6 +2459,7 @@ COMMANDS = {
     "train": cmd_train,
     "games": cmd_games,
     "impact": cmd_impact,
+    "stops": cmd_stops,
     "starters": cmd_starters,
 }
 

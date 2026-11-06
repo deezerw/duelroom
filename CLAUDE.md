@@ -55,6 +55,7 @@ Commands (checked against the CLI by `tools/check_docs.py`):
   train <deck> [hours] [n]  play n hands over and over, keep each best line
   games <deck> <enemy> [runs] [enemy hands]  finish the game: win rate by turn 3
   impact <deck> [enemy]     card impact scores from the games played
+  stops <deck> [enemy]      which of their cards you stopped, with what, and what it won
   starters <deck> <1-3> [hours]  what every 1/2/3-card hand makes on its own
   help / quit
 ```
@@ -172,6 +173,8 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/optimizer.py    Flex-slot hill climb with paired seeds
   │  skills/trainer.py      The deck trainer: replay a hand pool, keep best lines
   │  skills/game.py         Finish the game: turns 1-3 vs a meta deck, win rate
+  │  skills/impact.py       Card impact: win rate when a card was used vs not
+  │  skills/stops.py        What you stopped of theirs, with what, and its worth
   │  skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
   │
   └─ output ────────────────────────────────────────────────────────────────
@@ -508,6 +511,28 @@ for their strong hands) and +1 by (hand, enemy hand). Consequences: turn 1 is so
 once per pairing and reused, so turn-1-only cards are "every game" (no comparison);
 most cards score > 0 (more of your deck came out = the game went well), so read
 them against each other; "few games" under `MIN_SIDE` (5) compared games a side.
+
+## What you stopped (`skills/stops.py`)
+
+Games page "What you stopped", or `daemon.py stops <deck> [enemy]`. Asked 2026-11-05:
+"which of my opponent's cards getting stopped won me the game the most, and which of
+my cards are doing that". Read from the same replays as impact into `game_stops`.
+A stop is a link of theirs **negated** (MSG_CHAIN_NEGATED/DISABLED) or a card of
+theirs **removed** off the field/hand by effect while a link of YOURS resolves. Per
+enemy card: stopped vs went-through among games they played it; per your card: games
+it stopped something vs not -- both through `impact.compare` (same strata, same MH).
+
+**Negation attribution is the trap.** The engine reports a negation either while the
+negator resolves (Ash) or only when the victim resolves (Evolzar Lars) -- both seen in
+real games. "The link resolving" credits the victim to itself in the second case, and
+"any link above" credited their own Dominus Impulse negating their own Dominus Spark
+(30 games) to "a field effect". Rule: resolving link if above the victim, else your
+nearest link above it; only theirs above = not a stop; nothing above = field (0).
+
+**First read (imported vs angelechy, 1200 games):** on their turn 2 Evolzar Lars is
+almost the only thing that stops anything, and the greedy defender spends it on The
+Fallen & The Virtuous in 336/382 games (+7 ± 28) when stopping Pot of Desires (+23)
+or Primite Lordly Lode (+17) is worth more. Ash had no turn-2 window in any game.
 
 ## Finishing the game (Stage 9) — the rooted solver
 

@@ -5303,3 +5303,106 @@ def test_starter_test_trains_its_own_pool(monkeypatch):
     assert seen == [key]
     n = c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=?", (key,)).fetchone()[0]
     assert n == len(trainer.starter_hands(path, 1))
+
+
+# --- what you stopped (skills/stops.py) --------------------------------------
+
+def _chain_msgs():
+    """Message stand-ins named like ygorl's, for stops.Reader."""
+    from types import SimpleNamespace as NS
+
+    def kind(name, **kw):
+        return type(name, (NS,), {})(**kw)
+    loc = lambda ctl, where=0x4: NS(controller=ctl, location=where, sequence=0)
+    return {
+        "turn": lambda: kind("NewTurn"),
+        "chain": lambda code, ctl, n: kind("Chaining", code=code, loc=loc(ctl), chain_count=n),
+        "solving": lambda n: kind("ChainSolving", chain_count=n),
+        "solved": lambda n: kind("ChainSolved", chain_count=n),
+        "disabled": lambda n: kind("ChainDisabled", chain_count=n),
+        "end": lambda: kind("ChainEnd"),
+        "move": lambda code, frm, to, reason: kind(
+            "Move", code=code, previous=frm, current=to, reason=reason),
+        "loc": loc,
+    }
+
+
+def test_stops_credit_the_negation_to_the_right_link():
+    """Traced 2026-11-05 on real games: the engine reports a negation either
+    while the negator resolves (Ash) or only when the victim resolves (Evolzar
+    Lars). Their own link negating their own card is not your stop, and a
+    negation with nothing above it is a field effect."""
+    from skills import stops
+
+    m = _chain_msgs()
+    rd = stops.Reader(me=0)
+    for x in [m["turn"](), m["turn"](),
+              # Lars style: reported at the victim's own resolution
+              m["chain"](100, 1, 1), m["chain"](500, 0, 2),
+              m["solving"](2), m["solved"](2), m["solving"](1), m["disabled"](1),
+              m["solved"](1), m["end"](),
+              # Ash style: reported while Ash resolves
+              m["chain"](101, 1, 1), m["chain"](600, 0, 2),
+              m["solving"](2), m["disabled"](1), m["solved"](2), m["end"](),
+              # they negate their own card (Dominus Impulse onto Dominus Spark)
+              m["chain"](700, 0, 1), m["chain"](102, 1, 2), m["chain"](103, 1, 3),
+              m["solving"](3), m["disabled"](2), m["solved"](3), m["end"](),
+              # nothing above it: a continuous negate on the field
+              m["chain"](104, 1, 1), m["solving"](1), m["disabled"](1), m["end"]()]:
+        rd.feed(x)
+    assert rd.stops == [[2, "negated", 500, 100], [2, "negated", 600, 101],
+                        [2, "negated", stops.FIELD, 104]]
+    assert set(rd.played) == {100, 101, 102, 103, 104}
+
+
+def test_stops_count_removal_only_by_your_resolving_effect():
+    import ygorl.engine.constants as C
+    from skills import stops
+
+    m = _chain_msgs()
+    field, gy = m["loc"](1, 0x4), m["loc"](1, 0x10)
+    rd = stops.Reader(me=0)
+    for x in [m["turn"](),
+              m["chain"](800, 0, 1), m["solving"](1),
+              m["move"](200, field, gy, C.REASON_EFFECT | C.REASON_DESTROY),   # yes
+              m["move"](201, field, gy, C.REASON_EFFECT | C.REASON_COST),      # a cost
+              m["solved"](1), m["end"](),
+              m["chain"](202, 1, 1), m["solving"](1),
+              m["move"](202, field, m["loc"](1, 0x20), C.REASON_EFFECT),       # moves itself
+              m["solved"](1), m["end"]()]:
+        rd.feed(x)
+    assert rd.stops == [[1, "removed", 800, 200]]
+
+
+def _stops_game(conn, hand, eseed, run, won, played, stops_):
+    import json
+    line = f"/x/h{hand}e{eseed}r{run}.yrp"
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                 "enemy_seed, run, outcome, line, created) VALUES ('d','e',?,0,?,?,?,?,'x')",
+                 (hand, eseed, run, "win" if won else "no_win", line))
+    conn.execute("INSERT INTO game_stops (deck_hash, enemy, hand_index, board, enemy_seed, "
+                 "run, line, stops) VALUES ('d','e',?,0,?,?,?,?)",
+                 (hand, eseed, run, line, json.dumps(
+                     {"played": {str(c): 2 for c in played}, "stops": stops_})))
+
+
+def test_stop_value_compares_stopped_with_through_among_games_it_was_played():
+    """Stopping card 100 wins inside the same pairing; games where they never
+    played it are not 'went through'."""
+    from skills import stops
+
+    conn = _games_db()
+    for k in range(10):
+        hit = k < 5
+        _stops_game(conn, 0, 1000, k, hit, [100],
+                    [[2, "negated", 500, 100]] if hit else [])
+        _stops_game(conn, 0, 1000, 10 + k, False, [], [])    # never played: ignored
+    res = stops.scores(conn, "d", "e", own={500})
+    theirs = {r["code"]: r for r in res["theirs"]}
+    assert theirs[100]["played"] == 10 and theirs[100]["stopped"] == 5
+    assert theirs[100]["impact"] == 1.0 and theirs[100]["status"] == "scored"
+    assert theirs[100]["by"] == [(500, 5)]
+    yours = {r["code"]: r for r in res["yours"]}
+    assert yours[500]["hit"] == [(100, 5)] and yours[500]["impact"] > 0
+    assert stops.scores(conn, "d", "e", own={999})["yours"] == [], \
+        "a stopper not in your list is theirs while you held it"

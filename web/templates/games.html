@@ -168,6 +168,62 @@
   {% else %}
   <p class="muted" style="margin:0;font-size:12.5px">No games read yet.</p>
   {% endif %}
+
+  <h3 style="margin:16px 0 4px">What you stopped</h3>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their cards you
+    <b>negated</b> or <b>removed</b> (destroyed, banished, bounced) with an effect, and how
+    much more often you won when that card was stopped than when it went through — among the
+    games they played it, same opening hand against the same enemy hand.
+    {% if e.unread_stops %}<b>{{ e.unread_stops }} game(s) not read yet</b> — reload to read more.{% endif %}</div>
+  {% if e.theirs %}
+  <table class="impact">
+    <thead><tr><th>their card</th><th>stopping it</th><th class="extra">won stopped / through</th>
+      <th class="extra">stopped in</th><th>stopped by</th></tr></thead>
+    <tbody>
+    {% for r in e.theirs %}
+      <tr class="{{ r.status|replace(' ', '-') }}">
+        <td>{{ r.name }}</td>
+        <td>{% if r.status == 'every game' %}<span class="muted" title="never went through in a comparable game, so there is nothing to compare">every game</span>
+            {% else %}<span class="rate {{ 'pos' if r.impact > 0 else ('neg' if r.impact < 0 else '') }}">{{ '%+d'|format((r.impact * 100)|round|int) }}</span>
+              <span class="muted">± {{ (r.ci * 100)|round|int }}</span>
+              {% if r.status == 'few games' %}<span class="muted" title="under {{ min_side }} comparable games stopped or through"> · few games</span>{% endif %}{% endif %}</td>
+        <td class="extra">{{ (r.stopped_win * 100)|round|int }}% / {% if r.through_win is not none %}{{ (r.through_win * 100)|round|int }}%{% else %}—{% endif %}</td>
+        <td class="extra">{{ r.stopped }} of {{ r.played }} · turn {{ r.turn }}</td>
+        <td>{% for b, n in r.by[:3] %}{{ b }} <span class="muted">{{ n }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <table class="impact" style="margin-top:10px">
+    <thead><tr><th>your card</th><th>its stops</th><th class="extra">won with a stop / without</th>
+      <th class="extra">stops</th><th>stopped</th></tr></thead>
+    <tbody>
+    {% for r in e.yours %}
+      <tr class="{{ r.status|replace(' ', '-') }}">
+        <td>{{ r.name }}</td>
+        <td>{% if r.status == 'every game' %}<span class="muted">every game</span>
+            {% else %}<span class="rate {{ 'pos' if r.impact > 0 else ('neg' if r.impact < 0 else '') }}">{{ '%+d'|format((r.impact * 100)|round|int) }}</span>
+              <span class="muted">± {{ (r.ci * 100)|round|int }}</span>
+              {% if r.status == 'few games' %}<span class="muted"> · few games</span>{% endif %}{% endif %}</td>
+        <td class="extra">{{ (r.with_win * 100)|round|int }}% / {% if r.without_win is not none %}{{ (r.without_win * 100)|round|int }}%{% else %}—{% endif %}</td>
+        <td class="extra">{{ r.stops }} in {{ r.games_with }} games · turn {{ r.turn }}</td>
+        <td>{% for x, n in r.hit[:3] %}{{ x }} <span class="muted">{{ n }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <details class="note"><summary>reading these numbers</summary>
+    <b>Their cards:</b> +18 means that, among games where they played the card, you won 18
+    points more often when it was stopped than when it resolved. Turn 2 is their turn (your
+    board interrupting them); turn 3 is yours (breaking what they left). <b>Your cards:</b>
+    games where the card stopped something against games where it did not. A negation is
+    credited to your chain link above theirs; <b>a field effect</b> = negated with no link of
+    yours above it (a continuous negate on the field). Not counted: battle, and floodgates
+    that stop an activation before it happens. The defender is greedy — it uses each
+    interruption on the FIRST thing it can — so a card stopped "every time" may only mean it
+    is the first thing they play.
+  </details>
+  {% endif %}
 </div>
 {% endfor %}
 

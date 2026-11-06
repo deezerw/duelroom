@@ -444,14 +444,16 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                  out["outcome"], out.get("damage"), out.get("enemy_reached"),
                  out.get("line"), round(time.time() - t0, 1), _now()))
         if out["outcome"] != "no_t1":
-            from . import impact
-            try:    # the impact cache; a miss is read again by impact.fill
-                impact.record(conn, dh, name, enemy_name, conn.execute(
-                    "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
-                    "hand_index=? AND board=0 AND enemy_seed=? AND run=?",
-                    (dh, enemy_name, row["hand_index"], eseed, k)).fetchone())
-            except Exception as exc:
-                say(f"  (impact: could not read the replay: {exc})")
+            from . import impact, stops
+            g = conn.execute(
+                "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
+                "hand_index=? AND board=0 AND enemy_seed=? AND run=?",
+                (dh, enemy_name, row["hand_index"], eseed, k)).fetchone()
+            for mod in (impact, stops):
+                try:    # the replay caches; a miss is read again by fill()
+                    mod.record(conn, dh, name, enemy_name, g)
+                except Exception as exc:
+                    say(f"  ({mod.__name__.rsplit('.', 1)[1]}: could not read the replay: {exc})")
         say(f"  hand {row['hand_index'] + 1} vs enemy hand {eseed - 999} "
             f"run {k + 1}: {out['outcome']}"
             + (f" ({out['damage']} damage)" if out.get("damage") else ""))

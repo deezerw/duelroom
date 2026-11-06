@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer, game, impact,
+                    trainer, game, impact, stops,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -544,9 +544,19 @@ def games_view(name=None):
         unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S)
         cards = [{**r, "name": nm(r["code"])}
                  for r in impact.scores(c, dh, enemy, own=own)]
+        unread_stops = stops.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S)
+        snm = lambda code: ("a field effect" if code == stops.FIELD
+                            else "a set card" if not code else nm(code))
+        st = stops.scores(c, dh, enemy, own=own)
+        theirs = [{**r, "name": snm(r["code"]),
+                   "by": [(snm(b), n) for b, n in r["by"]]} for r in st["theirs"]]
+        yours = [{**r, "name": snm(r["code"]),
+                  "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
         enemies.append({"name": enemy, "rows": rows,
                         "openings": sorted(openings.items()),
-                        "impact": cards, "unread": unread})
+                        "impact": cards, "unread": unread,
+                        "theirs": theirs, "yours": yours,
+                        "unread_stops": unread_stops})
     return render_template(
         "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
         trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
