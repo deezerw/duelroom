@@ -81,7 +81,8 @@
   .caption .ev{display:block} .caption .ev + .ev{color:var(--dim);font-size:13px}
   .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .controls button,.controls select{background:var(--panel);color:var(--ink);
-     border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
+     border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer;
+     touch-action:manipulation}   /* quick taps on ▶▏ step, not double-tap zoom */
   .controls button:hover{border-color:var(--accent)}
   .controls input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
   .controls .pos{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;min-width:64px;text-align:right}
@@ -294,7 +295,7 @@ function animate(prevRects, f, dur){
     const from = prevRects.get(key(m.from)); const to = slotEl(m.to);
     if (!from || !to) continue;
     const target = to.querySelector(":scope > .card");
-    if (!target) continue;
+    if (!target || !target.animate) continue;   // no Web Animations: just snap
     const r = target.getBoundingClientRect();
     const dx = from.left - r.left, dy = from.top - r.top;
     if (!dx && !dy) continue;
@@ -329,7 +330,11 @@ function go(i, animated){
   const step = animated && i === cur + 1;
   const before = step ? rectsFor(F[i]) : null;
   render(i); cur = i;
-  if (step){ animate(before, F[i], dur); spotlight(F[i], dur * 1.4); }
+  // Motion only, never allowed to stop playback: an exception here used
+  // to escape play()'s tick before it scheduled the next step, so on a
+  // browser whose animate() threw, the replay froze after one move.
+  if (step){ try { animate(before, F[i], dur); spotlight(F[i], dur * 1.4); }
+             catch (err) { console.warn("playmat animation skipped:", err); } }
 }
 function play(){
   if (timer){ clearTimeout(timer); timer = null; $("b-play").textContent = "▶"; return; }
