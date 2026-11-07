@@ -5201,8 +5201,10 @@ def test_line_key_weighs_interruptions_by_card_value():
             pytest.skip("card scripts do not read these as field interruptions")
 
     def line(code):
+        # Desirae negates nothing bare: give it the Sequence it needs.
+        sz = [{"code": 49867899, "position": 5}] if code == desirae else []
         return {"board": {"players": [{"mzone": [{"code": code, "position": 1}],
-                                       "szone": [], "hand": [], "grave": []}, {}]},
+                                       "szone": sz, "hand": [], "grave": []}, {}]},
                 "actions": [1, 2]}
 
     base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
@@ -5530,3 +5532,34 @@ def test_released_prerelease_cards_load_under_their_official_passcode(tmp_path, 
     assert merged.execute("SELECT setcode FROM datas WHERE id=48340269").fetchone() == (7,)
     assert merged.execute("SELECT COUNT(*) FROM datas").fetchone()[0] == 2, \
         "the unreleased card and the card BabelCDB already has stay out"
+
+
+def test_desirae_counts_only_with_a_link_equipped():
+    """Desirae negates up to the Link Rating equipped to it, so bare it is
+    no interruption (the trainer kept 11 bare-Desirae bests on imported),
+    and a goal naming it asks the solver for Sequence equipped too."""
+    from ygorl.engine.duel import default_cards
+
+    from skills import drill, trainer
+
+    cards = default_cards()
+    desirae, sequence, requiem = 82135803, 49867899, 2463794
+
+    def line(szone):
+        return {"board": {"players": [{"mzone": [{"code": desirae, "position": 1}],
+                                       "szone": [{"code": c, "position": 5} for c in szone],
+                                       "hand": [], "grave": []}, {}]},
+                "actions": [1]}
+
+    base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
+    bare = trainer.line_key(line([]), [], cards, p=base)
+    assert bare[1:4] == [0, 0, 0]
+    for eq in ([sequence], [requiem]):
+        assert trainer.line_key(line(eq), [], cards, p=base) > bare
+    assert drill.link_equips(line([sequence, requiem])["board"], cards) == 3
+
+    assert trainer.split_goal([str(desirae), "35103106"])[0] == \
+        [str(desirae), "35103106", f"{sequence}@szone"]
+    assert trainer.with_equips([str(desirae), f"{sequence}@szone"]) == \
+        [str(desirae), f"{sequence}@szone"]
+    assert trainer.with_equips([f"{desirae}@grave"]) == [f"{desirae}@grave"]

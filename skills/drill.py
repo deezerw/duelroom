@@ -96,6 +96,36 @@ def lines_from(jsonl_path, deck_name=None):
     return out
 
 
+# Interrupters that do nothing without a Link Monster equipped to them, and
+# the equip a goal asks for with them. Desirae negates "up to the total Link
+# Rating of Link Monsters equipped to this card": bare, that is zero cards,
+# but upstream's script reading counts its Quick Effect regardless -- so the
+# trainer kept bare-Desirae boards as bests and the games played them.
+# Sequence (Link-2) is the equip the Fiendsmith line itself makes.
+NEEDS_LINK_EQUIP = {82135803: 49867899}   # Fiendsmith's Desirae -> Sequence
+TYPE_LINK = 0x4000000
+
+
+def link_equips(board, cards):
+    """Total Link Rating of the Link Monsters in your spell/trap zone. A
+    monster there is an equip; the board does not say equipped TO WHAT, so
+    a Sequence on an Engraver is read as Desirae's too."""
+    me = (board.get("players") or [{}])[0]
+    n = 0
+    for c in me.get("szone") or []:
+        card = cards.get(c["code"])
+        if card and card.type & TYPE_LINK:
+            n += bin(card.link_marker).count("1")
+    return n
+
+
+def dead_on_field(board, cards):
+    """Codes on your field whose interruption cannot fire on this board."""
+    if link_equips(board, cards):
+        return set()
+    return {c for c in NEEDS_LINK_EQUIP}
+
+
 def _on_field(line, weight=None):
     """Interruptions the end board holds on the FIELD, set or face-up.
     `weight(code)`: what each one is worth (default 1 each).
@@ -112,7 +142,10 @@ def _on_field(line, weight=None):
     if not players:
         return 0
     me, cards, n = players[0], default_cards(), 0
+    dead = dead_on_field(board, cards)
     for c in me.get("mzone") or []:
+        if cards.canonical(c["code"]) in dead:
+            continue
         if any(i.where == "field" for i in card_interruptions(c["code"], cards)):
             n += weight(c["code"]) if weight else 1
     for c in me.get("szone") or []:

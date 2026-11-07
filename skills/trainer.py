@@ -270,7 +270,24 @@ def split_goal(targets):
     draw counting treat "this board, through Requiem" as its own goal."""
     board = [t for t in targets if not str(t).startswith(EXT)]
     ext = [int(str(t)[len(EXT):]) for t in targets if str(t).startswith(EXT)]
-    return board, ext
+    return with_equips(board), ext
+
+
+def with_equips(board):
+    """A goal's board as the solver must see it: a field target that only
+    works equipped (`drill.NEEDS_LINK_EQUIP`) brings its equip along, so
+    "82135803" means a Desirae that can negate. Applied here, where every
+    goal becomes `--target`s (trainer and games), rather than to stored
+    goals: their history, retries and stacking keep their keys."""
+    from .drill import NEEDS_LINK_EQUIP
+    out = list(board)
+    for t in board:
+        code, _, zone = str(t).partition("@")
+        equip = NEEDS_LINK_EQUIP.get(int(code)) if code.isdigit() else None
+        if (equip and zone in ("", "mzone", "atk", "def")
+                and not any(str(x).startswith(f"{equip}@") for x in out)):
+            out.append(f"{equip}@szone")
+    return out
 
 
 def extender_args(p, required=(), cards=None):
@@ -371,7 +388,7 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import board_interruptions
 
-    from .drill import _on_field
+    from .drill import _on_field, dead_on_field
 
     cards = cards or default_cards()
     p = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {},
@@ -386,8 +403,11 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     score = board_interruptions(board, cards)
     end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
     held = Counter(opening) & end_hand          # copies never part of the line
+    dead = dead_on_field(board, cards)          # a bare Desirae negates nothing
     n = neg = 0
     for code, where, negate in score.pieces:
+        if where == "field" and cards.canonical(code) in dead:
+            continue
         if where == "hand" and held[code] > 0:
             held[code] -= 1
             continue
