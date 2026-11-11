@@ -15,6 +15,10 @@ seed), differing only in the defender flags / binary:
     venv/bin/python tools/experiments/defender_bench.py [deck] [enemy] [limit] [arms]
 
 Writes results.jsonl under OUT (resumable) and prints the paired summary.
+The "new" binaries are builds of the rooted solver with patch 0004 beside the live
+one: `ROOTED_DST=vendor/ygorl/build/combo-solver-smart2 tools/build_rooted_solver.sh`
+(the live binary already has 0004 since 2026-11-11; for a greedy-vs-smart A/B the
+flags alone differ, so one binary serves both arms).
 """
 
 import json
