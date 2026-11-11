@@ -215,7 +215,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 | `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2), `TRAIN_MS` (180 s per attempt; the page's "seconds per try"), `PLATEAU` (6) |
-| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV` |
+| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV`, `DEFENDER` ("smart") |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
@@ -564,6 +564,7 @@ measurement changed. What the patch adds, and the two real bugs it fixed:
   found no lethal, with it lethal was found (verified by replay).
 - `--opp-greedy [--opp-respond codes]`: the non-searching player DEFENDS -- first
   eligible chain effect per window, never onto its own link -- instead of passing.
+  Superseded as the default by the smart defender of patch 0004 (below).
 
 **Rebuild ALL solver objects after touching `search.h`.** Recompiling only
 `search.cpp` after adding a member left `main.o` on the old layout and the binary died
@@ -603,6 +604,58 @@ could have rejected it; both on the ROOTED binary only (the pinned one is untouc
   page and offset: pre-existing, not from 0003. Unexplained; worth a look.
 - Not done: the trainer, sweep and every turn-1 solve use the PINNED binary, which still
   has the old tracker. Porting the arena half of 0003 there is the next big saving.
+
+### The smart defender: patch 0004 (2026-11-11)
+
+Asked: make the AI play smarter. The 4800 games of 2026-11-09 (imported vs
+Angelechy-Meta, 2400 a side) said where the play was dumb: going first we won 19% and
+LOST ON THEIR TURN 2 in 60%, at the same rate whether our board held 1 or 4
+interruption pieces, and in 1866 of 2370 games our board stopped nothing at all. One
+traced game (h0/e1000): the enemy opened its turn with a hand effect onto an EMPTY
+field, the greedy defender fired S:P Little Knight at that first window, and its "first
+legal choice" targeting banished our own Lars and S:P with it ("2 face-up monsters on
+the field, including a monster you control"). Whole board gone before they had summoned.
+
+Patch 0004, rooted binary only (`tools/build_rooted_solver.sh` applies it; `game.require`
+refuses an older binary when `game.DEFENDER == "smart"`):
+
+- `--opp-smart`: the defender answers a window with the eligible piece listed FIRST in
+  `--opp-respond` (`game.respond_order`: hand traps, then negates, then the rest) rather
+  than the first option the core lists, and answers follow-up card selections by value
+  (its own lowest-ATK card given up, the attacker's highest taken) rather than "first".
+- `--opp-hold <codes>` (+ `--opp-hold-until n`, default 1): those pieces wait until the
+  attacker controls n monsters. `defender_args` holds everything but the hand traps.
+- **Enumerator bug found on the way:** `MSG_SELECT_CARD` deduplicates candidates by code
+  BEFORE forming subsets, so "select 2" among two copies of one card left a pool of one,
+  nothing was emitted, and the branch was KILLED as a prompt with no default answer --
+  688 times in a 5 s search, every one of them the DEFENDER's prompt (Skull Archfiend of
+  Chaos x2), so the attacker's rollouts died at our hands for no game reason, a fake
+  survival. Below the minimum the copies now stay as distinct choices. Dead ends 135 -> 0.
+- **A turn that never touches its target now writes a best approach** (most own monsters
+  at equal overlap; under `--goal-win` the win progress, as before). Going second, 19%
+  of games were `no_t1` because the enemy's turn 1 had no line at all: the position
+  h0/e1006 is a hand of two Ash, Fuwalos and two bricks -- it now summons Ash and passes.
+
+**Measured, `tools/experiments/defender_bench.py`:** the enemy's turn-2 kill search (20 s,
+the games' seed) on all 237 stored going-first turn-1 positions, four arms, paired:
+
+| arm | defender | lost | vs greedy |
+|---|---|---|---|
+| A | greedy, live binary | 142/237 (60%) | -- (the stored games: 60%) |
+| B | greedy, new binary | 142/237 (60%) | 1 saved, 1 newly lost (the noise floor) |
+| C | smart, no hold | 128/237 (54%) | 27 saved, 13 newly lost |
+| D | smart + hold | **90/237 (38%)** | **65 saved, 13 newly lost** |
+
+Lost under BOTH A and D: 77 (32%) -- the ceiling a per-position choice of defence
+would reach, which is the designed next step (`--opp-hold-until` 1/2/3 as a family the
+game loop tries, keeping the best).
+
+**The limit, seen in a trace (h0/e1009, arm D):** any fixed defender script is visible
+to the attacker's rollouts. With Lars held until a monster was out, the enemy played ONE
+activation to draw it, then effect-less Synchro summons and attacks for lethal. A
+smarter script moves the bar; only a family of scripts (or a search on both sides) moves
+it further. Trivikarma, counted as a piece on 40 of 237 boards, needs Visas Starfrost
+and is dead without it -- a trainer scoring gap the user has asked to leave for now.
 
 ### Going second (2026-11-06)
 
@@ -709,10 +762,10 @@ Honest gaps, so nobody mistakes a limit for a result:
   Both commands print the refusal on every call and the record carries it.
   **The replacement is `gauntlet.rank_boards`** — the same question asked of `--fire`,
   which is already measured over 40 hands per cell. See ISSUES.md #69.
-- **Games use a GREEDY DEFENDER.** Whoever is not searching uses its first legal
-  interruption at every window. Real players time negates; the searching side may
-  bait this one. Win rates are against that opponent, and both sides get the same
-  model. The upgrade -- trying several windows per piece -- costs a search per window.
+- **Games use a SCRIPTED DEFENDER** (`game.DEFENDER`, patch 0004 above): ordered
+  responses, board pieces held until the attacker has a monster, follow-up targets by
+  value. Games before 2026-11-11 used the greedy script. Both sides get the same
+  model, and either script is deterministic, so the searching side can play around it.
 - **A game's turn 1 is re-solved against the enemy deck**, toward the trainer's best
   goal, with their hand traps firing. It can land a smaller board than the trainer's
   (stored lines are bound to the passive opponent they were solved against, see
@@ -735,4 +788,4 @@ Honest gaps, so nobody mistakes a limit for a result:
 **The turn-2 resume problem is solved in the rooted binary** (Stage 9 above); `second`,
 `gauntlet.rank` and the side plan still call the PINNED binary and stay unsupported
 until they are moved onto `--root`. A full bot-vs-bot arena (beyond turn 3, with a
-smarter defender than greedy) is still deferred; see "Why No Duel AI (Yet)".
+searched rather than scripted defender) is still deferred; see "Why No Duel AI (Yet)".

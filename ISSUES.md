@@ -2417,3 +2417,35 @@ player-0 win, and every recorded damage equals the opponent's LP drop.
 Also: the two `/report` copy checks that had been carried as known failures were a
 test bug — bare `/report` follows the active deck, and `imported` has no matrix rows.
 Pinned to kewl-tune; the suite is fully green (361).
+
+## 71. The defender wiped its own board at the first window — FIXED 2026-11-11 (patch 0004)
+
+Asked to make the AI play smarter. Read the 4800 games of 2026-11-09 first: going first,
+19% won and 60% LOST ON THEIR TURN 2 — at the same rate with 1 or 4 pieces on our board,
+and in 1866/2370 games our board stopped nothing. Traced h0/e1000: the enemy's first
+action was a hand effect onto an empty field; the greedy defender fired S:P Little Knight
+there, and the "first legal choice" follow-up banished our own Lars and S:P.
+
+Three defects, one patch (`patches/0004-smart-defender.patch`, rooted binary only):
+
+1. **Greedy timing and targeting.** `--opp-smart` answers in `--opp-respond` order (hand
+   traps, negates, the rest) and picks follow-up cards by value; `--opp-hold` keeps board
+   pieces until the attacker controls a monster (`--opp-hold-until n`).
+2. **`MSG_SELECT_CARD` dedup made prompts unanswerable.** "Select 2" among two identical
+   copies left a pool of one, no subset was emitted, the branch was killed: 688 times in a
+   5 s search, all on the defender's prompt — the attacker's rollouts died for no game
+   reason, which flattered the defender. Below the minimum, copies stay distinct. Dead
+   ends 135 → 0 on the same search.
+3. **No approach at zero overlap.** A turn that never touched its target wrote no line, so
+   19% of going-second games were `no_t1`. At equal overlap the approach now prefers more
+   own monsters; the h0/e1006 enemy hand (two Ash, Fuwalos, two bricks) summons Ash and passes.
+
+Proven on all 237 stored going-first positions (`tools/experiments/defender_bench.py`,
+enemy's 20 s kill search, games' seed): greedy lost 142 (60%, the stored games' own rate),
+new binary with greedy flags 142 (1 flip each way = noise), smart 128, smart + hold **90
+(38%)**: 65 saved, 13 newly lost, 77 lost under both. `game.DEFENDER = "smart"` is the
+games' default; `game.require` refuses a rooted binary without `--opp-smart`.
+
+Open: a fixed script is readable by the attacker's rollouts (trace h0/e1009: one bait
+activation for Lars, then effect-less summons into lethal). The family of scripts
+(`--opp-hold-until` 1/2/3 tried per turn, best kept) is designed, not built.
