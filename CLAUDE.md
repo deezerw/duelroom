@@ -649,7 +649,11 @@ the games' seed) on all 237 stored going-first turn-1 positions, four arms, pair
 Then the hold-until family on the same positions: E (hold until 2 monsters) lost
 106/237, F (until 3) 145/237 -- worse alone, but lost under BOTH D and E: 67 (28%),
 under D, E and F: 63 (27%), under all four with greedy: 57 (24%). Two scripts buy most
-of it, so `DEFENCES = (1, 2)`. Caveat: each extra script is one more 20 s randomized
+of it, so `DEFENCES = (1, 2)`; adding a no-hold script (`(0, 1, 2)`) reaches 25% for one
+more search per game. The other side of the coin, `defender_bench_t3.py` (60 stored
+turn-3 positions, 40 won + 20 not, 60 s): your lethal against their greedy defence 40/60,
+against smart + hold 39/60 (2 lost, 1 gained -- noise). By turn 3 their board is what it
+is; the smarter script matters on THEIR turn into YOUR board. Caveat: each extra script is one more 20 s randomized
 search for the attacker to miss a real kill in (the A-vs-B noise floor is 1 flip in
 237 per arm), so a family's survival is slightly flattered. **The choice is built:
 `game.DEFENCES`**, the `--opp-hold-until` scripts a turn
