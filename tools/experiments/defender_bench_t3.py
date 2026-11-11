@@ -58,7 +58,8 @@ def run_arm(g, arm, deck, enemy, theirs, cards):
     t0 = time.time()
     try:
         r = game.turn3(start, prefix, goal[0], respond, scratch, engine.SOLVE_MS,
-                       g["enemy_seed"] * 100 + g["run"], binary=binary)
+                       g["enemy_seed"] * 100 + g["run"], binary=binary,
+                       defences=(1,))      # one script per arm, not the family
     finally:
         game.DEFENDER = was
     return {"won": r["won"], "damage": r["damage"], "s": round(time.time() - t0, 1)}

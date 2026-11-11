@@ -174,6 +174,15 @@ def _respond(codes):
 # turns and in one traced game banished its own Lars with its own S:P Little
 # Knight at the first window of the turn.
 DEFENDER = "smart"
+# The FAMILY of defences a turn tries (patch 0004 `--opp-hold-until`): board
+# pieces held until the attacker controls this many monsters. A fixed script
+# is visible to the attacker's rollouts (one bait activation, then
+# effect-less summons into lethal -- traced), so the defending side gets to
+# pick, per turn, the script that serves it best: on their turn the one
+# that stops the kill (then the least damage); on your lethal turn you must
+# win against EVERY one. Costs one kill search per entry, one lethal search
+# per entry for won turns. (1,) = a single script.
+DEFENCES = (1, 2)
 
 
 def _is_negate(code, cards):
@@ -193,10 +202,11 @@ def respond_order(codes, cards):
     return sorted(codes, key=lambda c: (tier[c], c))
 
 
-def defender_args(respond, cards=None, smart=None):
+def defender_args(respond, cards=None, smart=None, hold_until=1):
     """Solver flags for the non-searching side. `respond`: the codes it may
     use (ordered by `respond_order`); with the smart defender, every piece
-    that is not a hand trap is held until the attacker controls a monster."""
+    that is not a hand trap is held until the attacker controls `hold_until`
+    monsters."""
     smart = (DEFENDER == "smart") if smart is None else smart
     if cards is None:
         from ygorl.engine.duel import default_cards
@@ -210,7 +220,21 @@ def defender_args(respond, cards=None, smart=None):
         hold = [c for c in codes if c not in scenarios.HANDTRAPS]
         if hold:
             args += ["--opp-hold", "|".join(map(str, hold))]
+            if hold_until != 1:
+                args += ["--opp-hold-until", str(int(hold_until))]
     return args
+
+
+def _damage(prefix, approach, player):
+    """LP the opponent of `player` lost along `approach`, from the position
+    `prefix` reaches (0 without an approach)."""
+    if not approach:
+        return 0
+    before = replay(prefix).lp[1 - player]
+    pos = replay(approach)
+    low = (pos.min_lp[1 - player] if pos.min_lp[1 - player] is not None
+           else pos.lp[1 - player])
+    return max(0, before - low)
 
 
 # --- replaying a position ----------------------------------------------------
@@ -352,22 +376,37 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
 
 
 def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
-          otk_ms=OTK_MS):
+          otk_ms=OTK_MS, defences=None):
     """The enemy's turn into your board. Returns {lost, start, prefix, board,
-    reached}; `lost` means they found lethal. If the duel ended on their
-    turn the result is only {lost, won, line}."""
+    reached, defence}; `lost` means they found lethal against EVERY defence
+    in `defences` (default `DEFENCES`); otherwise the defence that kept the
+    most LP plays the rest of their turn. If the duel ended on their turn
+    the result is only {lost, won, line}."""
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
+    defences = tuple(defences or DEFENCES) or (1,)
     base = ["--start", start, "--root", prefix, "--no-ref",
-            "--target", enemy_target, "--player", "1", "--turns", "2"] \
-        + defender_args(our_respond)
+            "--target", enemy_target, "--player", "1", "--turns", "2"]
+    chosen, first_kill = defences[0], None
     if otk_ms:
-        k = _solve(prefix, base + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
-                   scratch, "t2-otk", otk_ms, seed)
-        if k["solution"] and _winner(k["solution"]) == 1:
-            return {"lost": True, "line": str(k["solution"])}
-    r = _solve(prefix, base, scratch, "t2", ms, seed)
+        best = None
+        for v in defences:
+            label = "t2-otk" if v == defences[0] else f"t2-otk-h{v}"
+            k = _solve(prefix, base + defender_args(our_respond, hold_until=v)
+                       + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
+                       scratch, label, otk_ms, seed)
+            if k["solution"] and _winner(k["solution"]) == 1:
+                first_kill = first_kill or str(k["solution"])
+                continue
+            taken = _damage(prefix, k["approach"], 1)
+            if best is None or taken < best[0]:
+                best = (taken, v)
+        if best is None:
+            return {"lost": True, "line": first_kill, "defence": None}
+        chosen = best[1]
+    r = _solve(prefix, base + defender_args(our_respond, hold_until=chosen),
+               scratch, "t2", ms, seed)
     # No line at all: the enemy passes its turn from the root.
     src = r["solution"] or r["approach"] or prefix
     pos = replay(src, until_turn=3)
@@ -378,32 +417,37 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
                                               pos.responses, scratch / "t2")
     return {"lost": False, "start": start2, "prefix": prefix2,
             "board": pos.board, "reached": r["solution"] is not None,
-            "log": str(r["log"])}
+            "log": str(r["log"]), "defence": chosen}
 
 
 def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
-          player=0, turn=3, extra=(), binary=None, env_extra=None):
+          player=0, turn=3, extra=(), binary=None, env_extra=None,
+          defences=None):
     """Your lethal turn: turn 3 as player 0 going first, turn 2 as player 1
-    going second. Returns {won, damage, line}. `extra` / `binary`: more
+    going second. A win must beat EVERY defence in `defences` (default
+    `DEFENCES`): the enemy picks the one that stops you. Returns {won,
+    damage, line, defence} -- the line and damage of the first defence that
+    held, or the winning line against the last one. `extra` / `binary`: more
     solver flags / another build (A/B arms)."""
     scratch = Path(scratch)
-    args = ["--start", start, "--root", prefix, "--no-ref",
-            "--target", our_target, "--player", str(player), "--turns", str(turn),
-            "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
-        + defender_args(enemy_respond) + list(extra)
-    r = _solve(prefix, args, scratch, f"t{turn}", ms, seed, binary=binary,
-               env_extra=env_extra)
-    if r["solution"] and _winner(r["solution"]) == player:
-        return {"won": True, "damage": None, "line": str(r["solution"])}
-    damage = 0
-    if r["approach"]:
-        before = replay(prefix).lp[1 - player]
-        pos = replay(r["approach"])
-        low = (pos.min_lp[1 - player] if pos.min_lp[1 - player] is not None
-               else pos.lp[1 - player])
-        damage = max(0, before - low)
-    return {"won": False, "damage": damage,
-            "line": str(r["approach"]) if r["approach"] else None}
+    defences = tuple(defences or DEFENCES) or (1,)
+    out = None
+    for v in defences:
+        label = f"t{turn}" if v == defences[0] else f"t{turn}-h{v}"
+        args = ["--start", start, "--root", prefix, "--no-ref",
+                "--target", our_target, "--player", str(player), "--turns", str(turn),
+                "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
+            + defender_args(enemy_respond, hold_until=v) + list(extra)
+        r = _solve(prefix, args, scratch, label, ms, seed, binary=binary,
+                   env_extra=env_extra)
+        if r["solution"] and _winner(r["solution"]) == player:
+            out = {"won": True, "damage": None, "line": str(r["solution"]),
+                   "defence": v}
+            continue
+        return {"won": False, "damage": _damage(prefix, r["approach"], player),
+                "line": str(r["approach"]) if r["approach"] else None,
+                "defence": v}
+    return out
 
 
 def enemy_hand(our_deck, enemy_deck, enemy_seed, scratch):

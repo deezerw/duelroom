@@ -5588,3 +5588,60 @@ def test_smart_defender_orders_pieces_and_holds_board_pieces():
     greedy = game.defender_args([sp, lars, ash], cards, smart=False)
     assert "--opp-smart" not in greedy and "--opp-hold" not in greedy
     assert game.defender_args([], cards, smart=True) == ["--opp-greedy", "--opp-smart"]
+
+
+def test_defence_family_their_turn_keeps_the_script_that_holds(monkeypatch, tmp_path):
+    """Patch 0004 family: on their turn the kill check runs once per defence;
+    a loss needs every defence beaten, otherwise the one that kept the most
+    LP plays the rest of the turn. On your lethal turn a win must beat every
+    defence, and the first that holds is what the game records."""
+    from skills import game
+
+    calls = []
+
+    def fake_solve(ref, args, scratch, label, ms, seed, **kw):
+        calls.append((label, args))
+        until = args[args.index("--opp-hold-until") + 1] if "--opp-hold-until" in args else "1"
+        if "--goal-win" in args:
+            if until == "1":                      # script 1 is beaten
+                return {"solution": "kill-vs-1", "approach": None, "log": "l"}
+            return {"solution": None, "approach": f"appr-vs-{until}", "log": "l"}
+        return {"solution": None, "approach": None, "log": tmp_path / "x.log"}
+
+    monkeypatch.setattr(game, "_solve", fake_solve)
+    monkeypatch.setattr(game, "_winner", lambda path: 1 if "kill" in path else None)
+    monkeypatch.setattr(game, "_damage", lambda prefix, approach, player:
+                        {"appr-vs-2": 1200, "appr-vs-3": 300}.get(approach, 0))
+    monkeypatch.setattr(game, "defender_args",
+                        lambda respond, cards=None, smart=None, hold_until=1:
+                        ["--opp-greedy", "--opp-hold-until", str(hold_until)])
+
+    class _Pos:
+        winner, board, responses = None, {}, []
+
+    monkeypatch.setattr(game, "replay", lambda *a, **k: _Pos())
+    monkeypatch.setattr(game.breaking, "split_position", lambda *a: ("s2", "p2"))
+    import ygorl.engine.replay as R
+    monkeypatch.setattr(R.Replay, "from_yrp", staticmethod(lambda *a: None))
+
+    out = game.turn2("start", "prefix", "t", [1], tmp_path, 1000, 1, otk_ms=100,
+                     defences=(1, 2, 3))
+    assert out["lost"] is False and out["defence"] == 3      # least damage taken
+    labels = [c[0] for c in calls]
+    assert labels == ["t2-otk", "t2-otk-h2", "t2-otk-h3", "t2"]
+    assert calls[-1][1][-1] == "3"                           # the payoff search uses it
+
+    # every script beaten -> lost, the first kill line kept
+    calls.clear()
+    out = game.turn2("start", "prefix", "t", [1], tmp_path, 1000, 1, otk_ms=100,
+                     defences=(1,))
+    assert out == {"lost": True, "line": "kill-vs-1", "defence": None}
+
+    # your lethal: script 1 is beaten (a win for you), script 2 holds -> no win
+    calls.clear()
+    monkeypatch.setattr(game, "_winner", lambda path: 0 if "kill" in path else None)
+    out = game.turn3("start", "prefix", "t", [1], tmp_path, 1000, 1, defences=(1, 2))
+    assert out["won"] is False and out["defence"] == 2 and out["damage"] == 1200
+    assert [c[0] for c in calls] == ["t3", "t3-h2"]
+    out = game.turn3("start", "prefix", "t", [1], tmp_path, 1000, 1, defences=(1,))
+    assert out["won"] is True and out["defence"] == 1
