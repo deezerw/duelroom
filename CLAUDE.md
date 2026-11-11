@@ -215,7 +215,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 | `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2), `TRAIN_MS` (180 s per attempt; the page's "seconds per try"), `PLATEAU` (6) |
-| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV`, `DEFENDER` ("smart") |
+| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV`, `DEFENDER` ("smart"), `DEFENCES` ((1, 2)) |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
@@ -647,8 +647,11 @@ the games' seed) on all 237 stored going-first turn-1 positions, four arms, pair
 | D | smart + hold | **90/237 (38%)** | **65 saved, 13 newly lost** |
 
 Lost under BOTH A and D: 77 (32%) -- the ceiling a per-position choice of defence
-would reach, which is the designed next step (`--opp-hold-until` 1/2/3 as a family the
-game loop tries, keeping the best).
+reaches. **That choice is built: `game.DEFENCES`**, the `--opp-hold-until` scripts a turn
+tries. Their turn: the kill check runs once per script, a loss needs every one beaten,
+and the script that kept the most LP plays the rest of the turn. Your lethal turn: a win
+must beat every script (the enemy picks the one that stops you). One kill search per
+script; one lethal search per script on won turns only. `(1,)` = a single script.
 
 **The limit, seen in a trace (h0/e1009, arm D):** any fixed defender script is visible
 to the attacker's rollouts. With Lars held until a monster was out, the enemy played ONE
