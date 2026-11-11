@@ -646,8 +646,13 @@ the games' seed) on all 237 stored going-first turn-1 positions, four arms, pair
 | C | smart, no hold | 128/237 (54%) | 27 saved, 13 newly lost |
 | D | smart + hold | **90/237 (38%)** | **65 saved, 13 newly lost** |
 
-Lost under BOTH A and D: 77 (32%) -- the ceiling a per-position choice of defence
-reaches. **That choice is built: `game.DEFENCES`**, the `--opp-hold-until` scripts a turn
+Then the hold-until family on the same positions: E (hold until 2 monsters) lost
+106/237, F (until 3) 145/237 -- worse alone, but lost under BOTH D and E: 67 (28%),
+under D, E and F: 63 (27%), under all four with greedy: 57 (24%). Two scripts buy most
+of it, so `DEFENCES = (1, 2)`. Caveat: each extra script is one more 20 s randomized
+search for the attacker to miss a real kill in (the A-vs-B noise floor is 1 flip in
+237 per arm), so a family's survival is slightly flattered. **The choice is built:
+`game.DEFENCES`**, the `--opp-hold-until` scripts a turn
 tries. Their turn: the kill check runs once per script, a loss needs every one beaten,
 and the script that kept the most LP plays the rest of the turn. Your lethal turn: a win
 must beat every script (the enemy picks the one that stops you). One kill search per

@@ -2446,6 +2446,9 @@ new binary with greedy flags 142 (1 flip each way = noise), smart 128, smart + h
 (38%)**: 65 saved, 13 newly lost, 77 lost under both. `game.DEFENDER = "smart"` is the
 games' default; `game.require` refuses a rooted binary without `--opp-smart`.
 
-Open: a fixed script is readable by the attacker's rollouts (trace h0/e1009: one bait
-activation for Lars, then effect-less summons into lethal). The family of scripts
-(`--opp-hold-until` 1/2/3 tried per turn, best kept) is designed, not built.
+A fixed script is readable by the attacker's rollouts (trace h0/e1009: one bait
+activation for Lars, then effect-less summons into lethal), so `game.DEFENCES` tries a
+family per turn (`--opp-hold-until` 1 and 2): hold-until-2 alone lost 106/237, but lost
+under both scripts 67 (28%); a third script (until 3) only reached 63. Each script is one
+more randomized kill search for the attacker to miss in, so the family's number is
+slightly flattered (noise floor: 1 flip in 237 per arm).
