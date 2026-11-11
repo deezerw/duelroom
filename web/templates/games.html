@@ -237,11 +237,13 @@
 
 <details class="note" style="margin-top:14px"><summary>how the enemy and your board are played</summary>
   Every turn is a full search from where the game actually stands. Whoever is not
-  searching defends <b>greedily</b>: at each chance it uses its first available
-  interruption — hand traps and the interruption pieces on its board — and never
-  chains onto its own effect. That is a decent player, not a perfect one: it negates
-  the first thing it legally can, and the searching side is free to bait that. Turn 2
-  first checks whether the enemy can simply kill you (a loss), then plays toward its
-  deck's payoff board.
+  searching defends by a script: hand traps first, then negates, then removals; board
+  pieces wait until the attacker controls a monster; follow-up targets are picked by
+  value (its own weakest given up, the attacker's strongest taken); it never chains
+  onto its own effect. That is a decent player, not a perfect one: the script is fixed,
+  and the searching side is free to play around it. Games before 2026-11-11 used a
+  greedy script (first available interruption at the first chance). Turn 2 first checks
+  whether the enemy can simply kill you (a loss), then plays toward its deck's payoff
+  board.
 </details>
 {% endblock %}

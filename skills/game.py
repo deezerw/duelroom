@@ -29,14 +29,25 @@ rest of the deck shuffled by the enemy seed, so your turn-2 draw is fixed
 per (hand, enemy hand) like everything else turn 1 decides.
 
 THE OPPONENT MODEL, stated because every number inherits it: whoever is
-not searching is a GREEDY DEFENDER (`--opp-greedy`). At each chain window
-it plays its first eligible interruption (never onto its own link), out
-of the cards in `--opp-respond` -- its board's interruption pieces, the
-player's own "counts as an interruption" cards and the known hand traps.
-It is not a timing expert: it negates the first thing it legally can,
-and the searching side's search is free to bait that. A smarter defender
-(trying several windows per piece) is the known upgrade; it costs one
-search per window tried.
+not searching is a scripted DEFENDER (`--opp-greedy`, patches 0002/0004)
+playing out of the cards in `--opp-respond` -- its board's interruption
+pieces, the player's own "counts as an interruption" cards and the known
+hand traps -- never onto its own link. `DEFENDER` picks the script:
+
+  greedy  patch 0002: the first eligible option the core lists, first
+          legal follow-up. Measured on 2400 going-first games (2026-11-09):
+          it stopped nothing on 79% of the enemy's turns, and in a traced
+          game spent S:P Little Knight on the first hand effect of the turn
+          into an EMPTY field, banishing its own Lars with it.
+  smart   patch 0004 (`defender_args`): answers in a stated order (hand
+          traps, negates, the rest), holds board pieces until the attacker
+          controls a monster (`--opp-hold`), and picks follow-up targets by
+          value -- its weakest given up, their strongest taken.
+
+Either script is deterministic and the searching side's rollouts see it,
+so a search is free to play around it (one activation to draw the negate,
+then effect-less summons into lethal). Trying a small family of defences
+per turn and keeping the best is the next step (`--opp-hold-until`).
 
 Fairness rules (STAGE8/9):
 * The enemy's OPENING hand is fixed per enemy seed and SHARED by all
@@ -89,6 +100,13 @@ def require():
         raise RuntimeError(
             f"the rooted solver is not built ({ROOTED_BIN}); run "
             "tools/build_rooted_solver.sh")
+    if DEFENDER == "smart":
+        helptext = subprocess.run([str(ROOTED_BIN), "--help"], capture_output=True,
+                                  text=True).stdout
+        if "--opp-smart" not in helptext:
+            raise RuntimeError(
+                f"the rooted solver at {ROOTED_BIN} predates patch 0004 (no "
+                "--opp-smart); rebuild it with tools/build_rooted_solver.sh")
 
 
 def _now():
@@ -144,6 +162,55 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
 def _respond(codes):
     codes = sorted({int(c) for c in codes if c})
     return ["--opp-respond", "|".join(map(str, codes))] if codes else []
+
+
+# --- the defender (whoever is not searching) ----------------------------------
+
+# "smart" = patch 0004: the defender answers with the piece ranked first in
+# its list, holds board pieces until the attacker has a monster, and picks
+# follow-up targets by value. "greedy" = patch 0002's defender: the first
+# eligible option, first legal follow-up -- which, measured on the 2400
+# going-first games of 2026-11-09, stopped nothing in 79% of the enemy's
+# turns and in one traced game banished its own Lars with its own S:P Little
+# Knight at the first window of the turn.
+DEFENDER = "smart"
+
+
+def _is_negate(code, cards):
+    from ygorl.solver.blocking import card_interruptions
+    try:
+        return any(i.negate for i in card_interruptions(code, cards))
+    except Exception:  # noqa: BLE001 -- a card the scripts cannot read: not a negate
+        return False
+
+
+def respond_order(codes, cards):
+    """The defender's pieces, earliest answers first: hand traps, then
+    negates, then the rest; stable (numeric) within a tier."""
+    codes = sorted({int(c) for c in codes if c})
+    tier = {c: (0 if c in scenarios.HANDTRAPS else 1 if _is_negate(c, cards) else 2)
+            for c in codes}
+    return sorted(codes, key=lambda c: (tier[c], c))
+
+
+def defender_args(respond, cards=None, smart=None):
+    """Solver flags for the non-searching side. `respond`: the codes it may
+    use (ordered by `respond_order`); with the smart defender, every piece
+    that is not a hand trap is held until the attacker controls a monster."""
+    smart = (DEFENDER == "smart") if smart is None else smart
+    if cards is None:
+        from ygorl.engine.duel import default_cards
+        cards = default_cards()
+    codes = respond_order(respond, cards)
+    args = ["--opp-greedy"]
+    if codes:
+        args += ["--opp-respond", "|".join(map(str, codes))]
+    if smart:
+        args.append("--opp-smart")
+        hold = [c for c in codes if c not in scenarios.HANDTRAPS]
+        if hold:
+            args += ["--opp-hold", "|".join(map(str, hold))]
+    return args
 
 
 # --- replaying a position ----------------------------------------------------
@@ -272,7 +339,7 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
             "--hand", "|".join(map(str, hand))]
     for t in goal:
         args += ["--target", t]
-    args += ["--opp-greedy"] + _respond(enemy_respond)
+    args += defender_args(enemy_respond)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -293,8 +360,8 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
 
     scratch = Path(scratch)
     base = ["--start", start, "--root", prefix, "--no-ref",
-            "--target", enemy_target, "--player", "1", "--turns", "2",
-            "--opp-greedy"] + _respond(our_respond)
+            "--target", enemy_target, "--player", "1", "--turns", "2"] \
+        + defender_args(our_respond)
     if otk_ms:
         k = _solve(prefix, base + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
                    scratch, "t2-otk", otk_ms, seed)
@@ -322,8 +389,8 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
     scratch = Path(scratch)
     args = ["--start", start, "--root", prefix, "--no-ref",
             "--target", our_target, "--player", str(player), "--turns", str(turn),
-            "--goal-win", "--stop-on-win", str(STOP_ON_WIN), "--opp-greedy"] \
-        + _respond(enemy_respond) + list(extra)
+            "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
+        + defender_args(enemy_respond) + list(extra)
     r = _solve(prefix, args, scratch, f"t{turn}", ms, seed, binary=binary,
                env_extra=env_extra)
     if r["solution"] and _winner(r["solution"]) == player:
@@ -376,8 +443,8 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     tpl = breaking.template_vs(scratch / "tpl.yrpX", enemy_deck, ours,
                                seed=enemy_seed, shuffle=False)
     args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
-            "--hand", "|".join(map(str, ehand)), "--target", enemy_target,
-            "--opp-greedy"] + _respond(our_respond)
+            "--hand", "|".join(map(str, ehand)), "--target", enemy_target] \
+        + defender_args(our_respond)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:

@@ -5563,3 +5563,28 @@ def test_desirae_counts_only_with_a_link_equipped():
     assert trainer.with_equips([str(desirae), f"{sequence}@szone"]) == \
         [str(desirae), f"{sequence}@szone"]
     assert trainer.with_equips([f"{desirae}@grave"]) == [f"{desirae}@grave"]
+
+
+def test_smart_defender_orders_pieces_and_holds_board_pieces():
+    """Patch 0004. The greedy defender fired the first eligible option the
+    core listed and took the first legal follow-up: in a traced game it
+    spent S:P Little Knight on the first hand effect of the enemy's turn,
+    into an empty field, banishing its own Lars. The smart defender answers
+    in a stated order (hand traps, negates, the rest), holds board pieces
+    until the attacker has a monster, and never holds a hand trap."""
+    from ygorl.engine.duel import default_cards
+
+    from skills import game
+
+    cards = default_cards()
+    lars, sp, ash, kaleido = 35103106, 29301450, 14558127, 28226490
+    order = game.respond_order({sp, lars, kaleido, ash}, cards)
+    assert order[0] == ash
+    assert order.index(lars) < order.index(sp)
+    args = game.defender_args([sp, lars, ash], cards, smart=True)
+    assert args[:3] == ["--opp-greedy", "--opp-respond", f"{ash}|{lars}|{sp}"]
+    assert "--opp-smart" in args
+    assert args[args.index("--opp-hold") + 1] == f"{lars}|{sp}"
+    greedy = game.defender_args([sp, lars, ash], cards, smart=False)
+    assert "--opp-smart" not in greedy and "--opp-hold" not in greedy
+    assert game.defender_args([], cards, smart=True) == ["--opp-greedy", "--opp-smart"]

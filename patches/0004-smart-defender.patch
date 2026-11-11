@@ -1,0 +1,306 @@
+diff -ru combo-solver/solver-patched/enumerate.cpp combo-solver-rooted/solver-patched/enumerate.cpp
+--- combo-solver/solver-patched/enumerate.cpp	2026-11-11 13:04:59.004560444 -0500
++++ combo-solver-rooted/solver-patched/enumerate.cpp	2026-11-11 13:04:59.005560469 -0500
+@@ -579,6 +579,18 @@
+ 			}
+ 			pool.push_back(static_cast<uint8_t>(i));
+ 		}
++		// Dedup must not make the prompt unanswerable (duelroom patch 0004):
++		// "select 2" among two copies of the same card left a pool of one, no
++		// subset was emitted, and the branch was KILLED as a prompt with no
++		// default answer -- 688 times in a 5 s search, every one of them a
++		// defender's prompt, so the attacker's rollouts died at the defender's
++		// hands for no game reason. Below the minimum, the copies are kept as
++		// distinct (equivalent) choices.
++		if(pool.size() < lo) {
++			pool.clear();
++			for(uint32_t i = 0; i < codes.size(); ++i)
++				pool.push_back(static_cast<uint8_t>(i));
++		}
+ 
+ 		static thread_local std::vector<uint8_t> idx;
+ 		ForEachSubset(static_cast<uint32_t>(pool.size()), lo, hi, opt.max_subsets,
+diff -ru combo-solver/solver-patched/main.cpp combo-solver-rooted/solver-patched/main.cpp
+--- combo-solver/solver-patched/main.cpp	2026-11-11 13:04:59.000560345 -0500
++++ combo-solver-rooted/solver-patched/main.cpp	2026-11-11 13:04:59.003560419 -0500
+@@ -1479,6 +1479,11 @@
+ 	// restricts which cards it uses (empty = all).
+ 	bool opp_greedy = false;
+ 	std::vector<uint32_t> opp_respond;
++	// --opp-smart / --opp-hold <code|code...> (duelroom patch 0004): see
++	// SearchConfig::opp_smart.
++	bool opp_smart = false;
++	std::vector<uint32_t> opp_hold;
++	uint32_t opp_hold_until = 1;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2004,6 +2009,12 @@
+ 				"  --opp-greedy       the opponent DEFENDS greedily: first eligible chain\n"
+ 				"                     effect at every window (never on its own link)\n"
+ 				"  --opp-respond <c>  codes (a|b|...) the greedy opponent may use\n"
++				"  --opp-smart        the defender answers with the eligible piece listed\n"
++				"                     FIRST in --opp-respond and picks follow-up targets\n"
++				"                     by value (its weakest given, their strongest taken)\n"
++				"  --opp-hold <c>     with --opp-smart: these pieces wait until the\n"
++				"                     searching side controls a monster (patch 0004)\n"
++				"  --opp-hold-until n ... until it controls n monsters (default 1)\n"
+ 				"  --goal-win         the goal is WINNING: a line is a solution when the\n"
+ 				"                     duel ends with --player as the winner (patch 0002)\n"
+ 				"  --stop-on-win <k>  with --goal-win: the rollouts stop once k winning\n"
+@@ -2420,6 +2431,7 @@
+ 				{ "--mp1-only",         &Options::mp1_only },
+ 				{ "--goal-win",         &Options::goal_win },
+ 				{ "--opp-greedy",       &Options::opp_greedy },
++				{ "--opp-smart",        &Options::opp_smart },
+ 				{ "--zone-serial",      &Options::zone_serial },
+ 				{ "--json",             &Options::json },
+ 			};
+@@ -2513,15 +2525,20 @@
+ 		} else if(a == "--guard-keep") {
+ 			const char* v = next("--guard-keep"); if(!v) return false;
+ 			o.guard_keep_specs.emplace_back(v);
+-		} else if(a == "--opp-respond") {
+-			const char* v = next("--opp-respond"); if(!v) return false;
++		} else if(a == "--opp-hold-until") {
++			const char* v = next("--opp-hold-until"); if(!v) return false;
++			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
++		} else if(a == "--opp-respond" || a == "--opp-hold") {
++			const char* v = next(a.c_str()); if(!v) return false;
++			std::vector<uint32_t>& into =
++				(a == "--opp-hold") ? o.opp_hold : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+ 				size_t bar = sv.find('|', at);
+ 				if(bar == std::string::npos) bar = sv.size();
+ 				if(bar > at)
+-					o.opp_respond.push_back(static_cast<uint32_t>(
++					into.push_back(static_cast<uint32_t>(
+ 						std::stoul(sv.substr(at, bar - at))));
+ 				at = bar + 1;
+ 			}
+@@ -4137,6 +4154,10 @@
+ 	cfg.opp_greedy = opt.opp_greedy;
+ 	for(uint32_t c : opt.opp_respond)
+ 		cfg.opp_respond.push_back(c);
++	cfg.opp_smart = opt.opp_smart;
++	for(uint32_t c : opt.opp_hold)
++		cfg.opp_hold.push_back(c);
++	cfg.opp_hold_until = opt.opp_hold_until;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+diff -ru combo-solver/solver-patched/search.cpp combo-solver-rooted/solver-patched/search.cpp
+--- combo-solver/solver-patched/search.cpp	2026-11-11 13:04:58.996560247 -0500
++++ combo-solver-rooted/solver-patched/search.cpp	2026-11-11 13:04:58.998560296 -0500
+@@ -594,26 +594,44 @@
+ 		} else if(prompt_type == MSG_SELECT_CHAIN) {
+ 			// Greedy defender: the first eligible effect, unless the chain's last
+ 			// link is already its own (it does not stack onto itself). Pass is
+-			// the last option when the window is not forced.
++			// the last option when the window is not forced. --opp-smart (patch
++			// 0004): the eligible effect ranked first in --opp-respond instead,
++			// and the --opp-hold pieces wait until the attacker has a monster.
+ 			uint8_t link_player = 255;
+ 			const bool own_link = duel.LastChainLink(&link_player) &&
+ 								  link_player == prompt_player;
+ 			size_t pick = out.size() - 1;
+-			if(!own_link)
++			if(!own_link) {
++				const bool hold =
++					cfg.opp_smart && !cfg.opp_hold.empty() &&
++					duel.Count(static_cast<uint8_t>(cfg.target_player),
++							   LOCATION_MZONE) < cfg.opp_hold_until;
++				int best_rank = std::numeric_limits<int>::max();
+ 				for(size_t i = 0; i < out.size(); ++i) {
+ 					const uint32_t code = out.At(i).card;
+ 					if(!code)
+ 						continue;
+-					if(cfg.opp_respond.empty() ||
+-					   std::find(cfg.opp_respond.begin(), cfg.opp_respond.end(),
+-								 code) != cfg.opp_respond.end()) {
++					const int rank = DefenderRank(code);
++					if(rank < 0)
++						continue;
++					if(hold && std::find(cfg.opp_hold.begin(), cfg.opp_hold.end(),
++										 code) != cfg.opp_hold.end())
++						continue;
++					if(!cfg.opp_smart) {
+ 						pick = i;
+ 						break;
+ 					}
++					if(rank < best_rank) {
++						best_rank = rank;
++						pick = i;
++					}
+ 				}
++			}
+ 			out.KeepOnly(pick);
+ 		} else if(!out.empty()) {
+-			out.KeepOnly(0);   // follow-ups (targets, yes): the first legal choice
++			// Follow-ups (targets, yes): the first legal choice -- or, with
++			// --opp-smart, the one worth most to the defender.
++			out.KeepOnly(cfg.opp_smart ? DefenderPick(out) : 0);
+ 		}
+ 	}
+ 	// THE --no-self-negate DISCIPLINE. A chain window of the player, NOT forced
+@@ -1660,6 +1678,102 @@
+ 	return progress;
+ }
+ 
++int Search::DefenderRank(uint32_t code) const {
++	if(cfg.opp_respond.empty())
++		return 0;
++	for(size_t i = 0; i < cfg.opp_respond.size(); ++i)
++		if(cfg.opp_respond[i] == code)
++			return static_cast<int>(i);
++	return -1;
++}
++
++size_t Search::DefenderPick(const ChoiceList& out) {
++	// Only the card-selection prompts carry a choice worth weighing; every
++	// other follow-up keeps the first legal answer (yes, the first zone...).
++	if(prompt_type != MSG_SELECT_CARD && prompt_type != MSG_SELECT_TRIBUTE &&
++	   prompt_type != MSG_SELECT_UNSELECT_CARD)
++		return 0;
++	const uint8_t* d = prompt_payload.data();
++	const size_t n = prompt_payload.size();
++	size_t off = 0;
++	auto u8 = [&](uint8_t& v) {
++		if(off + 1 > n) return false;
++		v = d[off]; off += 1; return true;
++	};
++	auto u32 = [&](uint32_t& v) {
++		if(off + 4 > n) return false;
++		std::memcpy(&v, d + off, 4); off += 4; return true;
++	};
++	// Header: player, cancelable[, finishable], min, max, count -- the same
++	// layouts enumerate.cpp reads (MSG_SELECT_CARD / TRIBUTE / UNSELECT_CARD).
++	uint8_t b = 0;
++	uint32_t w = 0, count = 0;
++	if(!u8(b) || !u8(b)) return 0;
++	if(prompt_type == MSG_SELECT_UNSELECT_CARD && !u8(b)) return 0;
++	if(!u32(w) || !u32(w) || !u32(count)) return 0;
++	struct Cand { uint8_t con, loc; uint32_t seq; };
++	std::vector<Cand> cands;
++	cands.reserve(count);
++	for(uint32_t i = 0; i < count; ++i) {
++		Cand c{};
++		uint32_t code = 0;
++		if(!u32(code) || !u8(c.con) || !u8(c.loc) || !u32(c.seq)) return 0;
++		if(prompt_type == MSG_SELECT_TRIBUTE) { if(!u8(b)) return 0; }
++		else if(!u32(w)) return 0;          // position
++		cands.push_back(c);
++	}
++	// Value of each candidate to the DEFENDER: giving up its own card costs
++	// that card's ATK, taking the attacker's card is worth that card's ATK.
++	// Off the field a card has no ATK that matters: ties keep the first.
++	std::vector<int64_t> val(cands.size(), 0);
++	std::vector<QueriedCard> q;
++	for(size_t i = 0; i < cands.size(); ++i) {
++		int64_t atk = 0;
++		if(cands[i].loc & LOCATION_ONFIELD) {
++			duel.Query(cands[i].con, cands[i].loc, QUERY_CODE | QUERY_ATTACK, q);
++			if(cands[i].seq < q.size() && q[cands[i].seq].present)
++				atk = std::max<int32_t>(0, q[cands[i].seq].attack);
++		}
++		val[i] = (cands[i].con == prompt_player) ? -(atk + 1) : (atk + 1);
++	}
++	size_t best = 0;
++	int64_t best_v = 0;
++	bool any = false;
++	for(size_t i = 0; i < out.size(); ++i) {
++		const auto& r = out.At(i).response;
++		if(r.size() < 8)
++			continue;           // cancel / finish (-1): never by choice
++		int32_t type = 0;
++		std::memcpy(&type, r.data(), 4);
++		int64_t v = 0;
++		bool ok = false;
++		if(prompt_type == MSG_SELECT_UNSELECT_CARD) {
++			if(type != 1) continue;
++			int32_t ix = 0;
++			std::memcpy(&ix, r.data() + 4, 4);
++			if(ix < 0 || static_cast<size_t>(ix) >= val.size())
++				continue;       // a deselect
++			v = val[static_cast<size_t>(ix)];
++			ok = true;
++		} else {
++			if(type != 2) continue;
++			uint32_t k = 0;
++			std::memcpy(&k, r.data() + 4, 4);
++			if(r.size() < 8 + static_cast<size_t>(k)) continue;
++			for(uint32_t j = 0; j < k; ++j) {
++				const uint8_t ix = r[8 + j];
++				if(ix < val.size()) { v += val[ix]; ok = true; }
++			}
++		}
++		if(ok && (!any || v > best_v)) {
++			any = true;
++			best_v = v;
++			best = i;
++		}
++	}
++	return any ? best : 0;
++}
++
+ int64_t Search::WinProgress() {
+ 	const auto opp = static_cast<uint8_t>(1 - cfg.target_player);
+ 	return -static_cast<int64_t>(duel.Lp(opp)) * 8 -
+@@ -1694,8 +1808,15 @@
+ 	}
+ 	bool better = common > stats.best_overlap;
+ 	int64_t win_progress = INT64_MIN;
+-	if(cfg.goal_win && common >= stats.best_overlap) {
+-		win_progress = WinProgress();
++	if(common >= stats.best_overlap) {
++		// The approach's second key: under --goal-win the win progress; otherwise
++		// (duelroom patch 0004) the searcher's own monster count. A turn that
++		// never touches its target used to leave NO approach at all -- the games
++		// recorded the enemy's turn 1 as "no_t1" (nothing to play from) in 19% of
++		// the going-second games, though it could summon. Now the best approach
++		// at equal overlap is the board with the most monsters on it.
++		win_progress = cfg.goal_win ? WinProgress()
++									: static_cast<int64_t>(here.mzone_count);
+ 		better = better || win_progress > stats.best_win_progress;
+ 	}
+ 	if(better) {
+diff -ru combo-solver/solver-patched/search.h combo-solver-rooted/solver-patched/search.h
+--- combo-solver/solver-patched/search.h	2026-11-11 13:04:58.990560098 -0500
++++ combo-solver-rooted/solver-patched/search.h	2026-11-11 13:04:58.994560197 -0500
+@@ -2689,6 +2689,21 @@
+ 	// --opp-greedy / --opp-respond (duelroom patch 0002).
+ 	bool opp_greedy = false;
+ 	std::vector<uint32_t> opp_respond;
++	// --opp-smart / --opp-hold (duelroom patch 0004). With opp_smart the
++	// defender (a) answers a chain window with the eligible piece listed
++	// EARLIEST in opp_respond, not the first option the core happens to list,
++	// (b) keeps the opp_hold pieces while the searching side controls no
++	// monster (a board piece fired into a hand effect on an empty field is a
++	// piece wasted), and (c) answers follow-up card selections by value: it
++	// gives up its own weakest card and takes the opponent's strongest, where
++	// the greedy defender took the first legal choice -- which once made S:P
++	// Little Knight banish its owner's Lars at the first window of the turn.
++	bool opp_smart = false;
++	std::vector<uint32_t> opp_hold;
++	// --opp-hold-until <n>: the held pieces wait until the searching side
++	// controls at least n monsters (default 1). A family of defences for the
++	// game loop to choose from: one fixed policy is readable by the search.
++	uint32_t opp_hold_until = 1;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -3433,6 +3448,12 @@
+ 	// Enumerates the current prompt into `out` (opponent: "do nothing" only;
+ 	// non-enumerable prompt: the default answer). false = dead branch.
+ 	bool FillChoices(ChoiceList& out);
++	// --opp-smart (patch 0004): rank of a card in opp_respond (lower answers
++	// first; 0 for every card when the list is empty; -1 = not allowed).
++	int DefenderRank(uint32_t code) const;
++	// --opp-smart: the defender's follow-up choice on a card-selection prompt,
++	// by value (its weakest given up, their strongest taken). Index into `out`.
++	size_t DefenderPick(const ChoiceList& out);
+ 	// One ChoiceList per depth, reused between siblings and between passes: the
+ 	// deque guarantees reference stability during the recursion.
+ 	ChoiceList& ChoicesAt(uint32_t depth) {
