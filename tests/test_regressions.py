@@ -5645,3 +5645,32 @@ def test_defence_family_their_turn_keeps_the_script_that_holds(monkeypatch, tmp_
     assert [c[0] for c in calls] == ["t3", "t3-h2"]
     out = game.turn3("start", "prefix", "t", [1], tmp_path, 1000, 1, defences=(1,))
     assert out["won"] is True and out["defence"] == 1
+
+
+def test_defender_answers_with_every_hand_trap_its_deck_runs():
+    """2026-11-13. The defender's list was `scenarios.HANDTRAPS` cut to the
+    deck, so against Angelechy-Meta only Ash, Droll and Ghost Ogre could ever
+    fire during your turn 1: the three Mulcharmy Fuwalos and three Purulia in
+    that deck never did, in 237 stored turns. `respond_codes` reads the
+    deck's interruptions from the scripts (and the known list), and a hand
+    trap found that way is never held by the smart defender."""
+    from ygorl.engine.duel import default_cards
+
+    from skills import game
+
+    cards = default_cards()
+    fuwalos, purulia, ash, sp = 42141493, 84192580, 14558127, 29301450
+    codes = game.respond_codes(
+        Path(__file__).resolve().parents[1] / "assets" / "decks" / "Angelechy-Meta.ydk", cards)
+    assert {fuwalos, purulia, ash} <= set(codes)
+    assert sp not in codes                      # not in that main deck
+    assert game.is_hand_trap(fuwalos, cards) and not game.is_hand_trap(sp, cards)
+    order = game.respond_order([sp, fuwalos, ash], cards)
+    assert set(order[:2]) == {ash, fuwalos} and order[2] == sp
+    args = game.defender_args([sp, fuwalos, ash], cards, smart=True)
+    assert args[args.index("--opp-hold") + 1] == str(sp)
+    with_extra = game.respond_codes(
+        Path(__file__).resolve().parents[1] / "assets" / "decks" / "Angelechy-Meta.ydk",
+        cards, extra=[sp])
+    assert sp in with_extra
+

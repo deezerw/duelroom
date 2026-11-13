@@ -185,19 +185,49 @@ DEFENDER = "smart"
 DEFENCES = (1, 2)
 
 
-def _is_negate(code, cards):
+def _interrupts(code, cards):
     from ygorl.solver.blocking import card_interruptions
     try:
-        return any(i.negate for i in card_interruptions(code, cards))
-    except Exception:  # noqa: BLE001 -- a card the scripts cannot read: not a negate
-        return False
+        return card_interruptions(code, cards)
+    except Exception:  # noqa: BLE001 -- a card the scripts cannot read: no interruption
+        return ()
+
+
+def _is_negate(code, cards):
+    return any(i.negate for i in _interrupts(code, cards))
+
+
+def is_hand_trap(code, cards):
+    """A card the defender plays from its HAND on the attacker's turn: the
+    known list, or a script-read interruption usable from the hand (the
+    Mulcharmies, Nibiru...)."""
+    return code in scenarios.HANDTRAPS or any(i.where == "hand"
+                                              for i in _interrupts(code, cards))
+
+
+def respond_codes(deck, cards=None, extra=()):
+    """Everything in `deck`'s main deck the defender may answer with: the
+    known hand traps plus every card whose script interrupts the opponent's
+    turn from anywhere (hand, set, field, grave), and `extra`. The core only
+    offers what is legal where the card sits, so a trap still in hand is
+    never fired; listing it costs nothing. Measured 2026-11-13 on the 237
+    stored turn 1s vs Angelechy-Meta: the old list (`scenarios.HANDTRAPS`
+    cut to the deck) was Ash, Droll and Ghost Ogre, so Mulcharmy Fuwalos
+    and Purulia, three copies each in that deck, never fired once."""
+    from .deck import Deck
+    if cards is None:
+        from ygorl.engine.duel import default_cards
+        cards = default_cards()
+    main = set(Deck.from_ydk(Path(deck)).main)
+    return sorted({c for c in main if c in scenarios.HANDTRAPS or _interrupts(c, cards)}
+                  | {int(c) for c in extra})
 
 
 def respond_order(codes, cards):
     """The defender's pieces, earliest answers first: hand traps, then
     negates, then the rest; stable (numeric) within a tier."""
     codes = sorted({int(c) for c in codes if c})
-    tier = {c: (0 if c in scenarios.HANDTRAPS else 1 if _is_negate(c, cards) else 2)
+    tier = {c: (0 if is_hand_trap(c, cards) else 1 if _is_negate(c, cards) else 2)
             for c in codes}
     return sorted(codes, key=lambda c: (tier[c], c))
 
@@ -217,7 +247,7 @@ def defender_args(respond, cards=None, smart=None, hold_until=1):
         args += ["--opp-respond", "|".join(map(str, codes))]
     if smart:
         args.append("--opp-smart")
-        hold = [c for c in codes if c not in scenarios.HANDTRAPS]
+        hold = [c for c in codes if not is_hand_trap(c, cards)]
         if hold:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:
@@ -509,11 +539,9 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
 
 # --- one matchup run -----------------------------------------------------------
 
-def enemy_respond_codes(enemy_deck):
-    """The enemy's hand traps: the known list, as far as its deck runs them."""
-    from .deck import Deck
-    d = Deck.from_ydk(enemy_deck)
-    return [c for c in scenarios.HANDTRAPS if c in set(d.main)]
+def enemy_respond_codes(enemy_deck, cards=None):
+    """What the enemy may answer your turn with (`respond_codes`)."""
+    return respond_codes(enemy_deck, cards)
 
 
 def games_dir(name, enemy_name, first=True):
@@ -557,7 +585,10 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         raise RuntimeError(f"no trained hands for {name}: train it first")
     cards = default_cards()
     ours_extra = trainer.prefs(conn, name)["interrupters"]
-    theirs = enemy_respond_codes(enemy_deck)
+    theirs = enemy_respond_codes(enemy_deck, cards)
+    # Your answers on their turn: your deck's hand traps and interrupters
+    # plus the "counts as an interruption" cards you named for the trainer.
+    ours_hand = respond_codes(deck_path, cards, extra=ours_extra)
     seeds = [1000 + k for k in range(enemy_hands)]
     first = int(bool(first))
     root = games_dir(name, enemy_name, first)
@@ -583,7 +614,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,
-                             set(ours_extra) | set(scenarios.HANDTRAPS))
+                             ours_hand)
         rec = {"deck_hash": dh, "enemy": enemy_name,
                "hand_index": row["hand_index"], "board": 0,
                "enemy_seed": eseed, "ok": int(t1 is not None)}
@@ -655,8 +686,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / f"run{k}"
             scratch.mkdir(parents=True, exist_ok=True)
             seed = eseed * 100 + k
-            ours = set(json.loads(t1["pieces"])) | set(ours_extra) \
-                | set(scenarios.HANDTRAPS)
+            ours = set(json.loads(t1["pieces"])) | set(ours_hand)
             t2 = turn2(t1["start"], t1["prefix"], enemy_target, ours,
                        scratch, ms, seed)
             if t2["lost"]:
