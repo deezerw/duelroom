@@ -2452,3 +2452,29 @@ family per turn (`--opp-hold-until` 1 and 2): hold-until-2 alone lost 106/237, b
 under both scripts 67 (28%); a third script (until 3) only reached 63. Each script is one
 more randomized kill search for the attacker to miss in, so the family's number is
 slightly flattered (noise floor: 1 flip in 237 per arm).
+
+## 72. Turn 1 never got to play the trainer's lines, and half the enemy's hand traps never fired — FIXED 2026-11-13
+
+Found by asking why our turn 1 reached its trained goal in only 39 of 237 going-first
+positions vs Angelechy-Meta. `tools/experiments/t1_fired.py` replays every stored turn 1
+and lists what the enemy fired: in 148 of them NOTHING, yet only 29 of those reached the
+goal. Two defects, both fixed:
+
+- **The game played a different duel from the trainer's.** The game forced the hand onto
+  the .ydk file order with the enemy seed's core randomness; the trainer solved on the
+  hand seed's shuffle and its own core seed. 23 of 24 best lines break on the file order,
+  14 of 24 on the right order with another seed, 0 of 24 on both. `trainer.hand_start` +
+  `game.ordered_deck` + `breaking.template_vs(core_seed=)` now give turn 1 (and your deck
+  going second) the trainer's exact duel.
+- **The defender's list was `scenarios.HANDTRAPS` cut to the deck**: Ash, Droll and Ghost
+  Ogre for Angelechy-Meta, so its three Mulcharmy Fuwalos and three Purulia never fired.
+  `game.respond_codes` reads every main-deck interruption from the scripts.
+
+Not the fix, measured (`tools/experiments/t1_bench.py`, 40 positions where the old games
+saw nothing fired and missed the goal, paired): with the trainer's duel AND the defender
+now firing Mulcharmies and Dominus traps, 60 s reaches the goal 2/40; warm-starting the
+policy from the best line (`--adapt`) 4/40; replaying the best line first as far as the
+enemy lets it (`patches/0005-approach-line.patch`, UNAPPLIED) 5/40, +5 -2 against plain,
+pieces 9 more / 9 fewer -- noise. A traced case: the line holds 70 of 148 answers, then
+a card our Pilgrim Reaper milled gives them a trigger and the game has changed. Our turn
+1 now loses to real interruptions, which is the point of the matchup test.

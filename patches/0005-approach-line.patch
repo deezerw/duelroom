@@ -1,0 +1,442 @@
+diff -ru a/solver-patched/main.cpp b/solver-patched/main.cpp
+--- a/solver-patched/main.cpp	2026-11-13 15:40:19.960597447 -0500
++++ b/solver-patched/main.cpp	2026-11-13 20:01:20.303026098 -0500
+@@ -1634,6 +1634,13 @@
+ 	// extra roots (full path + backtracks): the Go-Explore archive that persists
+ 	// BETWEEN runs.
+ 	std::vector<std::string> approach_files;
++	// --approach-line <f.yrp> (duelroom patch 0005): a LINE of the target
++	// player's answers only, recorded on this duel against a passive opponent
++	// (the trainer's best line for the hand). The defender answers its own
++	// prompts during the replay, and the line is cut where the core first
++	// refuses an answer -- where an interruption changed the game -- so the
++	// finisher roots at "the known line, as far as it held".
++	std::vector<std::string> approach_line_files;
+ 	// --root <f.yrp>: the start replay's search ROOT is the position this file's
+ 	// answers reach (duelroom patch 0002). Requires --start, same header.
+ 	std::string root_file;
+@@ -1936,6 +1943,14 @@
+ 				"backtracks). Repeatable. Must have been\n"
+ 				"                     produced on the SAME starting duel (and "
+ 				"--opp-hand).\n\nLINE CONSTRAINTS\n"
++				"  --approach-line <f.yrp>  a LINE of --player's answers only, recorded\n"
++				"                     on this duel against a passive opponent (duelroom\n"
++				"                     patch 0005: the trainer's best line). The defender\n"
++				"                     answers its own prompts while it is replayed, and\n"
++				"                     the line is cut where the core first refuses an\n"
++				"                     answer -- where an interruption changed the game --\n"
++				"                     so the finisher roots at the line as far as it\n"
++				"                     held. Repeatable.\n"
+ 				"  --summon <spec>    the n-th summon (normal or special, "
+ 				"Nibiru's count) must\n                     be one of the "
+ 				"cards given. <spec> = n:card[|card...],\n"
+@@ -2548,6 +2563,9 @@
+ 		} else if(a == "--approach") {
+ 			const char* v = next("--approach"); if(!v) return false;
+ 			o.approach_files.emplace_back(v);
++		} else if(a == "--approach-line") {
++			const char* v = next("--approach-line"); if(!v) return false;
++			o.approach_line_files.emplace_back(v);
+ 		} else if(a == "--opp-hand") {
+ 			const char* v = next("--opp-hand"); if(!v) return false;
+ 			o.opp_hand_specs.emplace_back(v);
+@@ -9488,8 +9506,31 @@
+ 		uint64_t resolved = 0;
+ 		size_t used = 0;
+ 		bool ok = false;
++		// Everything answered, both players (patch 0005): with a --approach-line
++		// prefix the defender's answers are not in `pre`, and a line built on
++		// the prefix must carry them to replay.
++		std::vector<std::vector<uint8_t>> fed;
+ 	};
+-	auto replay_prefix = [&](Duel& fd,
++	// Patch 0005: the replay goes through Search::ReplayPrefix so a
++	// --approach-line prefix gets the defender's answers; `line` false is the
++	// byte-for-byte replay of before (the result is the same).
++	auto replay_prefix = [&](Duel& fd, Arena& fa,
++							 const std::vector<std::vector<uint8_t>>& pre,
++							 bool line) -> PrefixCount {
++		prof::Scope ps(prof::kPrefix);
++		Search pf(fd, fa, start_yrp, cfg);
++		Search::PrefixReplay r = pf.ReplayPrefix(pre, line);
++		PrefixCount pc;
++		pc.actions = r.actions;
++		pc.summons = r.summons;
++		pc.turns = r.turns;
++		pc.resolved = r.resolved;
++		pc.used = r.used;
++		pc.ok = r.ok;
++		pc.fed = std::move(r.fed);
++		return pc;
++	};
++	auto replay_prefix_bytes = [&](Duel& fd,
+ 							 const std::vector<std::vector<uint8_t>>& pre)
+ 		-> PrefixCount {
+ 		// The cost of a prefix replay (in the finisher, once per root) has its own
+@@ -9552,8 +9593,10 @@
+ 				break;
+ 		}
+ 		pc.ok = !retry && pc.used == pre.size();
++		pc.fed = pre;
+ 		return pc;
+ 	};
++	(void)replay_prefix_bytes;
+ 
+ 	// Solutions coming from APPROACH roots (--approach). They replay on the
+ 	// approach's duel (its file's header), not necessarily on the starting duel:
+@@ -9566,6 +9609,8 @@
+ 		std::unique_ptr<Replay> holder;
+ 		std::string file;
+ 		std::vector<Solution> sols;
++		bool line = false;   // --approach-line: the target player's answers only
++		size_t len = 0;      // how far the line held on this duel (set by A1)
+ 	};
+ 	std::vector<ApproachSols> approach_runs;
+ 
+@@ -9592,7 +9637,7 @@
+ 														"finisher)", err);
+ 				if(opt.stop_gc)
+ 					fd.SetLuaGc(false);
+-				PrefixCount pc = replay_prefix(fd, best_path);
++				PrefixCount pc = replay_prefix(fd, fa, best_path, false);
+ 				if(!pc.ok) {
+ 					std::printf("  !! the prefix does not "
+ 													"replay (%zu/%zu): "
+@@ -9741,7 +9786,8 @@
+ 									 cheap[i]->responses.end() - back));
+ 					}
+ 		}
+-		if(roots.empty() && opt.approach_files.empty())
++		if(roots.empty() && opt.approach_files.empty() &&
++		   opt.approach_line_files.empty())
+ 			return;
+ 		std::printf("\n--- finisher: LTS over %zu root(s) + %zu "
+ 							"approach(es) (archive %zu cells, policy %zu "
+@@ -9783,6 +9829,18 @@
+ 			approach_runs.push_back(
+ 				{ std::move(holder), opt.approach_files[a], {} });
+ 		}
++		for(size_t a = 0; a < opt.approach_line_files.size(); ++a) {
++			auto holder = std::make_unique<Replay>();
++			std::string aerr;
++			if(!holder->Load(opt.approach_line_files[a], aerr)) {
++				std::printf("  !! --approach-line %s : %s\n",
++							opt.approach_line_files[a].c_str(), aerr.c_str());
++				continue;
++			}
++			ApproachSols AL{ std::move(holder), opt.approach_line_files[a], {} };
++			AL.line = true;
++			approach_runs.push_back(std::move(AL));
++		}
+ 		const double a1_deadline = budget * 0.2;
+ 		const double a2_deadline = budget * 0.75;
+ 		std::printf("  approach phase split: A1 %.0f s (0.20), A2 "
+@@ -9824,6 +9882,27 @@
+ 							if(opt.stop_gc)
+ 								fd.SetLuaGc(false);
+ 							fa.Push();
++							// Patch 0005: an --approach-line holds only as far as
++							// the opponent let it. Measured once per worker (a
++							// replay, milliseconds): the backtracks count from
++							// where it broke, not from its recorded end.
++							size_t held = ap->responses.size();
++							if(AR.line) {
++								Search pf(fd, fa, start_yrp, cfg);
++								Search::PrefixReplay pr =
++									pf.ReplayPrefix(ap->responses, true);
++								held = pr.ok ? ap->responses.size() : pr.used;
++								fa.Restore();
++								std::lock_guard<std::mutex> lk(fmx);
++								if(AR.len == 0 || held < AR.len) {
++									AR.len = held;
++									std::printf("  appr%zu line: %zu of %zu "
++												"answers held%s\n", a, held,
++												ap->responses.size(),
++												pr.ok ? "" : " (then refused: "
++															 "the line diverged)");
++								}
++							}
+ 							for(;;) {
+ 								size_t i = anext.fetch_add(1);
+ 								if(i >= backs.size())
+@@ -9832,13 +9911,14 @@
+ 								if(left < 2000 || StopRequested() || found.load() >= found_stop)
+ 									break;
+ 								const uint32_t back = backs[i];
+-								if(ap->responses.size() <= back)
++								if(held <= back)
+ 									continue;
+ 								fa.Restore();
+ 								std::vector<std::vector<uint8_t>> pre(
+ 									ap->responses.begin(),
+-									ap->responses.end() - back);
+-								PrefixCount pc = replay_prefix(fd, pre);
++									ap->responses.begin() +
++										static_cast<std::ptrdiff_t>(held - back));
++								PrefixCount pc = replay_prefix(fd, fa, pre, AR.line);
+ 								char lbl[48];
+ 								std::snprintf(lbl, sizeof(lbl),
+ 											  "appr%zu back %u", a, back);
+@@ -9878,13 +9958,13 @@
+ 											fs.Solutions().empty() ? "" : "  <-- GOAL");
+ 								for(Solution x : fs.Solutions()) {
+ 									std::vector<std::vector<uint8_t>> full =
+-										pre;
++										pc.fed;
+ 									full.insert(full.end(),
+ 												x.responses.begin(),
+ 												x.responses.end());
+ 									x.responses = std::move(full);
+ 									x.decisions += static_cast<uint32_t>(
+-										pre.size());
++										pc.fed.size());
+ 									x.actions += pc.actions;
+ 									AR.sols.push_back(std::move(x));
+ 									found.fetch_add(1);
+@@ -9893,12 +9973,12 @@
+ 								// (template checked): this is WHERE an approach
+ 								// with complete rips closes.
+ 								if(same_gabarit(ap)) {
+-									merge_joint(st, pre);
++									merge_joint(st, pc.fed);
+ 									// Full Go-Explore: the cells of the approach
+ 									// LTS enter the global archive, re-rooted. Same
+ 									// template guard as the joint line.
+ 									if(opt.archive_fin)
+-										merge_rebased(fs.Archive(), pre);
++										merge_rebased(fs.Archive(), pc.fed);
+ 								}
+ 							}
+ 							fa.Pop();
+@@ -10006,15 +10086,20 @@
+ 				// Measured window: at backtrack 60 the complete rip sequence is
+ 				// no longer playable (0 lines at 3 rips), at 70-80 it is (~4 000
+ 				// per worker), so the grid covers the point of no return.
++				// Patch 0005: an --approach-line counts from where it held.
++				const size_t alen = approach_runs[a].line && approach_runs[a].len
++										? approach_runs[a].len
++										: ap->responses.size();
+ 				for(uint32_t back : { 60u, 70u, 80u, 90u, 110u, 150u })
+-					if(ap->responses.size() > back) {
++					if(alen > back) {
+ 						std::snprintf(rlbl, sizeof(rlbl), "appr%zu back %u",
+ 									  a, back);
+ 						roots2.push_back(
+ 							{ static_cast<int64_t>(a), back, rlbl,
+ 							  std::vector<std::vector<uint8_t>>(
+ 								  ap->responses.begin(),
+-								  ap->responses.end() - back) });
++								  ap->responses.begin() +
++									  static_cast<std::ptrdiff_t>(alen - back)) });
+ 					}
+ 			}
+ 			// Optimisation: DEEP backtracks of the cheapest solutions (starting
+@@ -10152,7 +10237,9 @@
+ 										grp->idx[pk % grp->idx.size()];
+ 									const NrpaRoot& R = roots2[r];
+ 									fa.Restore();
+-									PrefixCount pc = replay_prefix(fd, R.pre);
++									PrefixCount pc = replay_prefix(
++										fd, fa, R.pre,
++										R.a >= 0 && approach_runs[static_cast<size_t>(R.a)].line);
+ 									if(!pc.ok) {
+ 										std::lock_guard<std::mutex> lk(fmx);
+ 										std::printf("  %-22s !! prefixe "
+@@ -10254,14 +10341,14 @@
+ 												? "" : "  <-- BUT");
+ 										for(Solution x : fs.Solutions()) {
+ 											std::vector<std::vector<uint8_t>>
+-												full = R.pre;
++												full = pc.fed;
+ 											full.insert(full.end(),
+ 														x.responses.begin(),
+ 														x.responses.end());
+ 											x.responses = std::move(full);
+ 											x.decisions +=
+ 												static_cast<uint32_t>(
+-													R.pre.size());
++													pc.fed.size());
+ 											x.actions += pc.actions;
+ 											if(R.a >= 0)
+ 												approach_runs[static_cast<size_t>(
+@@ -10283,7 +10370,7 @@
+ 											best_board = st.best_board;
+ 											best_mzone = st.best_mzone;
+ 											best_szone = st.best_szone;
+-											best_path = R.pre;
++											best_path = pc.fed;
+ 											best_path.insert(
+ 												best_path.end(),
+ 												st.best_path.begin(),
+@@ -10297,10 +10384,10 @@
+ 										// produces the ripped lines, exactly the ones
+ 										// the archive has never seen.
+ 										if(R.a < 0) {
+-											merge_joint(st, R.pre);
++											merge_joint(st, pc.fed);
+ 											if(opt.archive_fin)
+ 												merge_rebased(fs.Archive(),
+-															  R.pre);
++															  pc.fed);
+ 										} else {
+ 											ApproachSols& JAR = approach_runs
+ 												[static_cast<size_t>(R.a)];
+@@ -10309,10 +10396,10 @@
+ 													? JAR.holder->Embedded()
+ 													: JAR.holder.get();
+ 											if(same_gabarit(asrc)) {
+-												merge_joint(st, R.pre);
++												merge_joint(st, pc.fed);
+ 												if(opt.archive_fin)
+ 													merge_rebased(fs.Archive(),
+-																  R.pre);
++																  pc.fed);
+ 											}
+ 										}
+ 									}
+@@ -10374,7 +10461,7 @@
+ 							if(left < 2000 || StopRequested() || found.load() >= found_stop)
+ 								break;
+ 							fa.Restore();
+-							PrefixCount pc = replay_prefix(fd, roots[i].pre);
++							PrefixCount pc = replay_prefix(fd, fa, roots[i].pre, false);
+ 							if(!pc.ok) {
+ 								std::lock_guard<std::mutex> lk(fmx);
+ 								std::printf("  %-14s !! prefixe "
+diff -ru a/solver-patched/search.cpp b/solver-patched/search.cpp
+--- a/solver-patched/search.cpp	2026-11-13 15:40:19.961597466 -0500
++++ b/solver-patched/search.cpp	2026-11-14 00:52:30.215808466 -0500
+@@ -5,6 +5,8 @@
+ #include <cstdio>
+ 
+ #include <algorithm>
++#include <cstdlib>
++#include <cstdio>
+ #include <bitset>
+ #include <chrono>
+ #include <cmath>
+@@ -1678,6 +1680,94 @@
+ 	return progress;
+ }
+ 
++Search::PrefixReplay Search::ReplayPrefix(
++	const std::vector<std::vector<uint8_t>>& pre, bool line) {
++	PrefixReplay r;
++	ChoiceList out;
++	// A line recorded against a passive opponent never saw a chain window
++	// that the opponent's own activation opens: the window to respond to
++	// their link, and the window re-offered once a chain made of their links
++	// alone has resolved. Those are UNPLANNED: declined without consuming an
++	// answer (a recorded decline fits any window, so consuming one would
++	// shift the whole line by one). Everything else is fed as recorded, and
++	// the first refusal is where the line diverged. No arena snapshot is
++	// taken here: a nested level dropped without restoring (Discard) leaves
++	// the parent's undo log blind to its pages, and the finisher restores
++	// that parent level -- measured as a segfault.
++	//
++	// Verified 2026-11-14 (imported hand 2, 148 answers): against the
++	// trainer's passive deck every answer holds; against Angelechy-Meta the
++	// line holds 70, then a card of theirs our Pilgrim Reaper milled gives
++	// them a trigger the defender takes, and the game has changed.
++	static const std::vector<uint8_t> kDecline{ 0xff, 0xff, 0xff, 0xff };
++	static const bool debug = std::getenv("R2V_DEBUG_PREFIX") != nullptr;
++	bool chain_ours = false, chain_theirs = false;   // links of the chain building / just resolved
++	bool was_building = false;
++	for(;;) {
++		// Same contract as the finisher's byte replay: the last answer is fed
++		// and left pending for the search that follows, not processed here.
++		if(r.used == pre.size()) {
++			r.ok = true;
++			return r;
++		}
++		const Step s = StepToPrompt();
++		r.actions += actions_this_step;
++		r.turns += turns_this_step;
++		r.summons += static_cast<uint32_t>(summons_this_step.size());
++		r.resolved += resolved_this_step;
++		if(s == Step::Rejected) {
++			if(r.used)
++				--r.used;   // pre[used] is the answer that was refused
++			if(!r.fed.empty())
++				r.fed.pop_back();
++			r.refused = true;
++			if(debug)
++				std::fprintf(stderr, "[prefix] diverged after %zu own answers "
++									 "(%zu fed), prompt type %u player %d\n",
++							 r.used, r.fed.size(), prompt_type, prompt_player);
++			return r;
++		}
++		if(s == Step::Ended)
++			return r;
++		bool unplanned = false;
++		if(line && prompt_type == MSG_SELECT_CHAIN) {
++			uint8_t lp = 255;
++			const bool building = duel.LastChainLink(&lp);
++			if(building) {
++				if(!was_building)
++					chain_ours = chain_theirs = false;   // a new chain
++				if(lp == cfg.target_player)
++					chain_ours = true;
++				else
++					chain_theirs = true;
++				unplanned = lp != cfg.target_player;
++			} else {
++				unplanned = chain_theirs && !chain_ours;   // re-offer after their chain alone
++			}
++			was_building = building;
++		} else if(line) {
++			chain_ours = chain_theirs = false;
++			was_building = false;
++		}
++		if(line && prompt_player != cfg.target_player) {
++			out.Clear();
++			if(!FillChoices(out) || out.empty())
++				return r;
++			duel.SetResponse(out.At(0).response);
++			r.fed.push_back(out.At(0).response);
++			continue;
++		}
++		if(unplanned) {
++			duel.SetResponse(kDecline);
++			r.fed.push_back(kDecline);
++			continue;
++		}
++		duel.SetResponse(pre[r.used]);
++		r.fed.push_back(pre[r.used]);
++		++r.used;
++	}
++}
++
+ int Search::DefenderRank(uint32_t code) const {
+ 	if(cfg.opp_respond.empty())
+ 		return 0;
+diff -ru a/solver-patched/search.h b/solver-patched/search.h
+--- a/solver-patched/search.h	2026-11-13 15:40:19.961597466 -0500
++++ b/solver-patched/search.h	2026-11-13 19:54:01.323365790 -0500
+@@ -3382,6 +3382,26 @@
+ 	// the corpus agreement curve is blind to Q^. Empty when --qhat is off.
+ 	std::vector<BanditProbe> RootBandit() const;
+ 
++	// duelroom patch 0005: replay recorded answers from the current state.
++	// With `line`, the answers are the TARGET player's only and the DEFENDER
++	// (cfg.opp_*) answers the other player's prompts exactly as it does in the
++	// search; the replay stops at the first answer the core refuses -- an
++	// interruption changed the prompts -- and says how far the line held.
++	// Without `line`, every prompt consumes an answer, byte for byte (an
++	// approach written by a run records both players). `fed` is everything
++	// actually answered, both players: what a line built on this prefix
++	// must carry to replay.
++	struct PrefixReplay {
++		size_t used = 0;
++		uint32_t actions = 0, summons = 0, turns = 0;
++		uint64_t resolved = 0;
++		bool ok = false;        // every answer consumed, none refused
++		bool refused = false;   // the last answer fed was refused (MSG_RETRY)
++		std::vector<std::vector<uint8_t>> fed;
++	};
++	PrefixReplay ReplayPrefix(const std::vector<std::vector<uint8_t>>& pre,
++							  bool line);
++
+ private:
+ 	enum class Step { Prompt, Ended, Rejected };
+ 

@@ -669,6 +669,31 @@ smarter script moves the bar; only a family of scripts (or a search on both side
 it further. Trivikarma, counted as a piece on 40 of 237 boards, needs Visas Starfrost
 and is dead without it -- a trainer scoring gap the user has asked to leave for now.
 
+### Turn 1 in the trainer's duel (2026-11-13)
+
+Asked to keep making the AI play smarter. Our turn 1 reached its trained goal in 39 of 237
+going-first positions, and `tools/experiments/t1_fired.py` showed the enemy fired nothing
+in 148 of them -- so the search was missing goals the trainer had reached. Two fixes
+(ISSUES.md #72):
+
+- **`trainer.hand_start` / `game.ordered_deck`**: turn 1 (and your deck going second) is
+  played on the trainer's deck order and core seed for that hand, not the .ydk file order
+  and the enemy seed's randomness. On the old duel 23 of 24 best lines could not even be
+  replayed. The enemy's opening hand per seed is unchanged (its shuffle is host-side).
+- **`game.respond_codes`**: each side's defender answers with every interruption its main
+  deck runs, read from the scripts, not only `scenarios.HANDTRAPS`. Angelechy-Meta's six
+  Mulcharmies had never fired. `is_hand_trap` decides what the smart defender never holds.
+
+**Stored turn 1s are cached** (`game_turn1`), so a matchup already played keeps its old
+turn 1s, old defender list and old greedy defender until its rows are cleared.
+
+Measured and NOT adopted: with the real interruptions now firing, warm-starting from the
+best line (`--adapt`) or replaying it first (`patches/0005-approach-line.patch`, kept
+UNAPPLIED like 0001) reached 4/40 and 5/40 against 2/40 plain, pieces even -- noise
+(`tools/experiments/t1_bench.py`). The gotcha that cost a day there: the arena's `Pop()`
+RESTORES as well as pops; drop a snapshot with `Discard()`, and never Discard a nested
+level the caller will Restore through (segfault).
+
 ### Going second (2026-11-06)
 
 `games <deck> <enemy> --second`, or "you go: second" on the games page (and on the
