@@ -5674,3 +5674,60 @@ def test_defender_answers_with_every_hand_trap_its_deck_runs():
         cards, extra=[sp])
     assert sp in with_extra
 
+
+def test_turn1_plays_the_hand_in_the_trainers_duel(tmp_path):
+    """2026-11-13. The games forced the hand onto the .ydk FILE order and the
+    enemy seed's core randomness; the trainer solved the hand on its own
+    shuffle and seed, and 23 of the 24 best lines of `imported` break on the
+    file order. `trainer.hand_start` reads that duel back from the record and
+    `game.ordered_deck` writes the deck so the solver's hand forcing (remove
+    the first copy of each hand card, append the hand) reproduces it."""
+    from skills import game, trainer
+    from skills.deck import Deck
+
+    deck = tmp_path / "d.ydk"
+    deck.write_text("#main\n1\n2\n2\n3\n4\n5\n#extra\n9\n!side\n")
+    # the trainer's shuffle: hand (4, 2) at the tail
+    order = [2, 5, 3, 1, 4, 2]
+    out, tail = game.ordered_deck(deck, order, [2, 4], tmp_path / "o.ydk")
+    assert tail == [4, 2]
+    main = Deck.from_ydk(out).main
+    assert main == [4, 2, 2, 5, 3, 1]          # hand first, then the trainer's rest
+    rest = list(main)
+    for c in tail:                              # what the solver does
+        rest.remove(c)
+    assert rest + tail == order
+    side_b, _ = game.ordered_deck(deck, order, [2, 4], tmp_path / "b.ydk", hand_first=False)
+    assert Deck.from_ydk(side_b).main == order  # side b draws off the end as is
+    with pytest.raises(ValueError):
+        game.ordered_deck(deck, order, [3, 4], tmp_path / "x.ydk")   # not the tail
+    with pytest.raises(ValueError):
+        game.ordered_deck(deck, [1, 2, 3], [2, 3], tmp_path / "y.ydk")  # not this deck
+
+    rec = {"start": {"core_seed": [1, 2, 3, 4], "decks": {"a": {"main": order}}},
+           "lines": []}
+    assert trainer.hand_start(json.dumps(rec)) == {"order": order, "core_seed": [1, 2, 3, 4]}
+    assert trainer.hand_start(None) is None
+    assert trainer.hand_start(json.dumps({"start": {}})) is None
+
+
+def test_template_vs_carries_the_trainers_core_seed(tmp_path):
+    """2026-11-13. The solver's synthetic start copies the template's seed
+    words, so `template_vs(core_seed=...)` is how a game's turn 1 inherits
+    the trainer's in-line randomness (its shuffles). Side b's host-side
+    shuffle still follows `seed`, so the enemy's hand per enemy seed does
+    not move."""
+    from ygorl.engine.replay import Replay
+
+    from skills import breaking
+
+    root = Path(__file__).resolve().parents[1] / "assets" / "decks"
+    words = [11, 22, 33, 44]
+    a = breaking.template_vs(tmp_path / "a.yrpX", root / "imported.ydk",
+                             root / "Angelechy-Meta.ydk", seed=1000, shuffle=True)
+    b = breaking.template_vs(tmp_path / "b.yrpX", root / "imported.ydk",
+                             root / "Angelechy-Meta.ydk", seed=1000, shuffle=True,
+                             core_seed=words)
+    ra, rb = Replay.from_yrp(a), Replay.from_yrp(b)
+    assert list(rb.core_seed) == words and list(ra.core_seed) != words
+    assert rb.decks["b"]["main"] == ra.decks["b"]["main"]   # the enemy's shuffle is seed 1000's

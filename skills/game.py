@@ -150,8 +150,8 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
         # run retries it -- never scored off a half-searched turn.
         raise RuntimeError(f"{label}: solver hung past {_hard_limit(ms)} s, killed") from e
     log = scratch / f"{label}.log"
-    log.write_text((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or ""),
-                   encoding="utf-8")
+    log.write_text((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or "")
+                   + f"\n--- exit {r.returncode} ---\n", encoding="utf-8")
     sols = sorted(out.glob("solution_*.yrp"))
     appr = sorted(out.glob("best_approach*.yrp"))
     return {"solution": sols[0] if sols else None,
@@ -374,26 +374,70 @@ def _hand(board, player):
     return list(board["players"][player].get("hand") or [])
 
 
+# --- the deck under the hand ---------------------------------------------------
+
+def ordered_deck(deck_path, order, hand, out_path, hand_first=True):
+    """Write `deck_path` with its main deck in `order` -- the shuffle the
+    trainer solved this hand on, hand at the tail (`trainer.hand_order`).
+
+    The solver forces a hand by removing the FIRST copy of each hand card
+    from the list and appending the hand (BuildSyntheticStart, under
+    DUEL_PSEUDO_SHUFFLE), so for `--deck` the file is written hand-first:
+    what remains is exactly the trainer's rest, in the trainer's order.
+    Seated on side b (going second, no `--hand`), the order is written as
+    is: that side draws off the end. Returns (path, the hand in the order's
+    own tail order).
+
+    Why it matters, measured 2026-11-13: the games used to force the hand
+    onto the .ydk FILE order, the same for every hand, and 23 of the 24
+    trainer best lines of `imported` break on it within their first
+    decisions (a Tearlaments deck: the mills differ). The goal the game
+    aimed turn 1 at was reached with cards the game never got to mill.
+    """
+    from .deck import Deck
+
+    d = Deck.from_ydk(Path(deck_path))
+    order = [int(c) for c in order]
+    hand = [int(c) for c in hand]
+    if sorted(order) != sorted(d.main):
+        raise ValueError(f"{Path(deck_path).stem}: the order is not this deck's main deck")
+    tail = order[-len(hand):]
+    if sorted(tail) != sorted(hand):
+        raise ValueError(f"{Path(deck_path).stem}: the order does not end with the hand")
+    main = tail + order[:-len(hand)] if hand_first else list(order)
+    Deck(name=d.name, main=main, extra=list(d.extra), side=list(d.side)).write_ydk(Path(out_path))
+    return Path(out_path), tail
+
+
 # --- the three turns -----------------------------------------------------------
 
 def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
-          enemy_respond):
+          enemy_respond, start=None, extra=()):
     """Your turn 1 against the real enemy deck, closed at turn 2.
 
-    Returns {start, prefix, board, reached} or None when not even a
-    partial line came back (nothing to play from).
+    `start`: the trainer's duel for the hand (`trainer.hand_start`: the
+    main deck's order and the core seed), so the search plays the hand the
+    trainer solved -- same mills, same shuffles -- with the real enemy in
+    the other seat; default the .ydk file's order and the enemy seed's
+    randomness. `extra`: more solver flags. Returns {start, prefix, board,
+    reached} or None when not even a partial line came back.
     """
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
     scratch.mkdir(parents=True, exist_ok=True)
+    start = start or {}
     tpl = breaking.template_vs(scratch / "tpl.yrpX", our_deck, enemy_deck,
-                               seed=enemy_seed, shuffle=True)
-    args = ["--no-ref", "--deck", Path(our_deck).resolve(),
+                               seed=enemy_seed, shuffle=True,
+                               core_seed=start.get("core_seed"))
+    deck = Path(our_deck).resolve()
+    if start.get("order"):
+        deck, hand = ordered_deck(our_deck, start["order"], hand, scratch / "ordered.ydk")
+    args = ["--no-ref", "--deck", deck,
             "--hand", "|".join(map(str, hand))]
     for t in goal:
         args += ["--target", t]
-    args += defender_args(enemy_respond)
+    args += defender_args(enemy_respond) + list(extra)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -490,13 +534,16 @@ def enemy_hand(our_deck, enemy_deck, enemy_seed, scratch):
 
 
 def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
-                ms, seed, our_respond):
+                ms, seed, our_respond, start=None):
     """Going second: the enemy's turn 1 into your hand, closed at turn 2.
 
-    Returns {start, prefix, board, reached, enemy_hand}, or None when not
-    even a partial line came back -- the bare template would deal them the
-    bottom of their unshuffled list, not their hand, so there is no honest
-    position to play from (recorded as no_t1, as going first)."""
+    `start`: the trainer's duel for your hand (`trainer.hand_start`): your
+    deck in its order, the core on its seed; without it your deck is
+    shuffled by the enemy seed. Returns {start, prefix,
+    board, reached, enemy_hand}, or None when not even a partial line came
+    back -- the bare template would deal them the bottom of their
+    unshuffled list, not their hand, so there is no honest position to play
+    from (recorded as no_t1, as going first)."""
     import random
 
     from ygorl.engine.replay import Replay
@@ -506,16 +553,22 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     scratch = Path(scratch)
     scratch.mkdir(parents=True, exist_ok=True)
     ehand = enemy_hand(our_deck, enemy_deck, enemy_seed, scratch)
-    # Your deck, shuffled by the enemy seed, with the hand at the bottom
-    # where the unshuffled side b draws it (breaking.deck_with_hand).
-    d = Deck.from_ydk(Path(our_deck))
-    shuffled = scratch / "ours-shuffled.ydk"
-    main = list(d.main)
-    random.Random(enemy_seed).shuffle(main)
-    Deck(name=d.name, main=main, extra=list(d.extra), side=list(d.side)).write_ydk(shuffled)
-    ours = breaking.deck_with_hand(shuffled, hand, scratch / "ours.ydk")
+    start = start or {}
+    if start.get("order"):
+        ours, _tail = ordered_deck(our_deck, start["order"], hand, scratch / "ours.ydk",
+                                   hand_first=False)
+    else:
+        # Your deck, shuffled by the enemy seed, with the hand at the bottom
+        # where the unshuffled side b draws it (breaking.deck_with_hand).
+        d = Deck.from_ydk(Path(our_deck))
+        shuffled = scratch / "ours-shuffled.ydk"
+        main = list(d.main)
+        random.Random(enemy_seed).shuffle(main)
+        Deck(name=d.name, main=main, extra=list(d.extra), side=list(d.side)).write_ydk(shuffled)
+        ours = breaking.deck_with_hand(shuffled, hand, scratch / "ours.ydk")
     tpl = breaking.template_vs(scratch / "tpl.yrpX", enemy_deck, ours,
-                               seed=enemy_seed, shuffle=False)
+                               seed=enemy_seed, shuffle=False,
+                               core_seed=start.get("core_seed"))
     args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
             "--hand", "|".join(map(str, ehand)), "--target", enemy_target] \
         + defender_args(our_respond)
@@ -576,7 +629,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     dh = trainer.deck_hash(deck_path)
     check_enemy_list(conn, dh, enemy_name, enemy_deck)
     rows = conn.execute(
-        "SELECT hand_index, hand, best_goal FROM trainer_hands "
+        "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands "
         "WHERE deck_hash=? AND best_goal IS NOT NULL ORDER BY hand_index",
         (dh,)).fetchall()
     if hands is not None:
@@ -606,15 +659,19 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             return dict(hit)
         scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / "t1"
         scratch.mkdir(parents=True, exist_ok=True)
+        # The hand is played in the duel the trainer solved it in: its deck
+        # order and core seed (trainer.hand_start). A hand the trainer never
+        # recorded keeps the file's order and the enemy seed's randomness.
+        start = trainer.hand_start(row.get("best_record"))
         if first:
             t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                        trainer.split_goal(json.loads(row["best_goal"]))[0],
                        eseed, scratch, ms, eseed,
-                       theirs)
+                       theirs, start=start)
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,
-                             ours_hand)
+                             ours_hand, start=start)
         rec = {"deck_hash": dh, "enemy": enemy_name,
                "hand_index": row["hand_index"], "board": 0,
                "enemy_seed": eseed, "ok": int(t1 is not None)}

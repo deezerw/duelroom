@@ -76,6 +76,30 @@ def deck_hash(deck_path):
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
+def hand_start(best_record):
+    """The duel a trained hand was solved in: {"order": the main deck's
+    order, hand at the tail (the list the solver dealt from), "core_seed":
+    the core's seed words}, from `best_record.start`; None without a record.
+
+    What `game.turn1` plays the hand on, so a game's turn 1 mills what the
+    trainer's line milled and shuffles as it shuffled. Measured 2026-11-13
+    on `imported` (Tearlaments): on the .ydk file order 23 of 24 best lines
+    break; on the trainer's order with another core seed 14 of 24 still do
+    (the in-line shuffles); on both, all 24 replay to their board."""
+    if not best_record:
+        return None
+    rec = json.loads(best_record) if isinstance(best_record, str) else best_record
+    try:
+        start = rec["start"]
+        main = [int(c) for c in start["decks"]["a"]["main"]]
+    except (KeyError, TypeError):
+        return None
+    if not main:
+        return None
+    seed = start.get("core_seed")
+    return {"order": main, "core_seed": [int(w) for w in seed] if seed else None}
+
+
 # --- stopping ----------------------------------------------------------------
 #
 # A running job cannot be cancelled from the web UI -- killing a solver

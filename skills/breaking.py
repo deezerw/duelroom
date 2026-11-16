@@ -95,19 +95,26 @@ def to_ydeck(deck, name=None):
 
 
 def template_vs(path, their_deck, our_deck, seed, config=None, cards=None,
-                scripts=None, shuffle=False):
+                scripts=None, shuffle=False, core_seed=None):
     """Write a solver template whose opponent is a real deck.
 
     Mirrors ``ygorl.solver.batch.make_template`` except that deck b is
     ours instead of PASSIVE_OPPONENT. The solver fills side a with the
     deck and hand it is given, so `their_deck` only supplies the name
     here; pass it for a readable replay header.
+
+    `core_seed`: the core's four seed words (default: expanded from
+    `seed`). `seed` still shuffles side b host-side when `shuffle`; the
+    core's own randomness -- in-line shuffles, coin flips -- follows the
+    words. The solver's synthetic start copies them from this header, so a
+    game's turn 1 can run on the trainer's duel exactly (`game.turn1`).
     """
     config = config or DuelConfig()
     theirs = to_ydeck(their_deck)
     ours = to_ydeck(our_deck)
     rep = Replay(
         seed=seed,
+        seed_words=[int(w) for w in core_seed] if core_seed else None,
         first=0,
         rule_flags=config.rule_flags,
         player=asdict(config.player),
