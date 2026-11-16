@@ -12,3 +12,4 @@ certs/key.pem
 certs/*.srl
 data/web.env
 assets/decks/deleted/
+data/backups/
