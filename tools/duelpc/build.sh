@@ -65,7 +65,10 @@ xorriso -osirrox on -indev "$STOCK" \
     -extract /casper/hwe-initrd "$NET/tftp/amd64/hwe-initrd" 2>/dev/null
 chmod 644 "$NET/tftp/amd64/hwe-vmlinuz" "$NET/tftp/amd64/hwe-initrd"
 ln -sf "$OUT" "$NET/http/duelpc.iso"
-cat > "$NET/tftp/amd64/grub/grub.cfg" <<CFG
+# Ubuntu's signed network GRUB reads (tftp)/grub/grub.cfg, at the TFTP
+# ROOT (measured in a VM: amd64/grub/ is never looked at), so absolute paths.
+mkdir -p "$NET/tftp/grub"
+cat > "$NET/tftp/grub/grub.cfg" <<CFG
 # Served to ANY machine that network-boots while netinstall.sh is on, so the
 # default is to leave: nothing installs unless someone picks it.
 set timeout=20
@@ -75,8 +78,8 @@ menuentry "Boot from local disk" {
 }
 menuentry "Install duelpc (Ubuntu Server, asks which disk)" {
 	set gfxpayload=keep
-	linux	hwe-vmlinuz ip=dhcp iso-url=http://$SERVER_IP:$HTTP_PORT/duelpc.iso cloud-config-url=/dev/null autoinstall ---
-	initrd	hwe-initrd
+	linux	/amd64/hwe-vmlinuz ip=dhcp iso-url=http://$SERVER_IP:$HTTP_PORT/duelpc.iso cloud-config-url=/dev/null autoinstall ---
+	initrd	/amd64/hwe-initrd
 }
 CFG
 cat > "$NET/dnsmasq.conf" <<CFG

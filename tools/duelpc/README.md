@@ -37,7 +37,8 @@ the PC's own console and sudo).
    network-boots by accident installs nothing.
 4. Installer: it asks only for the disk. Pick the **empty spare SSD**,
    "Use an entire disk". Check the size and model; the other one is
-   Windows. It downloads the 4 GB image first, so allow a few minutes.
+   Windows. It downloads the 4 GB image into RAM first (needs 12 GB+ of
+   RAM; an 8 GB machine runs out), so allow a few minutes.
 5. When it reboots: server `tools/duelpc/find_duelpc.sh` prints its IP
    and MAC. A DHCP reservation for that MAC on the router keeps the IP fixed.
 
