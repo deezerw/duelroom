@@ -765,6 +765,19 @@ correlates +0.14 with winning, interruption pieces +0.18, a learned ridge board 
 (intervals overlap). No case for a neural board evaluator from the games we have; the
 question needs many boards per hand against a fixed enemy hand (a duelpc-sized run).
 
+## Turn 1 through hand traps: aim for interruptions only? (measured 2026-11-17, no)
+
+Against Angelechy-Meta the enemy fires something in 236 of 240 of our turn 1s and the full
+goal is reached in 14. `tools/experiments/t1_backup_bench.py` (on duelpc) re-solved every
+position with the goal cut to its interruption cards and ran both boards through the turn-2
+kill check 3x on paired seeds. The cut goal is reached 122/240 (vs 14) and leaves more
+interruption pieces (1.68 vs 1.29), yet LOSES MORE: 73% vs 69% of 720 checks, worse in 64
+positions and better in 37 (sign test p = 0.009); still worse where it reached its goal
+(79% vs 72%). The full goal's other cards (bodies, follow-up, resources kept) are worth
+more than an extra interruption. Keep the full goal; do not re-run this as a backup goal.
+Mulcharmy Fuwalos resolving looks bad (lost on T2 0.59 vs 0.38) but within one enemy hand
+their T2 hand size does not predict losses (rho -0.01): it marks strong enemy hands.
+
 ## Known limitations
 
 Honest gaps, so nobody mistakes a limit for a result:

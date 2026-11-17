@@ -18,6 +18,11 @@ all interruptions (B == A) are skipped.
 Runs where `DUELROOM_DEVICE` says (skills/remote.py):
     DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/t1_backup_bench.py [limit]
 Resumable: results.jsonl under OUT.
+
+Result (2026-11-17, duelpc, 240 positions x 3): B reaches its goal 122/240
+(A 14) with more pieces (1.68 vs 1.29) but loses on turn 2 MORE, 73% vs 69%;
+B worse in 64 positions, better in 37 (sign p = 0.009), worse even where it
+reached its goal (79% vs 72%). Keep the full goal.
 """
 
 import json
