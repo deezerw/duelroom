@@ -723,6 +723,14 @@ impact or stops. Files: `results/games/<deck>/<enemy>/second/`.
 - First run (4 hands x 1 enemy hand, 60 s): no lethal, 5700 / 4800 / 5900 / 2500 damage;
   a game is ~1 search (their turn 1 is shared by the runs).
 
+**Why going second fell 63% -> 45% (traced 2026-11-17, `tools/experiments/t2_enemy_fired.py`):**
+not a regression. Since 8463177 the enemy answers with every card its deck can legally
+play from the hand, and Angelechy-Meta runs 9 Dominus traps that activate FROM THE HAND
+(no trap in its GY) -- the old HANDTRAPS-only list let it use 6 interaction cards. Dominus
+Impulse fires in 41% of our losses vs 20% of our wins, Purge 24% vs 11%, Spark 24% vs 15%.
+Same enemy opening hands as the old run, no more pieces on their boards; the old 63% also
+dropped 19% no_t1 games. The 45% is the honest number.
+
 ## Tests on another machine (Stage 10, `skills/remote.py`)
 
 The app, database and every decision stay on the server; another device only runs
