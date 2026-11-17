@@ -723,6 +723,32 @@ impact or stops. Files: `results/games/<deck>/<enemy>/second/`.
 - First run (4 hands x 1 enemy hand, 60 s): no lethal, 5700 / 4800 / 5900 / 2500 damage;
   a game is ~1 search (their turn 1 is shared by the runs).
 
+## Tests on another machine (Stage 10, `skills/remote.py`)
+
+The app, database and every decision stay on the server; another device only runs
+`combosolver`. **Path mirroring**: the device has the same user and the same absolute
+paths, so a solver command line built here runs there unchanged.
+
+- Devices: `remote.DEVICES` — `server` (4 games at once) and `duelpc` (the gaming PC's
+  Ubuntu SSD, `duelpc.local` over mDNS, 8 at once; installer `tools/duelpc/`).
+- Before a job: `remote.prepare` — SSH check, else Wake-on-LAN and wait up to 4 min;
+  rsync of the solver build + merged card DB + CardScripts (`STATIC`) when the stamp
+  differs (`~/.duelroom-solver-stamp` both sides).
+- Per solve (`game._solve` -> `_solve_remote`): push every file argument + the workdir
+  (`rsync -R` to `/`), run under `timeout -s KILL` THERE (a killed ssh client would
+  leave the solver running), pull the outdir. One multiplexed SSH connection
+  (`~/.ssh/cm-duelroom-*`); duelpc's sshd allows 64 sessions. Exit 255 -> wake + one
+  retry; lost again -> `DeviceDown` ends the run (games are resumable).
+- A job's device: `params.device` (`/games` "run on" picker, `games ... --device duelpc`).
+  The worker runs ONE LANE PER DEVICE, so the server and duelpc each run one job at once.
+- `device` is in the key of all four game tables and every read (old rows = `server`);
+  scratch folders are `<enemy>@<device>`. Different search speed = different measurement:
+  never pool devices. Measured 2026-11-17 (`tools/experiments/device_bench.py`, paired
+  turn-1 solves): duelpc at 8 at once searches ~1.08x the server's states/s per solve
+  at 4 at once — about the same strength, twice the games per hour.
+- Gotchas: duelpc's DHCP address can change (mDNS covers it); a reinstall changes its
+  host key -> `ssh-keygen -R duelpc.local`. It must be booted into Linux (GRUB default).
+
 ## Known limitations
 
 Honest gaps, so nobody mistakes a limit for a result:
