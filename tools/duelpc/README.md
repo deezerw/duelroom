@@ -35,9 +35,10 @@ the PC's own console and sudo).
    the **UEFI PXE / network** entry, then **Install duelpc**. The menu
    defaults to "Boot from local disk" after 20 s, so a machine that
    network-boots by accident installs nothing.
-4. Installer: it asks only for the disk. Pick the **empty spare SSD**,
-   "Use an entire disk". Check the size and model; the other one is
-   Windows. It downloads the 4 GB image into RAM first (needs 12 GB+ of
+4. Installer: it asks only for the disk ("Guided storage configuration").
+   Keep "Use an entire disk", then OPEN THE DISK DROPDOWN under it and pick
+   the **empty spare SSD**. It may preselect the Windows drive; check the size
+   and model. Done, then confirm the "destructive action" prompt. It downloads the 4 GB image into RAM first (needs 12 GB+ of
    RAM; an 8 GB machine runs out), so allow a few minutes.
 5. When it reboots: server `tools/duelpc/find_duelpc.sh` prints its IP
    and MAC. A DHCP reservation for that MAC on the router keeps the IP fixed.
@@ -47,6 +48,14 @@ the PC's own console and sudo).
 Copy `\\server\ssdshare\duelpc-install\duelpc-ubuntu-24.04.5.iso` to the
 PC, flash it with Rufus (DD mode if asked) or balenaEtcher, boot the
 stick, choose **Install duelpc**. Same disk question, same result.
+
+## Tested
+
+2026-11-17, in a Secure Boot UEFI VM: network boot -> unattended install
+-> SSH in with the server's key: hostname duelpc, kernel 7.0 (HWE),
+Wake-on-LAN set, sleep masked, Windows in the boot menu, password SSH
+off, the server's solver binary runs unchanged. USB image: menu boots,
+stops at the disk question.
 
 ## Living with two systems
 
