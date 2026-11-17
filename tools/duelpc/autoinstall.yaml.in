@@ -1,0 +1,57 @@
+# Ubuntu Server 24.04 autoinstall for "duelpc", the gaming PC's spare SSD,
+# which runs duelroom solver jobs for the server. Rendered by build.sh,
+# which fills in the password hash and SSH key (never committed).
+#
+# The ONE question the installer still asks is the disk (interactive
+# storage): the PC also holds the Windows drive, and nothing here may
+# guess which disk is safe to wipe. Pick the spare SSD, "Use an entire disk".
+autoinstall:
+  version: 1
+  interactive-sections:
+    - storage
+  refresh-installer:
+    update: false
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: America/New_York
+  identity:
+    hostname: duelpc
+    realname: deezer
+    username: deezer
+    password: "@PWHASH@"
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - "@SSHKEY@"
+  network:
+    version: 2
+    ethernets:
+      lan:
+        match:
+          name: "en*"
+        dhcp4: true
+        wakeonlan: true
+  packages:
+    - rsync
+    - ethtool
+    - avahi-daemon
+    - os-prober
+    - libsqlite3-0
+    - htop
+  # HWE kernel: 7800X3D boards often carry a Realtek 5GbE (RTL8126) that
+  # the 6.8 GA kernel has no driver for. Both keep the solver's fast page
+  # tracker (userfaultfd WP_ASYNC + PAGEMAP_SCAN, kernel 6.7+).
+  kernel:
+    flavor: hwe
+  updates: security
+  late-commands:
+    # Boot menu: list Windows too, 5 s to choose, remember a one-off
+    # `grub-reboot` choice (how the server sends it back to Windows).
+    - curtin in-target -- sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/; s/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/; s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /etc/default/grub
+    - curtin in-target -- sh -c 'echo GRUB_DISABLE_OS_PROBER=false >> /etc/default/grub'
+    - curtin in-target -- update-grub
+    # A job runner must not fall asleep in the middle of a test.
+    - curtin in-target -- systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+    - curtin in-target -- sh -c 'echo "duelpc installed $(date -u +%FT%TZ) from @RELEASE@" > /etc/duelpc-release'
