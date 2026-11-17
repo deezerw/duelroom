@@ -13,6 +13,9 @@ HOURS=3h
 rules=("67/udp" "69/udp" "4011/udp" "$PORT/tcp")
 
 ufw_rules() {  # $1 = allow | delete allow
+    # A booting PC asks for DHCP from 0.0.0.0, outside $LAN: measured
+    # 2026-11-17, the LAN-only rule dropped every request ("no valid offer").
+    sudo ufw $1 in on enp1s0 to any port 67 proto udp comment 'duelpc netinstall' >/dev/null 2>&1 || true
     for r in "${rules[@]}"; do
         sudo ufw $1 from $LAN to any port "${r%/*}" proto "${r#*/}" comment 'duelpc netinstall' >/dev/null 2>&1 || true
     done
@@ -38,6 +41,7 @@ stop)
     ;;
 _cleanup)  # runs as root when the 3 h timer (or stop) ends the PXE unit
     systemctl stop duelpc-http 2>/dev/null || true
+    ufw delete allow in on enp1s0 to any port 67 proto udp >/dev/null 2>&1 || true
     for r in "${rules[@]}"; do
         ufw delete allow from $LAN to any port "${r%/*}" proto "${r#*/}" >/dev/null 2>&1 || true
     done
