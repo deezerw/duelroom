@@ -62,6 +62,7 @@ Fairness rules (STAGE8/9):
 """
 
 import json
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -139,10 +140,16 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
     cmd += [str(a) for a in args]
     cmd += ["--solve-ms", str(ms), "--threads", str(threads),
             "--seed", str(seed), "--outdir", str(out)]
+    from . import remote
+    dev = remote.current()
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
-                           timeout=_hard_limit(ms))
+        if dev.remote:
+            r = _solve_remote(dev, cmd, {**ARENA_ENV, **(env_extra or {})},
+                              _hard_limit(ms), wd.path, out)
+        else:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
+                               timeout=_hard_limit(ms))
     except subprocess.TimeoutExpired as e:
         # Measured 2026-11-03: a 60 s turn-2 solve still running after 10.5 h,
         # ignoring SIGTERM, held one of the run's workers the whole time.
@@ -157,6 +164,19 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
     return {"solution": sols[0] if sols else None,
             "approach": appr[0] if appr else None,
             "log": log, "rc": r.returncode}
+
+
+def _solve_remote(dev, cmd, env, limit_s, workdir, outdir):
+    """One solve on another machine (skills/remote.py). A lost connection
+    wakes the device and retries ONCE; a second loss ends the job rather
+    than marking every remaining game failed one by one."""
+    from . import remote
+    env = {"YGORL_THIRD_PARTY": str(engine.THIRD_PARTY), **env}
+    try:
+        return remote.run(dev, cmd, env, limit_s, push_dirs=[workdir], outdir=outdir)
+    except remote.DeviceDown:
+        remote.ensure_up(dev)
+        return remote.run(dev, cmd, env, limit_s, push_dirs=[workdir], outdir=outdir)
 
 
 def _respond(codes):
@@ -597,29 +617,41 @@ def enemy_respond_codes(enemy_deck, cards=None):
     return respond_codes(enemy_deck, cards)
 
 
-def games_dir(name, enemy_name, first=True):
+def games_dir(name, enemy_name, first=True, device="server"):
     """Where a matchup's game files live (going second: a `second/` beside
-    the going-first hand folders)."""
-    root = GAMES / name / enemy_name
+    the going-first hand folders; another device: `<enemy>@<device>`, so two
+    machines on one matchup never share a scratch folder)."""
+    root = GAMES / name / (enemy_name if device == "server" else f"{enemy_name}@{device}")
     return root if first else root / "second"
 
 
 def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
-        runs=RUNS, solve_ms=None, workers=WORKERS, from_end=False, first=True,
-        say=print):
+        runs=RUNS, solve_ms=None, workers=None, from_end=False, first=True,
+        device=None, say=print):
     """Play every (hand, enemy hand, run) game, resumable, and return the
     summary. `hands` = trainer hand indices (default: every hand the trainer
     has a best goal for). `from_end` plays the list backwards: a second
     runner started beside a running one meets it in the middle instead of
     replaying its games (each game is skipped once stored). `first=False`
-    plays going second (module docstring)."""
+    plays going second (module docstring). `device`: where the searches
+    run (skills/remote.py; default this process's, i.e. the server), which
+    also keys every stored row: games from machines of different speed are
+    different measurements."""
     from concurrent.futures import ThreadPoolExecutor
 
     from ygorl.engine.duel import default_cards
 
     from . import db, trainer
 
+    from . import remote
+
     require()
+    if device:
+        os.environ[remote.ENV_VAR] = device     # _solve reads it per solve
+    dev = remote.current()
+    device = dev.name
+    workers = workers or dev.workers
+    remote.prepare(dev, log=say)
     ms = solve_ms or engine.SOLVE_MS
     enemy_deck = engine.ROOT / "assets" / "decks" / f"{enemy_name}.ydk"
     enemy_target = scenarios.target_for(enemy_name)
@@ -644,17 +676,18 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     ours_hand = respond_codes(deck_path, cards, extra=ours_extra)
     seeds = [1000 + k for k in range(enemy_hands)]
     first = int(bool(first))
-    root = games_dir(name, enemy_name, first)
+    root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
-        f"{ms // 1000} s per search, target {enemy_target}")
+        f"{ms // 1000} s per search, target {enemy_target}, on {device} "
+        f"({workers} at once)")
 
     def t1_for(row, eseed):
         conn = db.connect()   # one per thread: sqlite3 binds a connection to it
         hit = conn.execute(
             "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND "
-            "hand_index=? AND board=0 AND enemy_seed=? AND first=?",
-            (dh, enemy_name, row["hand_index"], eseed, first)).fetchone()
+            "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND device=?",
+            (dh, enemy_name, row["hand_index"], eseed, first, device)).fetchone()
         if hit:
             return dict(hit)
         scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / "t1"
@@ -687,22 +720,30 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO game_turn1 (deck_hash, enemy, "
-                "hand_index, board, enemy_seed, first, ok, start, prefix, reached, "
-                "pieces, enemy_hand, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (dh, enemy_name, rec["hand_index"], 0, eseed, first, rec["ok"],
+                "hand_index, board, enemy_seed, first, device, ok, start, prefix, reached, "
+                "pieces, enemy_hand, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (dh, enemy_name, rec["hand_index"], 0, eseed, first, device, rec["ok"],
                  rec.get("start"), rec.get("prefix"), rec.get("reached"),
                  rec.get("pieces"), rec.get("enemy_hand"), _now()))
         return rec
 
     failed = []
+    down = []       # the device went away: every queued game returns at once
 
     def guarded(fn):
         # One game's crash (a replay MSG_RETRY, a solver that died) must not
         # end an hours-long run. Nothing is recorded for it, so the next
-        # run retries it; the count is reported at the end.
+        # run retries it; the count is reported at the end. A device that
+        # stays unreachable after a wake is different: it ends the run.
         def call(*a):
+            if down:
+                return None
             try:
                 return fn(*a)
+            except remote.DeviceDown as e:
+                down.append(e)
+                say(f"  !! {device} is unreachable, stopping: {e}")
+                return None
             except Exception as e:  # noqa: BLE001 -- reported, then retried
                 failed.append(e)
                 say(f"  !! {fn.__name__} failed: {type(e).__name__}: {e}")
@@ -714,8 +755,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         conn = db.connect()
         done = conn.execute(
             "SELECT 1 FROM game_results WHERE deck_hash=? AND enemy=? AND "
-            "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND run=?",
-            (dh, enemy_name, row["hand_index"], eseed, first, k)).fetchone()
+            "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND device=? AND run=?",
+            (dh, enemy_name, row["hand_index"], eseed, first, device, k)).fetchone()
         if done:
             return None
         t1 = t1_for(row, eseed)
@@ -763,18 +804,18 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO game_results (deck_hash, enemy, "
-                "hand_index, board, enemy_seed, first, run, outcome, damage, "
+                "hand_index, board, enemy_seed, first, device, run, outcome, damage, "
                 "enemy_reached, line, seconds, created) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (dh, enemy_name, row["hand_index"], 0, eseed, first, k,
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (dh, enemy_name, row["hand_index"], 0, eseed, first, device, k,
                  out["outcome"], out.get("damage"), out.get("enemy_reached"),
                  out.get("line"), round(time.time() - t0, 1), _now()))
         if out["outcome"] != "no_t1":
             from . import impact, stops
             g = conn.execute(
                 "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
-                "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND run=?",
-                (dh, enemy_name, row["hand_index"], eseed, first, k)).fetchone()
+                "hand_index=? AND board=0 AND enemy_seed=? AND first=? AND device=? AND run=?",
+                (dh, enemy_name, row["hand_index"], eseed, first, device, k)).fetchone()
             for mod in (impact, stops):
                 try:    # the replay caches; a miss is read again by fill()
                     mod.record(conn, dh, name, enemy_name, g)
@@ -791,6 +832,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(lambda j: t1_safe(*j),
                     [(dict(r), e) for r in rows for e in seeds]))
+    if down:
+        raise down[0]
     check_shared_enemy_hands(conn, dh, enemy_name, first)
     t1_for = t1_safe          # `one` reaches turn 1 through this name too
     jobs = [(dict(r), e, k) for k in range(runs) for r in rows for e in seeds]
@@ -798,10 +841,12 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         jobs.reverse()
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(guarded(one), jobs))
+    if down:
+        raise down[0]
     if failed:
         say(f"{len(failed)} step(s) failed and were not recorded; run the "
             f"same command again to retry them")
-    return summary(conn, dh, enemy_name, runs * enemy_hands, first)
+    return summary(conn, dh, enemy_name, runs * enemy_hands, first, device)
 
 
 def check_enemy_list(conn, dh, enemy_name, enemy_deck):
@@ -839,7 +884,7 @@ def check_shared_enemy_hands(conn, dh, enemy_name, first=None):
     return by_seed
 
 
-def summary(conn, dh, enemy_name, games_per_hand=None, first=True):
+def summary(conn, dh, enemy_name, games_per_hand=None, first=True, device="server"):
     """Per hand: games, wins, win rate, tier (dud / near-dud / -).
 
     `games_per_hand` default: what the stored games imply (enemy hands
@@ -848,16 +893,16 @@ def summary(conn, dh, enemy_name, games_per_hand=None, first=True):
     if games_per_hand is None:
         r = conn.execute(
             "SELECT COUNT(DISTINCT enemy_seed) s, MAX(run) + 1 k FROM "
-            "game_results WHERE deck_hash=? AND enemy=? AND first=?",
-            (dh, enemy_name, int(bool(first)))).fetchone()
+            "game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=?",
+            (dh, enemy_name, int(bool(first)), device)).fetchone()
         games_per_hand = (r["s"] or 0) * (r["k"] or 0)
     out = []
     for r in conn.execute(
             "SELECT hand_index, COUNT(*) n, SUM(outcome='win') w, "
             "SUM(outcome='lost_t2') l, MAX(damage) best_dmg "
-            "FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+            "FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=? "
             "GROUP BY hand_index ORDER BY hand_index",
-            (dh, enemy_name, int(bool(first)))):
+            (dh, enemy_name, int(bool(first)), device)):
         n, w = r["n"], r["w"] or 0
         rate = w / n if n else 0.0
         complete = n >= games_per_hand

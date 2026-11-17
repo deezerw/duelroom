@@ -5731,3 +5731,91 @@ def test_template_vs_carries_the_trainers_core_seed(tmp_path):
     ra, rb = Replay.from_yrp(a), Replay.from_yrp(b)
     assert list(rb.core_seed) == words and list(ra.core_seed) != words
     assert rb.decks["b"]["main"] == ra.decks["b"]["main"]   # the enemy's shuffle is seed 1000's
+
+
+def test_game_tables_gain_device_and_old_games_are_the_servers(tmp_path):
+    """2026-11-17, STAGE10. Games can be searched on another machine; a
+    faster one searches more in the same budget, so `device` joins every
+    game table's key and the rows stored before it are the server's."""
+    import sqlite3
+    from skills import db
+
+    p = tmp_path / "old.db"
+    old = sqlite3.connect(p)
+    old.executescript(
+        "CREATE TABLE game_results (deck_hash TEXT NOT NULL, enemy TEXT NOT NULL, "
+        "hand_index INTEGER NOT NULL, board INTEGER NOT NULL, enemy_seed INTEGER NOT NULL, "
+        "first INTEGER NOT NULL DEFAULT 1, run INTEGER NOT NULL, outcome TEXT NOT NULL, "
+        "damage INTEGER, enemy_reached INTEGER, line TEXT, seconds REAL, created TEXT NOT NULL, "
+        "PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run));"
+        "INSERT INTO game_results VALUES ('d','e',0,0,1000,1,0,'win',NULL,0,'',1.0,'t');")
+    old.close()
+    conn = db.connect(p)
+    assert [tuple(r) for r in conn.execute(
+        "SELECT device, outcome FROM game_results")] == [("server", "win")]
+    # the same game on another device is another row, not a replacement
+    conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                 "enemy_seed, first, device, run, outcome, created) "
+                 "VALUES ('d','e',0,0,1000,1,'duelpc',0,'no_win','t')")
+    assert conn.execute("SELECT COUNT(*) FROM game_results").fetchone()[0] == 2
+    for t in ("game_turn1", "game_used", "game_stops"):
+        pk = [r[1] for r in conn.execute(f"PRAGMA table_info({t})") if r[5]]
+        assert "device" in pk, t
+
+
+def test_each_device_keeps_its_own_game_folders():
+    from skills import game
+    a = game.games_dir("deck", "Enemy", True)
+    b = game.games_dir("deck", "Enemy", True, "duelpc")
+    assert a != b and b.name == "Enemy@duelpc"
+    assert game.games_dir("deck", "Enemy", False, "duelpc") == b / "second"
+
+
+def test_worker_claims_jobs_per_device(tmp_path):
+    """One job at a time PER MACHINE: a duelpc job runs beside a server job,
+    and a non-games job is always the server's."""
+    from skills import db
+    from web import jobs
+
+    conn = db.connect(tmp_path / "t.db")
+    a = jobs.enqueue(conn, "games", "deck", enemy="E", device="duelpc")
+    b = jobs.enqueue(conn, "gate", "deck")
+    c = jobs.enqueue(conn, "games", "deck", enemy="E")
+    assert jobs.claim(conn, "server")["id"] == b
+    assert jobs.claim(conn, "duelpc")["id"] == a
+    assert jobs.claim(conn, "duelpc") is None
+    assert jobs.claim(conn, "server")["id"] == c
+    assert "--device" in jobs.KINDS["games"][0]("deck", {"enemy": "E", "device": "duelpc"})
+
+
+def test_remote_solve_mirrors_the_command(tmp_path, monkeypatch):
+    """A remote solve pushes every file argument and the workdir to the SAME
+    absolute paths, runs the identical command there under a remote kill
+    timer, and pulls the outdir back; a lost connection is DeviceDown."""
+    import subprocess
+    from skills import remote
+
+    ref = tmp_path / "ref.yrpX"
+    ref.write_text("x")
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        rc = 255 if "LOSE" in " ".join(argv) else 0
+        return subprocess.CompletedProcess(argv, rc, "out", "err")
+
+    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+    dev = remote.DEVICES["duelpc"]
+    out = tmp_path / "out"
+    r = remote.run(dev, ["/bin/solver", str(ref), "--seed", "7"], {"A": "1"}, 300,
+                   push_dirs=[tmp_path / "wd"], outdir=out)
+    assert r.returncode == 0 and r.stdout == "out"
+    push, ssh, pull = calls
+    assert push[0] == "rsync" and str(ref) in push and str(tmp_path / "wd") in push
+    assert push[-1].endswith(":/") and "-R" in push
+    line = ssh[-1]
+    assert "timeout -s KILL 300" in line and str(ref) in line and "A=1" in line
+    assert pull[-1] == f"{out}/" and pull[-2].endswith(f":{out}/")
+    calls.clear()
+    with pytest.raises(remote.DeviceDown):
+        remote.run(dev, ["/bin/solver", "LOSE"], {}, 300)

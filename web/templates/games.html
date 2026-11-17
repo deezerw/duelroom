@@ -52,14 +52,14 @@
   {% if not built %}
     <p style="margin:0">The game solver is not built yet. On the server:
       <code>tools/build_rooted_solver.sh</code></p>
-  {% elif job and job.state == 'running' %}
-    <p style="margin:0"><b>Playing now</b> (job
-      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>).
-      Results below fill in as each game finishes.</p>
-  {% elif job %}
-    <p style="margin:0">Queued as job
-      <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>
-      {% if running %}— job {{ running.id }} ({{ running.kind }}) runs first{% endif %}.</p>
+  {% endif %}
+  {% for job in active_jobs %}
+    <p style="margin:0 0 .4rem">{% if job.state == 'running' %}<b>Playing now on {{ job.device }}</b>{% else %}Queued on {{ job.device }}{% endif %}
+      (job <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>).
+      {% if job.state == 'running' %}Results below fill in as each game finishes.{% endif %}</p>
+  {% endfor %}
+  {% if not built %}
+  {% elif not devices %}
   {% elif not trained %}
     <p style="margin:0">Train this deck first — the games play each trained hand's
       best line as your turn 1. <a href="{{ url_for('views.train_view', name=name) }}">Train</a></p>
@@ -72,6 +72,8 @@
         <select name="enemy">{% for o in options %}<option>{{ o }}</option>{% endfor %}</select></label>
       <label>you go
         <select name="side"><option value="first">first</option><option value="second">second</option></select></label>
+      <label>run on
+        <select name="device">{% for d, label in devices %}<option value="{{ d }}">{{ label }}</option>{% endfor %}</select></label>
       <label>games per hand pairing <input type="number" name="runs" value="{{ runs }}" min="1" max="30"></label>
       <label>enemy hands <input type="number" name="enemy_hands" value="{{ enemy_hands }}" min="1" max="10"></label>
       <button class="primary">Play the games</button>
@@ -95,11 +97,11 @@
 </div>
 
 {% for e in enemies %}
-<div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}</h2>
+<div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}{% if e.device != 'server' %} · on {{ e.device }}{% endif %}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
 <div class="panel">
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
-     href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **({} if e.first else {'second': 1})) }}">▶ Watch latest game</a>
+     href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **e.watch_args) }}">▶ Watch latest game</a>
   {% if e.openings %}
   <div class="openings">Enemy opening hands (identical for every one of your hands):
     <ul>{% for seed, cards in e.openings %}<li><b>{{ loop.index }}</b> — {{ cards|join(', ') }}</li>{% endfor %}</ul>
@@ -128,7 +130,7 @@
             {% set tip %}enemy hand {{ g.enemy_seed - 999 }}, game {{ g.run + 1 }}: {{ g.outcome|replace('_', ' ') }}{% if g.damage %} ({{ g.damage }} damage){% endif %}{% endset %}
             {% if g.outcome == 'no_t1' %}<span class="dot no_t1" title="{{ tip }} — nothing to watch"></span>
             {% else %}<a class="dot {{ g.outcome }}" title="{{ tip }}"
-               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run, **({} if e.first else {'second': 1})) }}"></a>{% endif %}
+               href="{{ url_for('views.watch_game', name=name, enemy=e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run, **e.watch_args) }}"></a>{% endif %}
           {% endfor %}
         </div></td>
       </tr>

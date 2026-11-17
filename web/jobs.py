@@ -1,10 +1,11 @@
 """Queued solver work.
 
 Solver runs take minutes to hours and occupy 6 of 8 cores, so a web
-request cannot hold one and two must never run at once. The web app
-only ENQUEUES; `web/worker.py` is a single process that claims and runs
-jobs, which makes the one-at-a-time guarantee structural rather than a
-convention someone has to remember.
+request cannot hold one and two must never run at once ON ONE MACHINE.
+The web app only ENQUEUES; `web/worker.py` is a single process that
+claims and runs jobs, one at a time per device (a `games` job can run its
+searches on another machine, STAGE10.md), which makes the guarantee
+structural rather than a convention someone has to remember.
 
 The other thing this has to get right is partial state. The CLI shipped
 a bug where a half-written sweep was read as complete and reported one
@@ -55,7 +56,8 @@ KINDS = {
                  "starter test", "hours, stoppable"),
     "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
                               str(p.get("runs", 10)), str(p.get("enemy_hands", 3))]
-                + (["--second"] if p.get("second") else []),
+                + (["--second"] if p.get("second") else [])
+                + (["--device", p["device"]] if p.get("device") else []),
                 "finish the game vs a meta deck", "hours, resumable"),
 }
 
@@ -114,12 +116,19 @@ def cancel(conn, job_id):
 
 # --- worker side ---------------------------------------------------------
 
-def claim(conn):
-    """Take the oldest queued job. Single worker, so no contention."""
+def device_of(job):
+    """Where a job's searches run (skills/remote.py). Only `games` jobs can
+    go elsewhere; everything else is the server's."""
+    return json.loads(job["params"] or "{}").get("device") or "server"
+
+
+def claim(conn, device="server"):
+    """Take the oldest queued job for `device`. One worker thread per
+    device (web/worker.py), so no contention."""
     with conn:
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE state='queued' ORDER BY id LIMIT 1"
-        ).fetchone()
+        row = next((r for r in conn.execute(
+            "SELECT * FROM jobs WHERE state='queued' ORDER BY id")
+            if device_of(r) == device), None)
         if not row:
             return None
         conn.execute("UPDATE jobs SET state='running', started_at=? WHERE id=?",

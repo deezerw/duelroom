@@ -2248,15 +2248,28 @@ def _print_games(rows, first=True):
               + tier + ("" if r["complete"] else "  (incomplete)"))
 
 
+def _device_arg(args):
+    """(`--device NAME` value or None, args without it)."""
+    args = list(args)
+    if "--device" not in args:
+        return None, args
+    i = args.index("--device")
+    dev = args[i + 1] if i + 1 < len(args) else ""
+    del args[i:i + 2]
+    return dev, args
+
+
 def _sides(conn, dh, args):
-    """[(enemy, first)] a deck has games for, narrowed to `args[0]` (an
-    enemy) and `--first` / `--second` when given."""
+    """[(enemy, first, device)] a deck has games for, narrowed to `args[0]`
+    (an enemy), `--first` / `--second` and `--device NAME` when given."""
+    device, args = _device_arg(args)
     side = (1 if "--first" in args else 0 if "--second" in args else None)
     args = [a for a in args if a not in ("--first", "--second")]
-    rows = conn.execute("SELECT DISTINCT enemy, first FROM game_results WHERE "
-                        "deck_hash=? ORDER BY enemy, first DESC", (dh,)).fetchall()
-    return [(e, f) for e, f in rows
-            if (not args or e == args[0]) and (side is None or f == side)]
+    rows = conn.execute("SELECT DISTINCT enemy, first, device FROM game_results WHERE "
+                        "deck_hash=? ORDER BY enemy, first DESC, device", (dh,)).fetchall()
+    return [(e, f, d) for e, f, d in rows
+            if (not args or e == args[0]) and (side is None or f == side)
+            and (device is None or d == device)]
 
 
 def cmd_starters(conn, args):
@@ -2335,10 +2348,11 @@ def cmd_impact(conn, args):
     if not sides:
         print(f"no games played for {name} yet: games {name} <enemy>")
         return
-    for enemy, first in sides:
-        impact.fill(conn, dh, name, enemy, say=print, first=first)
-        rows = impact.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first)
-        print(f"\n{name} vs {enemy} going {'first' if first else 'second'}: "
+    for enemy, first, device in sides:
+        impact.fill(conn, dh, name, enemy, say=print, first=first, device=device)
+        rows = impact.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first,
+                             device=device)
+        print(f"\n{name} vs {enemy} going {'first' if first else 'second'} on {device}: "
               f"{rows[0]['games'] if rows else 0} game(s) read")
         for r in rows:
             nm = (card_db.resolve(conn, r["code"]) or {"name": str(r["code"])})["name"]
@@ -2371,10 +2385,11 @@ def cmd_stops(conn, args):
     score = lambda r: ("every game" if r["status"] == "every game" else
                        f"{r['impact'] * 100:+4.0f} ±{r['ci'] * 100:3.0f}")
     flag = lambda r: "  few games" if r["status"] == "few games" else ""
-    for enemy, first in sides:
-        stops.fill(conn, dh, name, enemy, say=print, first=first)
-        res = stops.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first)
-        print(f"\n{name} vs {enemy} going {'first' if first else 'second'}: "
+    for enemy, first, device in sides:
+        stops.fill(conn, dh, name, enemy, say=print, first=first, device=device)
+        res = stops.scores(conn, dh, enemy, own=impact.deck_codes(path), first=first,
+                           device=device)
+        print(f"\n{name} vs {enemy} going {'first' if first else 'second'} on {device}: "
               f"{res['games']} game(s) read")
         print("\n  THEIR cards -- win-rate points when stopped vs when it went through")
         for r in res["theirs"]:
@@ -2395,11 +2410,19 @@ def cmd_stops(conn, args):
 
 def cmd_games(conn, args):
     """`games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N]
-    [--from-end]` / `games <deck> <enemy> status [--second]`: your turn 1,
+    [--from-end] [--device NAME]` / `games <deck> <enemy> status [--second]
+    [--device NAME]`: your turn 1,
     their turn 2, your turn 3 -- does the hand win by then? `--second`: their
     turn 1, your turn 2 -- do you kill through their board? `--from-end`
     plays the list backwards, so a second runner beside a running one takes
-    the games it has not reached."""
+    the games it has not reached. `--device`: run the searches on another
+    machine (skills/remote.py; default the server)."""
+    from skills import remote
+
+    device, args = _device_arg(args)
+    if device is not None and device not in remote.DEVICES:
+        print(f"no such device: {device} (known: {', '.join(remote.DEVICES)})")
+        return
     if len(args) < 2:
         print("usage: games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N] [--from-end] | games <deck> <enemy> status [--second]")
         return
@@ -2411,7 +2434,7 @@ def cmd_games(conn, args):
     from_end = "--from-end" in rest
     first = "--second" not in rest
     rest = [a for a in rest if a not in ("--from-end", "--second", "--first")]
-    workers = game.WORKERS
+    workers = None      # the device's own default
     if "--workers" in rest:
         i = rest.index("--workers")
         try:
@@ -2428,7 +2451,7 @@ def cmd_games(conn, args):
         return
     if rest and rest[0] == "status":
         _print_games(game.summary(conn, trainer.deck_hash(path), enemy,
-                                  first=first), first)
+                                  first=first, device=device or "server"), first)
         return
     try:
         runs = int(rest[0]) if rest else game.RUNS
@@ -2439,10 +2462,11 @@ def cmd_games(conn, args):
     if runs < 1 or ehands < 1:
         print("runs and enemy hands must be at least 1")
         return
-    _warn_if_busy("these games")
+    if not device or device == "server":
+        _warn_if_busy("these games")
     _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
                           enemy_hands=ehands, workers=workers, from_end=from_end,
-                          first=first), first)
+                          first=first, device=device), first)
 
 
 COMMANDS = {

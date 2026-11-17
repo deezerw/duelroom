@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS game_turn1 (
     board       INTEGER NOT NULL,       -- which kept board (0 = the best)
     enemy_seed  INTEGER NOT NULL,       -- fixes the enemy's hand
     first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
+    device      TEXT NOT NULL DEFAULT 'server',  -- where it was searched (skills/remote.py)
     ok          INTEGER NOT NULL,       -- 0: no line at all came back
     start       TEXT,                   -- .yrpX paths of the closed turn 1
     prefix      TEXT,
@@ -254,7 +255,7 @@ CREATE TABLE IF NOT EXISTS game_turn1 (
     pieces      TEXT,                   -- JSON interruption codes on turn 1's board
     enemy_hand  TEXT,                   -- JSON sorted codes: the fairness check
     created     TEXT NOT NULL,
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device)
 );
 
 CREATE TABLE IF NOT EXISTS game_results (
@@ -264,6 +265,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     board         INTEGER NOT NULL,
     enemy_seed    INTEGER NOT NULL,
     first         INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
+    device      TEXT NOT NULL DEFAULT 'server',  -- where it was searched (skills/remote.py)
     run           INTEGER NOT NULL,
     outcome       TEXT NOT NULL,        -- win / no_win / lost_t2 / no_t1
     damage        INTEGER,              -- best damage on turn 3 when no win
@@ -271,7 +273,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     line          TEXT,                 -- replay of the deciding turn
     seconds       REAL,
     created       TEXT NOT NULL,
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
 );
 
 -- What you summoned or activated in each game (skills/impact.py), read once
@@ -284,10 +286,11 @@ CREATE TABLE IF NOT EXISTS game_used (
     board       INTEGER NOT NULL,
     enemy_seed  INTEGER NOT NULL,
     first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
+    device      TEXT NOT NULL DEFAULT 'server',  -- where it was searched (skills/remote.py)
     run         INTEGER NOT NULL,
     line        TEXT NOT NULL,          -- '' when the game had none
     used        TEXT,                   -- JSON {code: first turn}; NULL = unreadable
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
 );
 
 -- What you stopped of the enemy's in each game (skills/stops.py), read once
@@ -300,10 +303,11 @@ CREATE TABLE IF NOT EXISTS game_stops (
     board       INTEGER NOT NULL,
     enemy_seed  INTEGER NOT NULL,
     first       INTEGER NOT NULL DEFAULT 1,  -- 1: you went first, 0: second
+    device      TEXT NOT NULL DEFAULT 'server',  -- where it was searched (skills/remote.py)
     run         INTEGER NOT NULL,
     line        TEXT NOT NULL,          -- '' when the game had none
     stops       TEXT,                   -- NULL = unreadable
-    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, run)
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
 );
 
 CREATE TABLE IF NOT EXISTS trainer_prefs (
@@ -340,6 +344,7 @@ def connect(path=None):
     conn.execute("PRAGMA journal_mode = WAL")
     _migrate_card_values(conn)
     _migrate_game_first(conn)
+    _migrate_game_device(conn)
     conn.executescript(SCHEMA)
     return conn
 
@@ -373,6 +378,28 @@ def _migrate_game_first(conn):
         for t in old:
             cols = ", ".join(r[1] for r in conn.execute(f"PRAGMA table_info({t}_old)"))
             conn.execute(f"INSERT INTO {t} ({cols}, first) SELECT {cols}, 1 FROM {t}_old")
+            conn.execute(f"DROP TABLE {t}_old")
+
+
+def _migrate_game_device(conn):
+    """The game tables had no `device` (2026-11-17, STAGE10: tests on other
+    machines): every game stored before then was searched on the server. It
+    joins the key -- a faster machine searches more in the same budget, so
+    its games are a different measurement, never pooled -- so the tables
+    are rebuilt like `_migrate_game_first`."""
+    tables = ("game_turn1", "game_results", "game_used", "game_stops")
+    old = [t for t in tables
+           if (cols := [r[1] for r in conn.execute(f"PRAGMA table_info({t})")])
+           and "device" not in cols]
+    if not old:
+        return
+    with conn:
+        for t in old:
+            conn.execute(f"ALTER TABLE {t} RENAME TO {t}_old")
+        conn.executescript(SCHEMA)
+        for t in old:
+            cols = ", ".join(r[1] for r in conn.execute(f"PRAGMA table_info({t}_old)"))
+            conn.execute(f"INSERT INTO {t} ({cols}, device) SELECT {cols}, 'server' FROM {t}_old")
             conn.execute(f"DROP TABLE {t}_old")
 
 

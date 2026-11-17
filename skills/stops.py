@@ -129,22 +129,22 @@ def record(conn, dh, name, enemy, g):
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO game_stops (deck_hash, enemy, hand_index, "
-            "board, enemy_seed, first, run, line, stops) VALUES (?,?,?,?,?,?,?,?,?)",
+            "board, enemy_seed, first, device, run, line, stops) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (dh, enemy, g["hand_index"], g["board"], g["enemy_seed"], g["first"],
-             g["run"],
+             g["device"], g["run"],
              g["line"] or "", None if got is None else json.dumps(got)))
     return got
 
 
-def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True):
+def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True, device="server"):
     """Cache every game not read yet (or re-recorded since). With
     `budget_s`, stop after that long. Returns how many are still unread."""
     todo = conn.execute(
         "SELECT g.* FROM game_results g LEFT JOIN game_stops s USING "
-        "(deck_hash, enemy, hand_index, board, enemy_seed, first, run) "
-        "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.outcome != 'no_t1' "
+        "(deck_hash, enemy, hand_index, board, enemy_seed, first, device, run) "
+        "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.device=? AND g.outcome != 'no_t1' "
         "AND (s.deck_hash IS NULL OR s.line != COALESCE(g.line, ''))",
-        (dh, enemy, int(bool(first)))).fetchall()
+        (dh, enemy, int(bool(first)), device)).fetchall()
     t0 = time.monotonic()
     for i, g in enumerate(todo):
         if budget_s is not None and time.monotonic() - t0 > budget_s:
@@ -157,24 +157,24 @@ def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True):
             with conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO game_stops (deck_hash, enemy, hand_index, "
-                    "board, enemy_seed, first, run, line, stops) "
-                    "VALUES (?,?,?,?,?,?,?,?,NULL)",
+                    "board, enemy_seed, first, device, run, line, stops) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,NULL)",
                     (dh, enemy, g["hand_index"], g["board"], g["enemy_seed"],
-                     g["first"], g["run"], g["line"] or ""))
+                     g["first"], g["device"], g["run"], g["line"] or ""))
     return 0
 
 
-def _games(conn, dh, enemy, own, first=True):
+def _games(conn, dh, enemy, own, first=True, device="server"):
     """[(stratum, won, played, stops)] for every read game. Stops BY a card
     not in your list (theirs, while you controlled it) are dropped; stops OF
     one of your own cards they had taken are dropped too."""
     out = []
     for r in conn.execute(
             "SELECT g.hand_index, g.enemy_seed, g.outcome, s.stops FROM game_results g "
-            "JOIN game_stops s USING (deck_hash, enemy, hand_index, board, enemy_seed, first, run) "
-            "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.outcome != 'no_t1' "
+            "JOIN game_stops s USING (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run) "
+            "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.device=? AND g.outcome != 'no_t1' "
             "AND s.stops IS NOT NULL AND s.line = COALESCE(g.line, '')",
-            (dh, enemy, int(bool(first)))):
+            (dh, enemy, int(bool(first)), device)):
         d = json.loads(r["stops"])
         played = {int(k): v for k, v in d["played"].items()}
         stops = [(t, kind, by, code) for t, kind, by, code in d["stops"]
@@ -187,7 +187,7 @@ def _games(conn, dh, enemy, own, first=True):
     return out
 
 
-def scores(conn, dh, enemy, min_side=impact.MIN_SIDE, own=None, first=True):
+def scores(conn, dh, enemy, min_side=impact.MIN_SIDE, own=None, first=True, device="server"):
     """{"games": n, "theirs": [...], "yours": [...]}.
 
     theirs -- one row per enemy card you stopped at least once:
@@ -201,7 +201,7 @@ def scores(conn, dh, enemy, min_side=impact.MIN_SIDE, own=None, first=True):
       `impact` = games where it stopped something vs games where it did not.
 
     `own`: your deck's card codes (`impact.deck_codes`)."""
-    games = _games(conn, dh, enemy, own, first)
+    games = _games(conn, dh, enemy, own, first, device)
     strata = defaultdict(list)
     for s, won, played, stops in games:
         strata[s].append((won, played, stops))

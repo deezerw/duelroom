@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer, game, impact, stops,
+                    trainer, game, impact, remote, stops,
                     report as report_mod, scenarios, stats)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -503,10 +503,15 @@ def _enemy_decks(name):
     return out
 
 
-def _games_job(c, name):
+def _job_device(job):
+    return json.loads(job["params"] or "{}").get("device") or "server"
+
+
+def _games_jobs(c, name):
+    """Queued or running games jobs for this deck: one per device at most."""
     return c.execute(
         "SELECT * FROM jobs WHERE kind='games' AND deck=? "
-        "AND state IN ('queued','running') ORDER BY id LIMIT 1", (name,)).fetchone()
+        "AND state IN ('queued','running') ORDER BY id", (name,)).fetchall()
 
 
 @bp.route("/games")
@@ -524,48 +529,60 @@ def games_view(name=None):
     own = impact.deck_codes(path)
     nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
     enemies = []
-    for enemy, first in c.execute("SELECT DISTINCT enemy, first FROM game_results "
-                                  "WHERE deck_hash=? ORDER BY enemy, first DESC", (dh,)).fetchall():
+    # One section per (enemy, side, device): a faster machine searches more
+    # in the same budget, so its games are never pooled with the server's.
+    for enemy, first, device in c.execute(
+            "SELECT DISTINCT enemy, first, device FROM game_results WHERE deck_hash=? "
+            "ORDER BY enemy, first DESC, device = 'server' DESC, device", (dh,)).fetchall():
         games = {}
         for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND "
-                           "enemy=? AND first=? ORDER BY enemy_seed, run",
-                           (dh, enemy, first)):
+                           "enemy=? AND first=? AND device=? ORDER BY enemy_seed, run",
+                           (dh, enemy, first, device)):
             games.setdefault(g["hand_index"], []).append(dict(g))
         rows = []
-        for r in game.summary(c, dh, enemy, first=first):
+        for r in game.summary(c, dh, enemy, first=first, device=device):
             h = hand_rows.get(r["hand_index"])
             rows.append({**r, "hand": h["hand"] if h else [],
                          "games_list": games.get(r["hand_index"], [])})
         openings = {}
         for t in c.execute("SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE "
-                           "deck_hash=? AND enemy=? AND first=? AND ok=1",
-                           (dh, enemy, first)):
+                           "deck_hash=? AND enemy=? AND first=? AND device=? AND ok=1",
+                           (dh, enemy, first, device)):
             openings[t["enemy_seed"]] = [nm(x) for x in json.loads(t["enemy_hand"] or "[]")]
         # Reading a game's replay takes ~0.05 s; a page load reads at most
         # a few seconds' worth, so a big backlog fills over a few visits
         # (or at once with `daemon.py impact`).
-        unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S, first=first)
+        unread = impact.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S, first=first,
+                             device=device)
         cards = [{**r, "name": nm(r["code"])}
-                 for r in impact.scores(c, dh, enemy, own=own, first=first)]
+                 for r in impact.scores(c, dh, enemy, own=own, first=first, device=device)]
         unread_stops = stops.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S,
-                                  first=first)
+                                  first=first, device=device)
         snm = lambda code: ("a field effect" if code == stops.FIELD
                             else "a set card" if not code else nm(code))
-        st = stops.scores(c, dh, enemy, own=own, first=first)
+        st = stops.scores(c, dh, enemy, own=own, first=first, device=device)
         theirs = [{**r, "name": snm(r["code"]),
                    "by": [(snm(b), n) for b, n in r["by"]]} for r in st["theirs"]]
         yours = [{**r, "name": snm(r["code"]),
                   "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
-        enemies.append({"name": enemy, "first": first, "rows": rows,
+        enemies.append({"name": enemy, "first": first, "device": device,
+                        "watch_args": {**({} if first else {"second": 1}),
+                                       **({} if device == "server" else {"device": device})},
+                        "device_label": remote.DEVICES[device].label
+                        if device in remote.DEVICES else device,
+                        "rows": rows,
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours,
                         "unread_stops": unread_stops})
+    active_jobs = [{**dict(j), "device": _job_device(j)} for j in _games_jobs(c, name)]
+    busy = {j["device"] for j in active_jobs}
     return render_template(
         "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
         trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
                           "AND best_goal IS NOT NULL", (dh,)).fetchone()[0],
-        job=_games_job(c, name), running=jobs.active(c),
+        active_jobs=active_jobs, running=jobs.active(c),
+        devices=[(d.name, d.label) for d in remote.DEVICES.values() if d.name not in busy],
         runs=game.RUNS, enemy_hands=game.ENEMY_HANDS,
         near_dud=int(game.NEAR_DUD_RATE * 100), solve_s=engine.SOLVE_MS // 1000,
         otk_s=game.OTK_MS // 1000, min_side=impact.MIN_SIDE,
@@ -583,16 +600,19 @@ def games_start(name):
     if enemy not in _enemy_decks(name):
         flash("Pick an enemy deck.")
         return redirect(url_for("views.games_view", name=name))
-    if _games_job(c, name):
-        flash("Games for this deck are already queued or running.")
+    device = request.form.get("device") or "server"
+    if device not in remote.DEVICES:
+        abort(400)
+    if any(_job_device(j) == device for j in _games_jobs(c, name)):
+        flash(f"Games for this deck are already queued or running on {device}.")
         return redirect(url_for("views.games_view", name=name))
     runs = min(max(request.form.get("runs", type=int) or game.RUNS, 1), 30)
     ehands = min(max(request.form.get("enemy_hands", type=int) or game.ENEMY_HANDS, 1), 10)
     second = request.form.get("side") == "second"
     job_id = jobs.enqueue(c, "games", deck=name, enemy=enemy, runs=runs,
-                          enemy_hands=ehands, second=second)
+                          enemy_hands=ehands, second=second, device=device)
     flash(f"Games against {enemy} going {'second' if second else 'first'} "
-          f"queued as job {job_id}.")
+          f"on {device} queued as job {job_id}.")
     return redirect(url_for("views.games_view", name=name))
 
 
@@ -605,14 +625,16 @@ def watch_game_latest(name, enemy):
     if not path or not path.exists():
         abort(404)
     first = 0 if request.args.get("second") else 1
+    device = request.args.get("device") or "server"
     for g in conn().execute(
             "SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND "
-            "outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
-            (trainer.deck_hash(path), enemy, first)):
+            "device=? AND outcome != 'no_t1' ORDER BY created DESC, rowid DESC LIMIT 20",
+            (trainer.deck_hash(path), enemy, first, device)):
         if impact.source(name, enemy, g):
             return redirect(url_for("views.watch_game", name=name, enemy=enemy,
                                     hand=g["hand_index"], eseed=g["enemy_seed"],
-                                    run=g["run"], **({} if first else {"second": 1})))
+                                    run=g["run"], **({} if first else {"second": 1}),
+                                    **({} if device == "server" else {"device": device})))
     flash(f"No game against {enemy} to watch yet.")
     return redirect(url_for("views.games_view", name=name))
 
@@ -631,9 +653,10 @@ def watch_game(name, enemy, hand, eseed, run):
         abort(404)
     dh = trainer.deck_hash(path)
     first = 0 if request.args.get("second") else 1
+    device = request.args.get("device") or "server"
     g = c.execute("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND "
-                  "hand_index=? AND enemy_seed=? AND first=? AND run=?",
-                  (dh, enemy, hand, eseed, first, run)).fetchone()
+                  "hand_index=? AND enemy_seed=? AND first=? AND device=? AND run=?",
+                  (dh, enemy, hand, eseed, first, device, run)).fetchone()
     if not g:
         abort(404)
     src = impact.source(name, enemy, g)   # no lethal-turn line: up to that turn

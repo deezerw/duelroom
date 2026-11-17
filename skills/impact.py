@@ -87,7 +87,7 @@ def source(name, enemy, g):
     going second)."""
     if g["line"] and Path(g["line"]).exists():
         return g["line"]
-    d = game.games_dir(name, enemy, g["first"]) / f"h{g['hand_index']}" / f"e{g['enemy_seed']}"
+    d = game.games_dir(name, enemy, g["first"], g["device"]) / f"h{g['hand_index']}" / f"e{g['enemy_seed']}"
     before = (d / f"run{g['run']}" / "t2" / "prefix.yrpX" if g["first"]
               else d / "t1" / "t1" / "prefix.yrpX")
     return str(before) if before.exists() else None
@@ -100,23 +100,23 @@ def record(conn, dh, name, enemy, g):
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO game_used (deck_hash, enemy, hand_index, "
-            "board, enemy_seed, first, run, line, used) VALUES (?,?,?,?,?,?,?,?,?)",
+            "board, enemy_seed, first, device, run, line, used) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (dh, enemy, g["hand_index"], g["board"], g["enemy_seed"], g["first"],
-             g["run"],
+             g["device"], g["run"],
              g["line"] or "", None if used is None else
              json.dumps({str(k): v for k, v in used.items()})))
     return used
 
 
-def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True):
+def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True, device="server"):
     """Cache every game not read yet (or re-recorded since). With
     `budget_s`, stop after that long. Returns how many are still unread."""
     todo = conn.execute(
         "SELECT g.* FROM game_results g LEFT JOIN game_used u USING "
-        "(deck_hash, enemy, hand_index, board, enemy_seed, first, run) "
-        "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.outcome != 'no_t1' "
+        "(deck_hash, enemy, hand_index, board, enemy_seed, first, device, run) "
+        "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.device=? AND g.outcome != 'no_t1' "
         "AND (u.deck_hash IS NULL OR u.line != COALESCE(g.line, ''))",
-        (dh, enemy, int(bool(first)))).fetchall()
+        (dh, enemy, int(bool(first)), device)).fetchall()
     t0 = time.monotonic()
     for i, g in enumerate(todo):
         if budget_s is not None and time.monotonic() - t0 > budget_s:
@@ -129,10 +129,10 @@ def fill(conn, dh, name, enemy, budget_s=None, say=None, first=True):
             with conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO game_used (deck_hash, enemy, hand_index, "
-                    "board, enemy_seed, first, run, line, used) "
-                    "VALUES (?,?,?,?,?,?,?,?,NULL)",
+                    "board, enemy_seed, first, device, run, line, used) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,NULL)",
                     (dh, enemy, g["hand_index"], g["board"], g["enemy_seed"],
-                     g["first"], g["run"], g["line"] or ""))
+                     g["first"], g["device"], g["run"], g["line"] or ""))
     return 0
 
 
@@ -172,7 +172,7 @@ def compare(strata, min_side=MIN_SIDE):
             "no_win": w_n / n_n if n_n else None, "status": status}
 
 
-def scores(conn, dh, enemy, min_side=MIN_SIDE, own=None, first=True):
+def scores(conn, dh, enemy, min_side=MIN_SIDE, own=None, first=True, device="server"):
     """One row per card you used in any game against `enemy`:
 
     {code, games, used, impact, ci, compared, used_win, not_win, turn, status}
@@ -192,10 +192,10 @@ def scores(conn, dh, enemy, min_side=MIN_SIDE, own=None, first=True):
     games = []
     for r in conn.execute(
             "SELECT g.hand_index, g.enemy_seed, g.outcome, u.used FROM game_results g JOIN "
-            "game_used u USING (deck_hash, enemy, hand_index, board, enemy_seed, first, run) "
-            "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.outcome != 'no_t1' "
+            "game_used u USING (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run) "
+            "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.device=? AND g.outcome != 'no_t1' "
             "AND u.used IS NOT NULL AND u.line = COALESCE(g.line, '')",
-            (dh, enemy, int(bool(first)))):
+            (dh, enemy, int(bool(first)), device)):
         used = {int(k): v for k, v in json.loads(r["used"]).items()}
         if own is not None:
             used = {k: v for k, v in used.items() if k in own}
