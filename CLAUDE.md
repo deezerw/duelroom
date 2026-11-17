@@ -757,6 +757,14 @@ paths, so a solver command line built here runs there unchanged.
 - Gotchas: duelpc's DHCP address can change (mDNS covers it); a reinstall changes its
   host key -> `ssh-keygen -R duelpc.local`. It must be booted into Linux (GRUB default).
 
+## A learned board value? (measured 2026-11-17)
+
+`tools/experiments/board_value.py`: on the solver's real choice (boards of ONE hand, enemy
+hand's difficulty removed, 240 going-first boards / 2400 games) "target cards placed"
+correlates +0.14 with winning, interruption pieces +0.18, a learned ridge board value +0.07
+(intervals overlap). No case for a neural board evaluator from the games we have; the
+question needs many boards per hand against a fixed enemy hand (a duelpc-sized run).
+
 ## Known limitations
 
 Honest gaps, so nobody mistakes a limit for a result:
