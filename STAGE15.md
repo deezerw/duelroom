@@ -30,4 +30,8 @@ answer is PICKED, not in the search itself.
    *Counted 2026-11-18:* S:P's effect was used in 26 of the 240 stored turn 1s and banished
    one of OUR cards in 16 (7%; e.g. h0/e1001, h14/e1005, h16/e1009). Real but second to the
    pick; fix after step 2.
+   **Done 2026-11-18 (user asked): patch 0007 `--no-self-target`**, `game.NO_SELF_TARGET`
+   on our turn 1 and lethal turns. S:P's summon banish must take an opponent's card (none ->
+   not activated); its quick effect (until the End Phase) stays legal. Stored games keep the
+   old behaviour until re-played.
 4. Then the enemy's real goals (train its 10 hands), and re-play everything.

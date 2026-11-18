@@ -678,6 +678,13 @@ and is dead without it. **Fixed 2026-11-18 at the user's request** (`drill.NEEDS
 and `game._pieces` counts only live pieces (a bare Desirae neither). Bests re-scored: hands
 0, 1, 2, 5, 6 lost one interruption each; re-trained 2026-11-18.
 
+**Patch 0007 (2026-11-18), `--no-self-target`:** at the searcher's single-pick target prompt
+of a listed card's effect (its link is already on the chain there), picks of only its own
+cards are dropped. `game.NO_SELF_TARGET = (S:P Little Knight,)` on our turn 1 and lethal turns:
+its summon banish took our own Engraver from the GY in 16 of 240 turn 1s. `game._solve` now
+raises on any non-zero solver exit (a crash is never a "no win"), and `remote.run` tells a
+remote crash (ssh 255, device answering) from a lost device.
+
 ### Turn 1 in the trainer's duel (2026-11-13)
 
 Asked to keep making the AI play smarter. Our turn 1 reached its trained goal in 39 of 237
