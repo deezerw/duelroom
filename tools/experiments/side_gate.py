@@ -37,7 +37,11 @@ def main():
         print(f"{c['name']}: {c['hands']} hands, {c['hands_touched']} touched, "
               f"{c['goals_changed']} goals changed", flush=True)
     device = remote.current().name
-    for cfg, first in ((blank, True), (blank, False), (storm, False)):
+    # The main deck's own games are part of (a): runs 0..1 of the same
+    # pairings, re-played where they are missing (2026-11-18: the going-first
+    # games of hands whose goal opens "@hand" were deleted, turn 3 was broken).
+    base = {"name": BASE, "path": side.deck_file(BASE)}
+    for cfg, first in ((base, True), (blank, True), (blank, False), (storm, False)):
         game.run(conn, cfg["path"], cfg["name"], ENEMY, enemy_hands=ENEMY_HANDS,
                  runs=side.RUNS, first=first, device=device)
     summary()
@@ -51,7 +55,12 @@ def progress():
                          "best_goal IS NOT NULL",
                          (trainer.deck_hash(side.deck_file(BASE)),)).fetchone()[0]
     per = hands * ENEMY_HANDS * side.RUNS
-    parts = []
+    main_n = conn.execute(
+        "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=1 "
+        "AND enemy_seed >= 1000 AND enemy_seed < ? AND run < ?",
+        (trainer.deck_hash(side.deck_file(BASE)), ENEMY, 1000 + ENEMY_HANDS,
+         side.RUNS)).fetchone()[0]
+    parts = [("main deck, going first", main_n, per)]
     for label, swap, first in (("blank, going first", VANILLA, 1),
                                ("blank, going second", VANILLA, 0),
                                ("Storm, going second", STORM, 0)):

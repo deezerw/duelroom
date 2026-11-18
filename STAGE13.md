@@ -62,3 +62,10 @@ causal question: same hands, same enemy hands, card X instead of card Y.
 5. **`/side` page**: per matchup, going first / going second: the configs
    that help with intervals, what to take out, how often the card is drawn
    and used, and Watch links for games where it made the difference.
+
+**2026-11-18, gate (a) first read: FAILED, and the failure was the games, not the swap.**
+-3 Ash +3 Alexandrite read +10.0% wins (95% +1.9 to +19.8). Untouched hands 37% vs 38%
+(same turn-1 pieces on 168/170); the 7 Ash hands 1% vs 34%. Cause: turn 3 going first was
+steered by `goal[0]`, and "14558127@hand" posts an empty target (fixed, `game.steer`, see
+CLAUDE.md "Going second"). Bad games deleted; `side_gate.py` now also re-plays the main
+deck's runs 0..1. Re-run it after the current process ends, then read (a) again.

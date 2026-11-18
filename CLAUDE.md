@@ -718,9 +718,12 @@ impact or stops. Files: `results/games/<deck>/<enemy>/second/`.
   turn 1 = `no_t1` (the bare template would deal them the bottom of their list).
 - **Your turn 2 is steered by the first goal piece NOT held in hand.** Hand 4's goal opens
   `42141493@hand` (keep Fuwalos): as a target it posts 0 cards, all 9 lines the search
-  reached were rejected, no approach was written, and the game read "0 damage". Going
-  FIRST still steers turn 3 with `goal[0]`, the same quirk; it was left alone so the 300
-  stored hand-4 games stay comparable -- decide before the next going-first run.
+  reached were rejected, no approach was written, and the game read "0 damage".
+  **Going first had the same bug on turn 3 until 2026-11-18** (`game.steer` now serves
+  both): the 11 of 24 imported hands whose goal opens "@hand" won 6 of the 564 turn 3s
+  they reached, the other hands 623 of 728. Found by Stage 13's blank gate (-3 Ash +3
+  vanilla read +10% wins, all on Ash@hand hands). Those 1220 going-first games were
+  deleted (turn 1s kept); the old going-first 26% understated the deck.
 - Playmat: you are engine player 1, so `playback.frames(me=1)` swaps the sides and you
   sit at the bottom with your hand shown (`/watch/game/...?second=1`).
 - First run (4 hands x 1 enemy hand, 60 s): no lethal, 5700 / 4800 / 5900 / 2500 damage;

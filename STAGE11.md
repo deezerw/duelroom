@@ -97,3 +97,10 @@ as close to optimal as the compute allows; within that, the games may change.
   only finds it sometimes -- a real opponent may or may not).
 - Old 10-run games stay readable but are never pooled with the new ones
   (same rule as devices).
+
+**2026-11-18, plateau 1x/2x/4x read** (`budget_plateau.py summary`, 72 runs a stage):
+our turn 1 flat (lost 42/42/39%), their turn 1 flat (33/33/33%) -- converged. NOT converged,
+every flip one direction: their kill check 38 -> 53 -> 65% lost; our break going second
+33 -> 49 -> 58% won. Turn 3 had the goal[0] bug (42 lines dropped, re-run on the hands
+whose goal opens with a board piece). Running now on duelpc: t3 refill, then kill and brk
+at 8x/16x (`--stages kill,brk --levels 8,16`). Budgets change only once both flatten.
