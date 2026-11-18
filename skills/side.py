@@ -63,6 +63,11 @@ def _target_code(t):
         return None
 
 
+def deck_file(name):
+    """A config (its name holds "~") lives under SIDE_DIR, a deck in assets/decks."""
+    return (SIDE_DIR if "~" in name else engine.ROOT / "assets" / "decks") / f"{name}.ydk"
+
+
 def make(conn, base_name, swaps, base_path=None):
     """Write the config deck and its trained hands. `swaps`: [(out, in, n)].
     Returns {name, path, deck_hash, hands, hands_touched, goals_changed}.
@@ -131,12 +136,11 @@ def make(conn, base_name, swaps, base_path=None):
 
 
 def compare(conn, base_name, name, enemy, first=True, device="server", runs=RUNS):
-    """Config minus main deck, paired per (hand, enemy hand) over runs
+    """Config `name` minus `base_name` (the main deck, or another config), paired per (hand, enemy hand) over runs
     0..runs-1: win-rate change (and killed-on-turn-2 change going first)
     with a 95% interval resampling hands and enemy hands. Only pairings
     both have played count. Returns None until any exist."""
-    dh_base = trainer.deck_hash(engine.ROOT / "assets" / "decks" / f"{base_name}.ydk")
-    dh = trainer.deck_hash(SIDE_DIR / f"{name}.ydk")
+    dh_base, dh = trainer.deck_hash(deck_file(base_name)), trainer.deck_hash(deck_file(name))
 
     def cells(h):
         out = {}
