@@ -7,7 +7,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 build="$here/vendor/ygorl/build"
 src="$build/combo-solver"
-dst="${ROOTED_DST:-$build/combo-solver-rooted}"
+dst="$(realpath -m "${ROOTED_DST:-$build/combo-solver-rooted}")"
 [ -x "$src/bin/combosolver" ] || { echo "pinned solver not built: $src" >&2; exit 1; }
 rm -rf "$dst"
 cp -a "$src" "$dst"
