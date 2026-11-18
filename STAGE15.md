@@ -35,3 +35,10 @@ answer is PICKED, not in the search itself.
    not activated); its quick effect (until the End Phase) stays legal. Stored games keep the
    old behaviour until re-played.
 4. Then the enemy's real goals (train its 10 hands), and re-play everything.
+
+**2026-11-18, step 1 read** (60 positions, 738 distinct boards, kill check at 4x OTK_MS,
+held out by hand): lost on turn 2 with the board picked by full 94%, pieces 90%, free 90%,
+random 93%, model (GBM) 95%, oracle 70%. pieces - full -4.2% (95% -11.0 to +1.8); on the 18
+positions where the board decides, -13.9% (-33.3 to +8.3). No pick clears zero: step 2's
+condition is NOT met. The GBM is no better than random. Only 18/60 positions have any board
+that survives, so the pick can rescue at most ~24 points even when perfect.
