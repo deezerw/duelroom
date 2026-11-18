@@ -1,0 +1,361 @@
+--- combo-solver-rooted/solver-patched/duel.h
++++ combo-solver-next/solver-patched/duel.h
+@@ -102,6 +102,12 @@
+ 	// arena restores, and pruning wrongly is the bad direction, since it cuts a
+ 	// real move.
+ 	bool LastChainLink(uint8_t* trigger_player);
++	// The card code of the chain's most recent link, 0 when no chain is in
++	// progress (duelroom patch 0006: the trigger a searched defender's rule is
++	// keyed by). Read from OCG_DuelQueryField, whose chain records close the
++	// buffer, fixed size, so the last one is the last 28 bytes; stateless for
++	// the same reason as LastChainLink.
++	uint32_t LastChainCode();
+ 	// A player's LP, read from the processor state (rooted patch).
+ 	int32_t Lp(uint8_t player);
+ 
+--- combo-solver-rooted/solver-patched/duel.cpp
++++ combo-solver-next/solver-patched/duel.cpp
+@@ -274,6 +274,26 @@
+ 	return true;
+ }
+ 
++uint32_t Duel::LastChainCode() {
++	if(!LastChainLink(nullptr))
++		return 0;
++	uint32_t len = 0;
++	const uint8_t* data = nullptr;
++	{
++		ArenaScope scope(arena);
++		data = static_cast<const uint8_t*>(OCG_DuelQueryField(handle, &len));
++	}
++	// Per link: code u32, controller u8, location u8, sequence u32, position
++	// u32, triggering controller u8, location u8, sequence u32, description
++	// u64 (ocgapi.cpp OCG_DuelQueryField).
++	constexpr uint32_t kLink = 4 + 1 + 1 + 4 + 4 + 1 + 1 + 4 + 8;
++	if(!data || len < kLink + 4)
++		return 0;
++	uint32_t code = 0;
++	std::memcpy(&code, data + len - kLink, 4);
++	return code;
++}
++
+ int32_t Duel::Lp(uint8_t player) {
+ 	// Layout as in LastChainLink: phase u16, turn i16, turn_player u8, then per
+ 	// player 16 bytes starting with lp i32.
+--- combo-solver-rooted/solver-patched/search.h
++++ combo-solver-next/solver-patched/search.h
+@@ -1928,6 +1928,18 @@
+ 	uint32_t zone_mask = 0;
+ };
+ 
++// A searched defender's rule (duelroom patch 0006): at a defender chain
++// window whose trigger is `trigger` (the last chain link's card, canonical;
++// 0 = an open window, no chain) and, when `mons` >= 0, while the searching
++// side controls exactly `mons` monsters, FIRE `piece` (--opp-rule) or never
++// fire it (--opp-skip). Python's outer loop (game.searched_kill) learns them
++// from the defender's branches on the attacker's lines.
++struct OppRule {
++	uint32_t piece = 0;
++	uint32_t trigger = 0;
++	int32_t mons = -1;
++};
++
+ struct SearchConfig {
+ 	int target_player = 0;
+ 	uint32_t max_decisions = 24;      // depth, in decisions
+@@ -2704,6 +2716,11 @@
+ 	// controls at least n monsters (default 1). A family of defences for the
+ 	// game loop to choose from: one fixed policy is readable by the search.
+ 	uint32_t opp_hold_until = 1;
++	// --opp-rule / --opp-skip (duelroom patch 0006), with --opp-smart only:
++	// a firing rule overrides the hold and the rank; a skip removes the piece
++	// from that window's choice.
++	std::vector<OppRule> opp_fire;
++	std::vector<OppRule> opp_skip;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -3454,6 +3471,9 @@
+ 	// --opp-smart: the defender's follow-up choice on a card-selection prompt,
+ 	// by value (its weakest given up, their strongest taken). Index into `out`.
+ 	size_t DefenderPick(const ChoiceList& out);
++	// Patch 0006: the trigger a defender rule is keyed by, at the current
++	// window (the last chain link's card, canonical; 0 = no chain).
++	uint32_t DefenderTrigger();
+ 	// One ChoiceList per depth, reused between siblings and between passes: the
+ 	// deque guarantees reference stability during the recursion.
+ 	ChoiceList& ChoicesAt(uint32_t depth) {
+--- combo-solver-rooted/solver-patched/search.cpp
++++ combo-solver-next/solver-patched/search.cpp
+@@ -606,8 +606,37 @@
+ 					cfg.opp_smart && !cfg.opp_hold.empty() &&
+ 					duel.Count(static_cast<uint8_t>(cfg.target_player),
+ 							   LOCATION_MZONE) < cfg.opp_hold_until;
++				// Patch 0006: the searched defender's learnt rules, keyed by
++				// this window's trigger. A firing rule wins outright.
++				const bool ruled = cfg.opp_smart &&
++								   (!cfg.opp_fire.empty() || !cfg.opp_skip.empty());
++				uint32_t trig = 0;
++				int32_t mons = 0;
++				if(ruled) {
++					trig = DefenderTrigger();
++					mons = static_cast<int32_t>(duel.Count(
++						static_cast<uint8_t>(cfg.target_player), LOCATION_MZONE));
++				}
++				auto hit = [&](const std::vector<OppRule>& rules, uint32_t code) {
++					const uint32_t c = duel.Db().Canonical(code);
++					for(const OppRule& r : rules)
++						if(r.piece == c && r.trigger == trig &&
++						   (r.mons < 0 || r.mons == mons))
++							return true;
++					return false;
++				};
++				bool fired = false;
++				if(ruled)
++					for(size_t i = 0; i < out.size(); ++i) {
++						const uint32_t code = out.At(i).card;
++						if(code && DefenderRank(code) >= 0 && hit(cfg.opp_fire, code)) {
++							pick = i;
++							fired = true;
++							break;
++						}
++					}
+ 				int best_rank = std::numeric_limits<int>::max();
+-				for(size_t i = 0; i < out.size(); ++i) {
++				for(size_t i = 0; i < out.size() && !fired; ++i) {
+ 					const uint32_t code = out.At(i).card;
+ 					if(!code)
+ 						continue;
+@@ -617,6 +646,8 @@
+ 					if(hold && std::find(cfg.opp_hold.begin(), cfg.opp_hold.end(),
+ 										 code) != cfg.opp_hold.end())
+ 						continue;
++					if(ruled && hit(cfg.opp_skip, code))
++						continue;
+ 					if(!cfg.opp_smart) {
+ 						pick = i;
+ 						break;
+@@ -1678,6 +1709,11 @@
+ 	return progress;
+ }
+ 
++uint32_t Search::DefenderTrigger() {
++	const uint32_t c = duel.LastChainCode();
++	return c ? duel.Db().Canonical(c) : 0;
++}
++
+ int Search::DefenderRank(uint32_t code) const {
+ 	if(cfg.opp_respond.empty())
+ 		return 0;
+--- combo-solver-rooted/solver-patched/main.cpp
++++ combo-solver-next/solver-patched/main.cpp
+@@ -1484,6 +1484,11 @@
+ 	bool opp_smart = false;
+ 	std::vector<uint32_t> opp_hold;
+ 	uint32_t opp_hold_until = 1;
++	// --opp-rule / --opp-skip <piece:trigger[@mons]> and --opp-branches <dir>
++	// (duelroom patch 0006): see SearchConfig::opp_fire and RunOppBranches.
++	std::vector<OppRule> opp_fire;
++	std::vector<OppRule> opp_skip;
++	std::string opp_branches;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2015,6 +2020,14 @@
+ 				"  --opp-hold <c>     with --opp-smart: these pieces wait until the\n"
+ 				"                     searching side controls a monster (patch 0004)\n"
+ 				"  --opp-hold-until n ... until it controls n monsters (default 1)\n"
++				"  --opp-rule <r>     with --opp-smart: r = piece:trigger[@n], fire the\n"
++				"                     piece at a window answering that card (trigger 0 =\n"
++				"                     no chain), [while the searcher has n monsters]\n"
++				"  --opp-skip <r>     ... never fire it there (both repeatable, patch 0006)\n"
++				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
++				"                     with --start [--root]) and write to <d> one prefix\n"
++				"                     per reply the defender did not make at each of its\n"
++				"                     chain windows after the root, + branches.jsonl\n"
+ 				"  --goal-win         the goal is WINNING: a line is a solution when the\n"
+ 				"                     duel ends with --player as the winner (patch 0002)\n"
+ 				"  --stop-on-win <k>  with --goal-win: the rollouts stop once k winning\n"
+@@ -2545,6 +2558,24 @@
+ 		} else if(a == "--root") {
+ 			const char* v = next("--root"); if(!v) return false;
+ 			o.root_file = v;
++		} else if(a == "--opp-branches") {
++			const char* v = next("--opp-branches"); if(!v) return false;
++			o.opp_branches = v;
++		} else if(a == "--opp-rule" || a == "--opp-skip") {
++			const char* v = next(a.c_str()); if(!v) return false;
++			OppRule r;
++			unsigned long p = 0, t = 0;
++			int m = -1;
++			const int got = std::sscanf(v, "%lu:%lu@%d", &p, &t, &m);
++			if(got < 2 || !p) {
++				std::printf("!! %s %s: expected piece:trigger[@monsters]\n",
++							a.c_str(), v);
++				return false;
++			}
++			r.piece = static_cast<uint32_t>(p);
++			r.trigger = static_cast<uint32_t>(t);
++			r.mons = got == 3 ? m : -1;
++			(a == "--opp-rule" ? o.opp_fire : o.opp_skip).push_back(r);
+ 		} else if(a == "--approach") {
+ 			const char* v = next("--approach"); if(!v) return false;
+ 			o.approach_files.emplace_back(v);
+@@ -4158,6 +4189,8 @@
+ 	for(uint32_t c : opt.opp_hold)
+ 		cfg.opp_hold.push_back(c);
+ 	cfg.opp_hold_until = opt.opp_hold_until;
++	cfg.opp_fire = opt.opp_fire;
++	cfg.opp_skip = opt.opp_skip;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+@@ -5561,6 +5594,133 @@
+ // A solution comes out of a search that deduplicates and canonicalises: nothing
+ // guarantees a priori that its sequence of answers, replayed from scratch,
+ // rebuilds the board. So we replay it in a fresh duel and only write what holds.
++// --opp-branches <dir> (duelroom patch 0006): THE SEARCHED DEFENDER'S MOVES.
++// Replays `line` (a written solution: the root prefix + the attacker's line,
++// from the duel's start) on the --start duel, and at every chain window of the
++// DEFENDER (1 - --player) after the root -- not on its own link, which the
++// smart defender never stacks on -- writes one prefix per reply it did not
++// make: another eligible piece (--opp-respond), or passing instead of firing.
++// A prefix = the line's answers up to that window + the other reply, so the
++// attacker can be searched again --root'ed there. branches.jsonl, one line a
++// branch: {"k", "at" (answer index), "trigger" (last link's card, canonical,
++// 0 = no chain), "mons" (the searcher's monsters), "chosen", "alt" (codes,
++// 0 = pass), "file"}. Returns the number written, or -1.
++int RunOppBranches(const Replay& line, const Replay& start_yrp, const Options& opt,
++				   CardDB& db, ScriptProvider& scripts,
++				   const std::vector<uint32_t>* opp_hand) {
++	std::error_code ec;
++	std::filesystem::create_directories(opt.opp_branches, ec);
++	const std::string jl = opt.opp_branches + "/branches.jsonl";
++	std::FILE* out = std::fopen(jl.c_str(), "w");
++	if(!out) {
++		std::printf("!! --opp-branches: cannot write %s\n", jl.c_str());
++		return -1;
++	}
++	const auto attacker = static_cast<uint8_t>(opt.target_player);
++	const auto defender = static_cast<uint8_t>(1 - opt.target_player);
++	const size_t root_len = start_yrp.root_prefix.size();
++	for(size_t i = 0; i < root_len; ++i)
++		if(i >= line.responses.size() || line.responses[i] != start_yrp.root_prefix[i]) {
++			std::printf("!! --opp-branches: the line does not start with the --root "
++						"prefix (answer %zu)\n", i);
++			std::fclose(out);
++			return -1;
++		}
++	// WriteYrp1 puts the root prefix back in front: the files hold the
++	// answers after it.
++	EnumOptions eo;
++	eo.dedup_by_code = true;
++	eo.max_subsets = opt.max_subsets;
++	int written = 0;
++	std::string err;
++	std::thread([&] {
++		Arena a;
++		if(!a.Init(opt.arena_mb << 20, 0, err)) {
++			written = -1;
++			return;
++		}
++		Duel d(db, scripts, &a);
++		// Setup replays the root prefix (start_yrp's), exactly as the search.
++		if(!d.Create(start_yrp.seed, start_yrp.duel_flags, start_yrp.start_lp,
++					 start_yrp.start_hand, start_yrp.draw_count, err) ||
++		   !d.Setup(start_yrp, err, opp_hand, defender)) {
++			written = -1;
++			return;
++		}
++		size_t used = root_len;
++		int pplayer = -1;
++		uint8_t ptype = 0;
++		std::vector<uint8_t> pdata;
++		ChoiceList choices;
++		while(used < line.responses.size()) {
++			const int status = d.Process();
++			for(const Message& m : d.Messages())
++				if(IsPrompt(m.type)) {
++					ptype = m.type;
++					pplayer = m.size ? m.data[0] : -1;
++					pdata.assign(m.data, m.data + m.size);
++				}
++			if(status != OCG_DUEL_STATUS_AWAITING) {
++				if(status != OCG_DUEL_STATUS_CONTINUE)
++					break;
++				continue;
++			}
++			const std::vector<uint8_t>& given = line.responses[used];
++			uint8_t lp = 255;
++			if(pplayer == defender && ptype == MSG_SELECT_CHAIN &&
++			   !(d.LastChainLink(&lp) && lp == defender)) {
++				EnumerateInto(ptype, pdata.data(), static_cast<uint32_t>(pdata.size()),
++							  eo, choices);
++				size_t chosen = choices.size();
++				for(size_t i = 0; i < choices.size(); ++i)
++					if(choices.At(i).response == given) {
++						chosen = i;
++						break;
++					}
++				const uint32_t trig = d.LastChainCode();
++				const uint32_t t = trig ? db.Canonical(trig) : 0;
++				const uint32_t mons = d.Count(attacker, LOCATION_MZONE);
++				const uint32_t was = chosen < choices.size() && choices.At(chosen).card
++										 ? db.Canonical(choices.At(chosen).card) : 0;
++				for(size_t i = 0; i < choices.size() && chosen < choices.size(); ++i) {
++					if(i == chosen)
++						continue;
++					const uint32_t code = choices.At(i).card;
++					const bool piece = code && (opt.opp_respond.empty() ||
++						std::find(opt.opp_respond.begin(), opt.opp_respond.end(),
++								  code) != opt.opp_respond.end());
++					if(!(piece || (!code && was)))
++						continue;      // pass is a branch only when it fired
++					const uint32_t alt = code ? db.Canonical(code) : 0;
++					std::vector<std::vector<uint8_t>> ans(
++						line.responses.begin() + root_len, line.responses.begin() + used);
++					ans.push_back(choices.At(i).response);
++					char name[64];
++					std::snprintf(name, sizeof(name), "b%03d.yrp1", written);
++					const std::string file = opt.opp_branches + "/" + name;
++					std::string werr;
++					if(!WriteYrp1(file, start_yrp, ans, werr)) {
++						std::printf("!! --opp-branches: %s\n", werr.c_str());
++						continue;
++					}
++					std::fprintf(out, "{\"k\":%d,\"at\":%zu,\"trigger\":%u,\"mons\":%u,"
++									  "\"chosen\":%u,\"alt\":%u,\"file\":\"%s\"}\n",
++								 written, used, t, mons, was, alt, file.c_str());
++					++written;
++				}
++			}
++			d.SetResponse(given);
++			++used;
++		}
++	}).join();
++	std::fclose(out);
++	if(written < 0)
++		std::printf("!! --opp-branches: %s\n", err.c_str());
++	else
++		std::printf("  defender branches : %d written to %s\n", written, jl.c_str());
++	return written;
++}
++
+ size_t WriteSolutions(const std::vector<Solution>& sols, const Replay& start_yrp,
+ 					  const BoardKey& target, const Options& opt, CardDB& db,
+ 					  ScriptProvider& scripts, const std::string& outdir,
+@@ -11226,6 +11386,14 @@
+ 	scripts.Init(opt.workdir, opt.scriptdirs);
+ 	std::printf("  script dirs       : %zu%s\n", scripts.Dirs().size(),
+ 				opt.scriptdirs.empty() ? "" : "  (override)");
++	if(!opt.opp_branches.empty()) {
++		if(!start_yrp) {
++			std::printf("!! --opp-branches needs --start\n");
++			return 2;
++		}
++		return RunOppBranches(*yrp, *start_yrp, opt, db, scripts,
++							  cons.opp_hand.empty() ? nullptr : &cons.opp_hand) < 0 ? 1 : 0;
++	}
+ 
+ 	// --no-self-negate: the deck's NEGATION effects are derived HERE, the one
+ 	// place where the database, the scripts and the decks coexist before any
