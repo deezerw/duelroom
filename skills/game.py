@@ -95,6 +95,17 @@ STOP_ON_WIN = 4
 # the old tracker by itself if userfaultfd is unavailable.
 ARENA_ENV = {"R2V_ARENA_UFFD": "1"}
 GAMES = Path(__file__).resolve().parent.parent / "results" / "games"
+# Patch 0007: cards whose single-target effect our searches may only point at
+# an OPPONENT's card. S:P Little Knight's summon banish, with nothing of theirs
+# to hit, banished our own Fiendsmith Engraver from the GY in 16 of 240 games'
+# turn 1s (h16/e1009 run 8): a resource thrown away for nothing. Its quick
+# effect (both banished until the End Phase) is a real dodge and stays legal.
+NO_SELF_TARGET = (29301450,)
+
+
+def self_target_args():
+    return (["--no-self-target", "|".join(map(str, NO_SELF_TARGET))]
+            if NO_SELF_TARGET else [])
 
 
 def require():
@@ -102,13 +113,16 @@ def require():
         raise RuntimeError(
             f"the rooted solver is not built ({ROOTED_BIN}); run "
             "tools/build_rooted_solver.sh")
-    if DEFENDER == "smart":
-        helptext = subprocess.run([str(ROOTED_BIN), "--help"], capture_output=True,
-                                  text=True).stdout
-        if "--opp-smart" not in helptext:
-            raise RuntimeError(
-                f"the rooted solver at {ROOTED_BIN} predates patch 0004 (no "
-                "--opp-smart); rebuild it with tools/build_rooted_solver.sh")
+    helptext = subprocess.run([str(ROOTED_BIN), "--help"], capture_output=True,
+                              text=True).stdout
+    if DEFENDER == "smart" and "--opp-smart" not in helptext:
+        raise RuntimeError(
+            f"the rooted solver at {ROOTED_BIN} predates patch 0004 (no "
+            "--opp-smart); rebuild it with tools/build_rooted_solver.sh")
+    if NO_SELF_TARGET and "--no-self-target" not in helptext:
+        raise RuntimeError(
+            f"the rooted solver at {ROOTED_BIN} predates patch 0007 (no "
+            "--no-self-target); rebuild it with tools/build_rooted_solver.sh")
 
 
 def _now():
@@ -497,7 +511,7 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
             "--hand", "|".join(map(str, hand))]
     for t in goal:
         args += ["--target", t]
-    args += defender_args(enemy_respond) + list(extra)
+    args += defender_args(enemy_respond) + self_target_args() + list(extra)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -582,7 +596,7 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
         args = ["--start", start, "--root", prefix, "--no-ref",
                 "--target", our_target, "--player", str(player), "--turns", str(turn),
                 "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
-            + defence_args(enemy_respond, v) + list(extra)
+            + defence_args(enemy_respond, v) + self_target_args() + list(extra)
         r = _solve(prefix, args, scratch, label, ms, seed, binary=binary,
                    env_extra=env_extra)
         if r["solution"] and _winner(r["solution"]) == player:

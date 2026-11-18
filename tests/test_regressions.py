@@ -6190,3 +6190,18 @@ def test_searched_defender_rule_flags_and_replacement():
     assert game.rule_args([("fire", 8, 33, 2), ("skip", 7, 0, 1)]) == [
         "--opp-rule", "8:33@2", "--opp-skip", "7:0@1"]
     assert game._rule_of({"alt": 0, "chosen": 7, "trigger": 0, "mons": 1}) == ("skip", 7, 0, 1)
+
+
+def test_our_searches_never_point_sp_at_our_own_cards(monkeypatch, tmp_path):
+    """Patch 0007: our lethal turn (and turn 1) pass --no-self-target with
+    S:P Little Knight, so its summon banish cannot hit our own GY."""
+    from skills import game
+
+    seen = []
+    monkeypatch.setattr(game, "_solve", lambda ref, args, *a, **k:
+                        seen.append(args) or {"solution": None, "approach": None, "log": "l"})
+    monkeypatch.setattr(game, "_damage", lambda *a: 0)
+    game.turn3("start", "prefix", "t", [1], tmp_path, 1000, 1, defences=(1,))
+    args = seen[-1]
+    assert args[args.index("--no-self-target") + 1] == "29301450"
+    assert game.self_target_args() == ["--no-self-target", "29301450"]

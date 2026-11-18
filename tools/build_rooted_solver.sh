@@ -20,6 +20,8 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0004-smart-defender.patch" >&2)
 # 0006: --opp-rule / --opp-skip / --opp-branches, the searched defender's moves.
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0006-searched-defender.patch" >&2)
+# 0007: --no-self-target, no own-card picks for a listed card's single target.
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0007-no-self-target.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "$(nproc)" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -27,4 +29,5 @@ g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
 "$dst/bin/combosolver" --help 2>&1 | grep -q -- "--stop-on-win" || { echo "built binary lacks --stop-on-win" >&2; exit 1; }
 "$dst/bin/combosolver" --help 2>&1 | grep -q -- "--opp-smart" || { echo "built binary lacks --opp-smart" >&2; exit 1; }
 "$dst/bin/combosolver" --help 2>&1 | grep -q -- "--opp-branches" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
+"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--no-self-target" || { echo "built binary lacks --no-self-target" >&2; exit 1; }
 echo "$dst/bin/combosolver"

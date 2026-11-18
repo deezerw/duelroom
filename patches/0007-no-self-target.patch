@@ -1,0 +1,173 @@
+--- combo-solver-rooted/solver-patched/search.h
++++ combo-solver-next/solver-patched/search.h
+@@ -2721,6 +2721,8 @@
+ 	// from that window's choice.
+ 	std::vector<OppRule> opp_fire;
+ 	std::vector<OppRule> opp_skip;
++	// --no-self-target <codes> (duelroom patch 0007): see Search::NoSelfTarget.
++	std::vector<uint32_t> no_self_target;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -2996,6 +2998,8 @@
+ 	// with the flag armed, either the window never came up or the wiring is dead,
+ 	// and both can be read.
+ 	uint64_t self_negate_cuts = 0;
++	// --no-self-target picks dropped (patch 0007).
++	uint64_t self_target_cuts = 0;
+ 	// Main-phase activations removed by --guard-keep. Same liveness reading as
+ 	// above: zero with the flag armed means the window never came up, or the
+ 	// wiring is dead.
+@@ -3474,6 +3478,9 @@
+ 	// Patch 0006: the trigger a defender rule is keyed by, at the current
+ 	// window (the last chain link's card, canonical; 0 = no chain).
+ 	uint32_t DefenderTrigger();
++	// Patch 0007: drop the searcher's picks of only its own cards at the target
++	// prompt of a --no-self-target card's effect.
++	void NoSelfTarget(ChoiceList& out);
+ 	// One ChoiceList per depth, reused between siblings and between passes: the
+ 	// deque guarantees reference stability during the recursion.
+ 	ChoiceList& ChoicesAt(uint32_t depth) {
+--- combo-solver-rooted/solver-patched/search.cpp
++++ combo-solver-next/solver-patched/search.cpp
+@@ -588,6 +588,15 @@
+ 	// The opponent does not play: it passes systematically (the solo scope we
+ 	// chose). The last option is the "do nothing" of chain windows and yes/no
+ 	// questions.
++	// --no-self-target (duelroom patch 0007): the searcher's single-pick target
++	// prompt of a listed card's effect must take an OPPONENT's card. S:P Little
++	// Knight's summon banish, offered nothing of theirs on our turn 1, banished
++	// our own Fiendsmith Engraver from the GY in 16 of 240 games' turn 1s:
++	// nothing gained, a resource lost. With no legal pick of theirs the branch
++	// dies, so the activation is never made.
++	if(prompt_player == cfg.target_player && prompt_type == MSG_SELECT_CARD &&
++	   !cfg.no_self_target.empty() && !out.empty())
++		NoSelfTarget(out);
+ 	if(prompt_player != cfg.target_player) {
+ 		if(!cfg.opp_greedy) {
+ 			out.KeepOnlyLast();
+@@ -1709,6 +1718,52 @@
+ 	return progress;
+ }
+ 
++void Search::NoSelfTarget(ChoiceList& out) {
++	uint8_t lp = 255;
++	if(!duel.LastChainLink(&lp) || lp != cfg.target_player)
++		return;
++	const uint32_t code = duel.Db().Canonical(duel.LastChainCode());
++	if(std::find(cfg.no_self_target.begin(), cfg.no_self_target.end(), code) ==
++	   cfg.no_self_target.end())
++		return;
++	// MSG_SELECT_CARD: player u8, cancelable u8, min u32, max u32, count u32,
++	// then per candidate code u32, controller u8, location u8, sequence u32,
++	// position u32 (the layout DefenderPick reads).
++	const uint8_t* d = prompt_payload.data();
++	const size_t n = prompt_payload.size();
++	size_t off = 2 + 4 + 4;
++	uint32_t count = 0;
++	if(off + 4 > n)
++		return;
++	std::memcpy(&count, d + off, 4);
++	off += 4;
++	std::vector<uint8_t> con;
++	for(uint32_t i = 0; i < count; ++i) {
++		if(off + 14 > n)
++			return;
++		con.push_back(d[off + 4]);
++		off += 14;
++	}
++	for(size_t i = out.size(); i-- > 0;) {
++		const auto& r = out.At(i).response;
++		int32_t type = 0;
++		if(r.size() < 8)
++			continue;
++		std::memcpy(&type, r.data(), 4);
++		if(type != 2)
++			continue;
++		uint32_t k = 0;
++		std::memcpy(&k, r.data() + 4, 4);
++		bool theirs = false;
++		for(uint32_t j = 0; j < k && 8 + j < r.size(); ++j)
++			theirs = theirs || (r[8 + j] < con.size() && con[r[8 + j]] != cfg.target_player);
++		if(!theirs) {
++			out.RemoveAt(i);
++			++stats.self_target_cuts;
++		}
++	}
++}
++
+ uint32_t Search::DefenderTrigger() {
+ 	const uint32_t c = duel.LastChainCode();
+ 	return c ? duel.Db().Canonical(c) : 0;
+--- combo-solver-rooted/solver-patched/main.cpp
++++ combo-solver-next/solver-patched/main.cpp
+@@ -1489,6 +1489,8 @@
+ 	std::vector<OppRule> opp_fire;
+ 	std::vector<OppRule> opp_skip;
+ 	std::string opp_branches;
++	// --no-self-target <code|code...> (duelroom patch 0007).
++	std::vector<uint32_t> no_self_target;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2024,6 +2026,8 @@
+ 				"                     piece at a window answering that card (trigger 0 =\n"
+ 				"                     no chain), [while the searcher has n monsters]\n"
+ 				"  --opp-skip <r>     ... never fire it there (both repeatable, patch 0006)\n"
++				"  --no-self-target <c> codes (a|b|...): the searcher's single-pick target of\n"
++				"                     these cards' effects must be an opponent's card (0007)\n"
+ 				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
+ 				"                     with --start [--root]) and write to <d> one prefix\n"
+ 				"                     per reply the defender did not make at each of its\n"
+@@ -2541,10 +2545,11 @@
+ 		} else if(a == "--opp-hold-until") {
+ 			const char* v = next("--opp-hold-until"); if(!v) return false;
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+-		} else if(a == "--opp-respond" || a == "--opp-hold") {
++		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+-				(a == "--opp-hold") ? o.opp_hold : o.opp_respond;
++				(a == "--opp-hold") ? o.opp_hold
++				: (a == "--no-self-target") ? o.no_self_target : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+@@ -4191,6 +4196,7 @@
+ 	cfg.opp_hold_until = opt.opp_hold_until;
+ 	cfg.opp_fire = opt.opp_fire;
+ 	cfg.opp_skip = opt.opp_skip;
++	cfg.no_self_target = opt.no_self_target;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+@@ -8702,7 +8708,7 @@
+ 			// the rollout phase line is the only way to answer the open question:
+ 			// does the guard prune usefully, or does it raze the space?
+ 			uint64_t constraint_cuts = 0, guard_cuts = 0, self_negate_cuts = 0,
+-					 guard_keep_cuts = 0;
++					 guard_keep_cuts = 0, self_target_cuts = 0;
+ 			// Options: picks / decisions absorbed / aborted.
+ 			uint64_t macro_taken = 0, macro_absorbed = 0, macro_aborted = 0;
+ 			size_t ctx_entries = 0;
+@@ -8966,6 +8972,7 @@
+ 					m.constraint_cuts += s.Stats().constraint_cuts;
+ 					m.guard_cuts += s.Stats().guard_cuts;
+ 					m.self_negate_cuts += s.Stats().self_negate_cuts;
++					m.self_target_cuts += s.Stats().self_target_cuts;
+ 					m.guard_keep_cuts += s.Stats().guard_keep_cuts;
+ 					m.adapts += s.Stats().nrpa_adapts;
+ 					m.ctx_entries = (std::max)(m.ctx_entries,
+@@ -9288,6 +9295,12 @@
+ 						(unsigned long long)m.turn_cuts,
+ 						100.0 * double(m.constraint_cuts + m.guard_cuts +
+ 									   m.turn_cuts) / double(m.rollouts));
++			// Liveness of --no-self-target (patch 0007).
++			if(m.self_target_cuts)
++				std::printf("      %-7s discipline: %llu "
++							"own-card target pick(s) removed (--no-self-target)\n",
++							mi ? "NRPA" : "greedy",
++							(unsigned long long)m.self_target_cuts);
+ 			// Liveness of --no-self-negate.
+ 			if(m.self_negate_cuts)
+ 				std::printf("      %-7s discipline: %llu "
