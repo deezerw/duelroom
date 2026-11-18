@@ -3,8 +3,16 @@ breaker as a breaker? Nobody reads a side result before this passes.
 
   (a) going first:  -3 Ash +3 Alexandrite Dragon (a vanilla) vs the main deck
       -> must NOT come out as a gain (interval above 0 = harness wrong)
-  (b) going second: -3 Ash +3 Lightning Storm vs -3 Ash +3 Alexandrite Dragon
-      -> must come out as a clear gain (Storm clears Angelechy's board)
+  (b) going second: -3 Fiendsmith Engraver +3 Alexandrite vs the main deck
+      -> must come out as a clear LOSS (Engraver: 11 of 24 hands, used in
+         78% of the main deck's going-second wins)
+
+(b) was Storm vs the blank, read 2026-11-18 as -2.1% (95% -7.1 to +2.1).
+Not the harness: Storm resolved in all 15 games it was played, clearing
+Endgame Problem (14) and set Dominus Sparks (8), and Angelechy stopped the
+break anyway FROM THE HAND (Dominus Impulse, Ghost Ogre). Against this
+deck Storm is not a known large gain, so it cannot be the positive control.
+Storm vs blank is still printed, as a finding.
 
 Same hands, enemy hands, seeds; runs 0..1. Resumable (games are stored).
 
@@ -20,20 +28,21 @@ sys.path.insert(0, str(ROOT))
 from skills import db, game, remote, side  # noqa: E402
 
 BASE, ENEMY = "imported", "Angelechy-Meta"
-ASH, VANILLA, STORM = 14558127, 43096270, 14532163
+ASH, VANILLA, STORM, ENGRAVER = 14558127, 43096270, 14532163, 60764609
 ENEMY_HANDS = 10
 
 
 def configs(conn):
     blank = side.make(conn, BASE, [(ASH, VANILLA, 3)])
     storm = side.make(conn, BASE, [(ASH, STORM, 3)])
-    return blank, storm
+    no_engraver = side.make(conn, BASE, [(ENGRAVER, VANILLA, 3)])
+    return blank, storm, no_engraver
 
 
 def main():
     conn = db.connect()
-    blank, storm = configs(conn)
-    for c in (blank, storm):
+    blank, storm, no_engraver = configs(conn)
+    for c in (blank, storm, no_engraver):
         print(f"{c['name']}: {c['hands']} hands, {c['hands_touched']} touched, "
               f"{c['goals_changed']} goals changed", flush=True)
     device = remote.current().name
@@ -41,7 +50,8 @@ def main():
     # pairings, re-played where they are missing (2026-11-18: the going-first
     # games of hands whose goal opens "@hand" were deleted, turn 3 was broken).
     base = {"name": BASE, "path": side.deck_file(BASE)}
-    for cfg, first in ((base, True), (blank, True), (blank, False), (storm, False)):
+    for cfg, first in ((base, True), (blank, True), (no_engraver, False),
+                       (blank, False), (storm, False)):
         game.run(conn, cfg["path"], cfg["name"], ENEMY, enemy_hands=ENEMY_HANDS,
                  runs=side.RUNS, first=first, device=device)
     summary()
@@ -61,10 +71,11 @@ def progress():
         (trainer.deck_hash(side.deck_file(BASE)), ENEMY, 1000 + ENEMY_HANDS,
          side.RUNS)).fetchone()[0]
     parts = [("main deck, going first", main_n, per)]
-    for label, swap, first in (("blank, going first", VANILLA, 1),
-                               ("blank, going second", VANILLA, 0),
-                               ("Storm, going second", STORM, 0)):
-        path = side.deck_file(side.config_name(BASE, [(ASH, swap, 3)]))
+    for label, swaps, first in (("blank, going first", [(ASH, VANILLA, 3)], 1),
+                                ("-3 Engraver, going second", [(ENGRAVER, VANILLA, 3)], 0),
+                                ("blank, going second", [(ASH, VANILLA, 3)], 0),
+                                ("Storm, going second", [(ASH, STORM, 3)], 0)):
+        path = side.deck_file(side.config_name(BASE, swaps))
         n = 0
         if path.exists():
             n = conn.execute(
@@ -78,10 +89,13 @@ def progress():
 
 def summary():
     conn = db.connect()
-    blank, storm = configs(conn)
+    blank, storm, no_engraver = configs(conn)
     device = remote.current().name
     for label, a, b, first in (("(a) blank vs main, going first", BASE, blank["name"], True),
-                               ("(b) Storm vs blank, going second", blank["name"], storm["name"], False)):
+                               ("(b) -3 Engraver vs main, going second", BASE,
+                                no_engraver["name"], False),
+                               ("    finding: Storm vs blank, going second", blank["name"],
+                                storm["name"], False)):
         c = side.compare(conn, a, b, ENEMY, first=first, device=device)
         if not c:
             print(f"{label}: nothing to compare yet")
@@ -92,7 +106,7 @@ def summary():
         if "lost_t2" in c:
             p, lo, hi = c["lost_t2"]
             print(f"    killed on turn 2 change {p:+.1%} (95% {lo:+.1%} to {hi:+.1%})")
-    print("gate: (a) must not read 'helps', (b) must read 'helps'")
+    print("gate: (a) must not read 'helps', (b) must read 'hurts'")
 
 
 if __name__ == "__main__":
