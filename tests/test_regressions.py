@@ -5873,3 +5873,22 @@ def test_matchup_interval_resamples_both_hands_not_games():
     # one cell, or nothing: no false precision
     assert stats.crossed_bootstrap({}) == (0.0, 0.0, 1.0)
     assert stats.crossed_bootstrap({(0, 0): [1, 1, 1]}) == (1.0, 0.0, 1.0)
+
+
+def test_heat_pauses_only_on_sustained_heat_and_resumes_cool():
+    """The 7800X3D sits at 89 C by design: one reading there must not pause
+    the solves, HOT_MINUTES in a row must, and only well under resumes."""
+    from skills import remote
+
+    h = remote.Heat()
+    hot = {"cpu": remote.CPU_HOT, "gpu": None, "gpu_w": None}
+    warm = {"cpu": remote.CPU_OK + 2, "gpu": 50, "gpu_w": 20.0}
+    cool = {"cpu": remote.CPU_OK - 5, "gpu": 50, "gpu_w": 20.0}
+    assert not h.update(hot) and not h.update(warm)      # a blip resets
+    for _ in range(remote.HOT_MINUTES - 1):
+        assert not h.update(hot)
+    assert h.update(hot)
+    assert h.update(warm)            # between the marks: still hot
+    assert h.update(None)            # unreadable: no change
+    assert not h.update(cool)
+    assert h.update({"cpu": 40, "gpu": remote.GPU_HOT, "gpu_w": 250.0}) is False

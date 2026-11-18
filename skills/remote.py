@@ -19,6 +19,7 @@ import os
 import shlex
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -207,6 +208,94 @@ def prepare(dev, log=print):
     sync(dev, log)
     binary = STATIC[0] / "combosolver"
     ssh(dev, f"{shlex.quote(str(binary))} --help >/dev/null", check=True)
+    heat_of(dev, log)
+
+
+# --- heat ---------------------------------------------------------------------
+#
+# Days of solving with nobody home: every minute the device's CPU (k10temp
+# Tctl) and GPU temperatures go into the job log, and new solves wait while
+# it runs hot -- running solves finish, so the load falls on its own. The
+# 7800X3D holds itself at 89 C by design, so one reading there is normal;
+# HOT_MINUTES of it in a row is a cooling problem (fan, dust, a hot room).
+
+CPU_HOT, CPU_OK = 89, 80
+GPU_HOT, GPU_OK = 85, 75
+HOT_MINUTES = 3
+HEAT_EVERY_S = 60
+_TEMPS = ("for h in /sys/class/hwmon/hwmon*; do [ \"$(cat $h/name)\" = k10temp ] && "
+          "cat $h/temp1_input; done; nvidia-smi --query-gpu=temperature.gpu,power.draw "
+          "--format=csv,noheader,nounits 2>/dev/null || true")
+
+
+def temps(dev):
+    """{cpu: C, gpu: C or None, gpu_w: W or None}, or None when unreadable."""
+    try:
+        r = ssh(dev, _TEMPS, timeout=20)
+    except subprocess.TimeoutExpired:
+        return None
+    lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+    if r.returncode != 0 or not lines:
+        return None
+    try:
+        out = {"cpu": int(lines[0]) // 1000, "gpu": None, "gpu_w": None}
+        if len(lines) > 1 and "," in lines[1]:
+            g, w = (x.strip() for x in lines[1].split(",")[:2])
+            out["gpu"], out["gpu_w"] = int(float(g)), float(w)
+    except ValueError:
+        return None
+    return out
+
+
+class Heat:
+    """Hysteresis on readings: hot after HOT_MINUTES readings at or over the
+    limit, cool again once every reading is back under the OK mark."""
+
+    def __init__(self):
+        self.hot = False
+        self.streak = 0
+
+    def update(self, t):
+        if t is None:
+            return self.hot
+        over = t["cpu"] >= CPU_HOT or (t["gpu"] or 0) >= GPU_HOT
+        self.streak = self.streak + 1 if over else 0
+        if self.streak >= HOT_MINUTES:
+            self.hot = True
+        elif self.hot and t["cpu"] < CPU_OK and (t["gpu"] or 0) < GPU_OK:
+            self.hot = False
+        return self.hot
+
+
+_heat = {}
+_heat_lock = threading.Lock()
+
+
+def _watch(dev, heat, log):
+    while True:
+        t = temps(dev)
+        was = heat.hot
+        heat.update(t)
+        if t:
+            log(f"temps {dev.name}: cpu {t['cpu']} C"
+                + (f", gpu {t['gpu']} C {t['gpu_w']:.0f} W" if t["gpu"] is not None else "")
+                + (" -- HOT, new solves wait" if heat.hot else ""))
+        if heat.hot and not was:
+            log(f"{dev.name}: over {CPU_HOT} C CPU / {GPU_HOT} C GPU for {HOT_MINUTES} min; "
+                f"pausing new solves until under {CPU_OK} / {GPU_OK} C")
+        if was and not heat.hot:
+            log(f"{dev.name}: cooled down, solving again")
+        time.sleep(HEAT_EVERY_S)
+
+
+def heat_of(dev, log=print):
+    """This process's heat watch for `dev`, started on first use."""
+    with _heat_lock:
+        if dev.name not in _heat:
+            _heat[dev.name] = Heat()
+            threading.Thread(target=_watch, args=(dev, _heat[dev.name], log),
+                             name=f"heat-{dev.name}", daemon=True).start()
+        return _heat[dev.name]
 
 
 # --- one solve ----------------------------------------------------------------
@@ -223,6 +312,9 @@ def run(dev, cmd, env, timeout_s, push_dirs=(), outdir=None):
     file is pushed first (same absolute path), plus `push_dirs`; `outdir`
     is pulled back afterwards. Raises DeviceDown when SSH itself fails
     (exit 255), subprocess.TimeoutExpired past `timeout_s`."""
+    heat = _heat.get(dev.name)      # started by prepare()
+    while heat and heat.hot:
+        time.sleep(10)
     cwd = os.getcwd()
     files = sorted({os.path.abspath(a) for a in cmd if os.path.isfile(a)})
     dirs = [os.path.abspath(d) for d in push_dirs]
