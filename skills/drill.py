@@ -106,11 +106,25 @@ NEEDS_LINK_EQUIP = {82135803: 49867899}   # Fiendsmith's Desirae -> Sequence
 TYPE_LINK = 0x4000000
 
 
-def link_equips(board, cards):
-    """Total Link Rating of the Link Monsters in your spell/trap zone. A
-    monster there is an equip; the board does not say equipped TO WHAT, so
-    a Sequence on an Engraver is read as Desirae's too."""
-    me = (board.get("players") or [{}])[0]
+# Interrupters that need a card of their own in your Monster Zone. Trivikarma
+# targets "1 'Visas Starfrost' in your Monster Zone": imported runs no Visas
+# (and Perlereino searches only Tearlaments or Visas), so its set copy negates
+# nothing -- 55 games lost on turn 2 with it unused -- yet upstream's reading
+# counts it, and 5 of the trainer's bests were built around it. Its GY search
+# (banish -> a Spell/Trap that mentions Visas) still works: a card, not a piece.
+NEEDS_ON_FIELD = {7436169: 56099748}      # Trivikarma -> Visas Starfrost
+
+
+def _me(board, player=0):
+    players = board.get("players") or []
+    return players[player] if len(players) > player else {}
+
+
+def link_equips(board, cards, player=0):
+    """Total Link Rating of the Link Monsters in that player's spell/trap
+    zone. A monster there is an equip; the board does not say equipped TO
+    WHAT, so a Sequence on an Engraver is read as Desirae's too."""
+    me = _me(board, player)
     n = 0
     for c in me.get("szone") or []:
         card = cards.get(c["code"])
@@ -119,11 +133,18 @@ def link_equips(board, cards):
     return n
 
 
-def dead_on_field(board, cards):
-    """Codes on your field whose interruption cannot fire on this board."""
-    if link_equips(board, cards):
-        return set()
-    return {c for c in NEEDS_LINK_EQUIP}
+def dead_on_field(board, cards, player=0):
+    """Codes whose interruption cannot fire from that player's field (face-up
+    or set) on this board: a bare Desirae, a Trivikarma without Visas."""
+    dead = set() if link_equips(board, cards, player) else set(NEEDS_LINK_EQUIP)
+    mzone = {cards.canonical(c["code"]) for c in _me(board, player).get("mzone") or []}
+    return dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
+
+
+def never_live(deck_codes):
+    """Pieces a deck can never make work: their partner is not in it."""
+    have = {int(c) for c in deck_codes}
+    return {c for c, need in NEEDS_ON_FIELD.items() if need not in have}
 
 
 def _on_field(line, weight=None):
@@ -149,6 +170,8 @@ def _on_field(line, weight=None):
         if any(i.where == "field" for i in card_interruptions(c["code"], cards)):
             n += weight(c["code"]) if weight else 1
     for c in me.get("szone") or []:
+        if cards.canonical(c["code"]) in dead:
+            continue
         faceup = bool(c.get("position", 0) & 0x5)
         where = "field" if faceup else "set"
         if any(i.where == where

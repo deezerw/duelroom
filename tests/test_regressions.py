@@ -6076,3 +6076,37 @@ def test_defence_scripts_vary_order_and_hold_and_keep_the_default_flags(monkeypa
     assert flags("all2") == {"--opp-respond": "100|200|300", "--opp-hold": "100|200|300",
                              "--opp-hold-until": "2"}
     assert flags("neg1")["--opp-respond"] == "200|100|300"
+
+
+def test_trivikarma_without_visas_is_not_an_interruption_anywhere():
+    # Trivikarma targets "1 Visas Starfrost in your Monster Zone". imported
+    # runs no Visas, yet upstream's reading counted the set copy: 5 trainer
+    # bests were built around it, and it sat unused in 55 games lost on
+    # turn 2. Dead set cards are left out like a bare Desirae, the games
+    # count only live pieces, and a deck without Visas never asks for it.
+    from ygorl.engine.duel import default_cards
+    from skills import drill, game, trainer
+
+    cards = default_cards()
+    TRIVI, VISAS, LARS = 7436169, 56099748, 99937011
+
+    def board(mzone):
+        return {"players": [{"mzone": [{"code": c, "position": 1} for c in mzone],
+                             "szone": [{"code": TRIVI, "position": 10}],
+                             "hand": [], "grave": []}, {}]}
+
+    base = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": {}}
+    key = lambda b: trainer.line_key({"board": b, "actions": [1]}, [], cards, p=base)
+    assert TRIVI in drill.dead_on_field(board([LARS]), cards)
+    assert TRIVI not in drill.dead_on_field(board([VISAS]), cards)
+    assert key(board([LARS]))[2] == key({"players": [{"mzone": [{"code": LARS, "position": 1}],
+                                                       "szone": [], "hand": [], "grave": []}, {}]})[2]
+    visas_only = {"players": [{"mzone": [{"code": VISAS, "position": 1}], "szone": [],
+                               "hand": [], "grave": []}, {}]}
+    assert key(board([VISAS]))[2] > key(visas_only)[2], "with Visas it is a piece"
+    assert TRIVI not in game._pieces(board([LARS]), 0, cards)
+    # the other seat is read from its own field
+    two = {"players": [{"mzone": [], "szone": []}, board([VISAS])["players"][0]]}
+    assert TRIVI in game._pieces(two, 1, cards)
+    assert drill.never_live([TRIVI, LARS]) == {TRIVI}
+    assert drill.never_live([TRIVI, VISAS]) == set()

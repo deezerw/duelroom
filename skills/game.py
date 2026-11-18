@@ -414,8 +414,14 @@ def _winner(path):
 
 
 def _pieces(board, player, cards):
+    """That player's interruption pieces on `board`, less the ones that cannot
+    fire there (`drill.dead_on_field`: a bare Desirae, Trivikarma without Visas)."""
     from ygorl.solver.blocking import board_interruptions
-    return [c for c, _w, _n in board_interruptions(board, cards, player).pieces]
+
+    from .drill import dead_on_field
+    dead = dead_on_field(board, cards, player)
+    return [c for c, w, _n in board_interruptions(board, cards, player).pieces
+            if not (w in ("field", "set") and cards.canonical(c) in dead)]
 
 
 def _hand(board, player):

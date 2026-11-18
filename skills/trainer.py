@@ -427,10 +427,10 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
     score = board_interruptions(board, cards)
     end_hand = Counter(((board.get("players") or [{}])[0]).get("hand") or [])
     held = Counter(opening) & end_hand          # copies never part of the line
-    dead = dead_on_field(board, cards)          # a bare Desirae negates nothing
+    dead = dead_on_field(board, cards)          # a bare Desirae, a Trivikarma without Visas
     n = neg = 0
     for code, where, negate in score.pieces:
-        if where == "field" and cards.canonical(code) in dead:
+        if where in ("field", "set") and cards.canonical(code) in dead:
             continue
         if where == "hand" and held[code] > 0:
             held[code] -= 1
@@ -780,9 +780,12 @@ def breadth_goals(deck_path, hand, p):
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import blocking_plan
 
+    from .drill import never_live
+
     deck = load_ydk(Path(deck_path))
     bp = blocking_plan(deck.main, deck.extra, list(hand), default_cards())
-    codes = [int(x.password) for x in bp.pieces]
+    dead = never_live([*deck.main, *deck.extra])     # Trivikarma in a deck without Visas
+    codes = [int(x.password) for x in bp.pieces if int(x.password) not in dead]
     codes += sorted(c for c in p["interrupters"] if c not in codes)
     goals = [([*bp.base, str(c)], f"piece:{c}") for c in codes]
     if bp.base:
