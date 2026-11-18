@@ -69,7 +69,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import breaking, engine, scenarios, trainer
+from . import breaking, engine, scenarios, stats, trainer
 
 ROOTED_BIN = (engine.VENDOR / "build" / "combo-solver-rooted" / "bin"
               / "combosolver")
@@ -896,6 +896,13 @@ def summary(conn, dh, enemy_name, games_per_hand=None, first=True, device="serve
             "game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=?",
             (dh, enemy_name, int(bool(first)), device)).fetchone()
         games_per_hand = (r["s"] or 0) * (r["k"] or 0)
+    cells = {}
+    for g in conn.execute(
+            "SELECT hand_index, enemy_seed, outcome FROM game_results WHERE deck_hash=? "
+            "AND enemy=? AND first=? AND device=?",
+            (dh, enemy_name, int(bool(first)), device)):
+        cells.setdefault(g["hand_index"], {}).setdefault(
+            (g["hand_index"], g["enemy_seed"]), []).append(g["outcome"] == "win")
     out = []
     for r in conn.execute(
             "SELECT hand_index, COUNT(*) n, SUM(outcome='win') w, "
@@ -910,7 +917,30 @@ def summary(conn, dh, enemy_name, games_per_hand=None, first=True, device="serve
             "dud" if w == 0 else ("near-dud" if rate < NEAR_DUD_RATE else ""))
         out.append({"hand_index": r["hand_index"], "games": n, "wins": w,
                     "lost_t2": r["l"] or 0, "win_rate": rate,
+                    # 95%, enemy hands resampled: a hand's games against one
+                    # enemy hand are not independent of each other.
+                    "ci": stats.crossed_bootstrap(cells.get(r["hand_index"], {}))[1:],
                     "best_damage": r["best_dmg"], "tier": tier,
                     "complete": complete})
     out.sort(key=lambda x: -x["win_rate"])
     return out
+
+
+def overall(conn, dh, enemy_name, first=True, device="server"):
+    """The matchup in one line: win rate and (going first) killed-on-turn-2
+    rate over every game, each with a 95% interval that resamples BOTH your
+    hands and their hands (stats.crossed_bootstrap) -- the honest one; a
+    Wilson interval over the pooled games is several times too narrow."""
+    win, lost, no_t1 = {}, {}, 0
+    for g in conn.execute(
+            "SELECT hand_index, enemy_seed, outcome FROM game_results WHERE deck_hash=? "
+            "AND enemy=? AND first=? AND device=?",
+            (dh, enemy_name, int(bool(first)), device)):
+        k = (g["hand_index"], g["enemy_seed"])
+        win.setdefault(k, []).append(g["outcome"] == "win")
+        lost.setdefault(k, []).append(g["outcome"] == "lost_t2")
+        no_t1 += g["outcome"] == "no_t1"
+    n = sum(map(len, win.values()))
+    return {"games": n, "hands": len({h for h, _e in win}),
+            "enemy_hands": len({e for _h, e in win}), "no_t1": no_t1,
+            "win": stats.crossed_bootstrap(win), "lost_t2": stats.crossed_bootstrap(lost)}

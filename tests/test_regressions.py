@@ -5851,3 +5851,25 @@ def test_device_down_requeues_the_job_instead_of_ending_it(tmp_path, monkeypatch
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
     assert row["state"] == "queued" and row["error"].startswith("waiting for duelpc")
     assert jobs.claim(conn, "duelpc")["id"] == jid
+
+
+def test_matchup_interval_resamples_both_hands_not_games():
+    """24 hands x 10 enemy hands x 10 replays is 2400 games, but the replays
+    of one pairing are near-copies: the interval must reflect 24 and 10, not
+    2400. Pinned on a design where hands differ and replays agree."""
+    import random
+    from skills import stats
+
+    r = random.Random(3)
+    strength = {h: r.random() for h in range(24)}
+    cells = {(h, e): [int(r.random() < strength[h])] * 10
+             for h in range(24) for e in range(10)}
+    n = 2400
+    w = sum(map(sum, cells.values()))
+    p, lo, hi = stats.crossed_bootstrap(cells)
+    _p, wlo, whi = stats.wilson(w, n)
+    assert abs(p - w / n) < 1e-12 and lo < p < hi
+    assert hi - lo > 3 * (whi - wlo)
+    # one cell, or nothing: no false precision
+    assert stats.crossed_bootstrap({}) == (0.0, 0.0, 1.0)
+    assert stats.crossed_bootstrap({(0, 0): [1, 1, 1]}) == (1.0, 0.0, 1.0)

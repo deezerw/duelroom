@@ -571,6 +571,7 @@ def games_view(name=None):
                         "device_label": remote.DEVICES[device].label
                         if device in remote.DEVICES else device,
                         "rows": rows,
+                        "overall": game.overall(c, dh, enemy, first=first, device=device),
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours,

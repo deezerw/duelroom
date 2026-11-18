@@ -99,6 +99,13 @@
 {% for e in enemies %}
 <div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}{% if e.device != 'server' %} · on {{ e.device }}{% endif %}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
+  {% set o = e.overall %}
+  <p style="margin:.2rem 0 .6rem">Wins <span class="rate">{{ (o.win[0] * 100)|round|int }}%</span>
+    <span class="muted">(95%: {{ (o.win[1] * 100)|round|int }}–{{ (o.win[2] * 100)|round|int }}%)</span>{% if e.first %}
+    · killed on turn 2 <span class="rate">{{ (o.lost_t2[0] * 100)|round|int }}%</span>
+    <span class="muted">({{ (o.lost_t2[1] * 100)|round|int }}–{{ (o.lost_t2[2] * 100)|round|int }}%)</span>{% endif %}
+    <span class="muted">· {{ o.games }} games, {{ o.hands }} of your hands × {{ o.enemy_hands }} of theirs{% if o.no_t1 %}, {{ o.no_t1 }} with no turn 1{% endif %}.
+    The range is how sure we are: it narrows with more hands, not with more replays of the same ones.</span></p>
 <div class="panel">
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
      href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **e.watch_args) }}">▶ Watch latest game</a>
@@ -122,6 +129,7 @@
         <td>Hand {{ r.hand_index + 1 }}{% if r.tier %}<span class="tier {{ r.tier }}">{{ r.tier }}</span>{% endif %}
           <div class="cards">{{ r.hand|join(', ') }}</div></td>
         <td><span class="rate">{{ (r.win_rate * 100)|round|int }}%</span>
+          <span class="muted" title="95% interval">{{ (r.ci[0] * 100)|round|int }}–{{ (r.ci[1] * 100)|round|int }}</span>
           <span class="muted">{{ r.wins }}/{{ r.games }}</span>
           {% if not r.complete %}<span class="muted">· running</span>{% endif %}</td>
         <td class="extra">{{ r.lost_t2 if e.first else (r.best_damage or 0) }}</td>

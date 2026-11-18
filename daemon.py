@@ -2242,7 +2242,7 @@ def _print_games(rows, first=True):
     for r in rows:
         tier = f"  {r['tier'].upper()}" if r["tier"] else ""
         print(f"  hand {r['hand_index'] + 1:>2}  {r['wins']:>2}/{r['games']:<2} "
-              f"{r['win_rate']:>5.0%}"
+              f"{r['win_rate']:>5.0%} ({r['ci'][0]:.0%}-{r['ci'][1]:.0%})"
               + (f"  lost on turn 2: {r['lost_t2']}" if first
                  else f"  best damage: {r['best_damage'] or 0}")
               + tier + ("" if r["complete"] else "  (incomplete)"))

@@ -118,3 +118,45 @@ def trials_needed(effect, baseline=0.5, z=1.96, power=0.84):
     """
     var = baseline * (1 - baseline)
     return math.ceil(2 * ((z + power) ** 2) * var / (effect ** 2))
+
+
+def crossed_bootstrap(cells, reps=2000, seed=0, level=0.95):
+    """Interval for a pooled rate over a crossed design: `cells` maps
+    (hand, enemy_hand) -> list of 0/1 outcomes.
+
+    Games are not independent: every game of one hand shares its strength,
+    and every game against one enemy hand shares theirs, so a Wilson
+    interval over the pooled games is far too narrow. This resamples hands
+    and enemy hands independently (with replacement) and recomputes the
+    pooled rate -- the standard bootstrap for a two-way random design,
+    slightly conservative. Returns (point, low, high).
+    """
+    import random
+
+    cells = {k: v for k, v in cells.items() if v}
+    if not cells:
+        return (0.0, 0.0, 1.0)
+    hands = sorted({h for h, _e in cells})
+    ehands = sorted({e for _h, e in cells})
+    sums = {k: (sum(v), len(v)) for k, v in cells.items()}
+    point = sum(s for s, _n in sums.values()) / sum(n for _s, n in sums.values())
+    if len(hands) == len(ehands) == 1:
+        return (point, 0.0, 1.0)    # one pairing: its replays say nothing about others
+    rng = random.Random(seed)
+    rates = []
+    for _ in range(reps):
+        hs = [rng.choice(hands) for _ in hands]
+        es = [rng.choice(ehands) for _ in ehands]
+        w = n = 0
+        for h in hs:
+            for e in es:
+                c = sums.get((h, e))
+                if c:
+                    w += c[0]
+                    n += c[1]
+        if n:
+            rates.append(w / n)
+    rates.sort()
+    lo = rates[int((1 - level) / 2 * len(rates))]
+    hi = rates[min(len(rates) - 1, int((1 + level) / 2 * len(rates)))]
+    return (point, lo, hi)
