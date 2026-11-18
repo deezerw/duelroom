@@ -920,6 +920,12 @@ def summary(conn, dh, enemy_name, games_per_hand=None, first=True, device="serve
                     # 95%, enemy hands resampled: a hand's games against one
                     # enemy hand are not independent of each other.
                     "ci": stats.crossed_bootstrap(cells.get(r["hand_index"], {}))[1:],
+                    # Pairings (enemy hands) whose replays disagree: the line is
+                    # there and the search only sometimes finds it -- for a real
+                    # match, a coin flip on who sees it, not a known result.
+                    "pairings": len(cells.get(r["hand_index"], {})),
+                    "borderline": sum(1 for v in cells.get(r["hand_index"], {}).values()
+                                      if 0 < sum(v) < len(v)),
                     "best_damage": r["best_dmg"], "tier": tier,
                     "complete": complete})
     out.sort(key=lambda x: -x["win_rate"])
@@ -941,6 +947,7 @@ def overall(conn, dh, enemy_name, first=True, device="server"):
         lost.setdefault(k, []).append(g["outcome"] == "lost_t2")
         no_t1 += g["outcome"] == "no_t1"
     n = sum(map(len, win.values()))
-    return {"games": n, "hands": len({h for h, _e in win}),
+    return {"games": n, "pairings": len(win),
+            "borderline": sum(1 for v in win.values() if 0 < sum(v) < len(v)), "hands": len({h for h, _e in win}),
             "enemy_hands": len({e for _h, e in win}), "no_t1": no_t1,
             "win": stats.crossed_bootstrap(win), "lost_t2": stats.crossed_bootstrap(lost)}
