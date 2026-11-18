@@ -406,6 +406,8 @@ stage is complete and verified.
 8. `STAGE8.md` — Matchup testing: top-3 boards per hand, impact score per card, shared enemy hands, 10 runs, locals weighting
 9. `STAGE9.md` — Finish the game: win rate by turn 3, duds — **gates passed, core built** (`game.py`, `/games`), impact score built; going-second left
 10. ~~Tests on another machine~~ — **done** (`remote.py`; duelpc runs games jobs, results keyed by device, Wake-on-LAN; see "Tests on another machine")
+11. `STAGE11.md` — Pick the turn-1 board that survives: away-day runs on duelpc, board data, a learned board choice, paired A/B (prerequisites done)
+12. `STAGE12.md` — A move prior for the search (GPU), only if Stage 11 pays off
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
