@@ -116,3 +116,11 @@ theirs 81%, they kill through ours 92%+). A fixed script is visible to the attac
 rollouts (CLAUDE.md "The limit, seen in a trace"), so more attacker budget increasingly
 measures "can the search play around the script", not a real game. Budgets NOT changed;
 asked the user whether to strengthen the defender first.
+
+**2026-11-18, user chose: stronger defender first.** `tools/experiments/defender_family.py` runs
+8 candidate scripts (hold until 0/1/2/3, `game.SCRIPTS` neg1/rev1/all1/all2) alone on the
+plateau's 72 kill runs (16x) and 72 brk runs (8x), 1152 searches on duelpc; the summary
+builds the family greedily. Then: DEFENCES = the family that stops the most, re-check the kill
+plateau under it, set budgets, then board data. Side gate (b) (Storm vs blank) read -2.1%
+(can't tell): Storm used in 15/140 games, 0 won -- the break ran at 1x, which the plateau says
+is far from converged; re-run (b) at the new break budget.
