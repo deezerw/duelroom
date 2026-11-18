@@ -54,7 +54,7 @@
       <code>tools/build_rooted_solver.sh</code></p>
   {% endif %}
   {% for job in active_jobs %}
-    <p style="margin:0 0 .4rem">{% if job.state == 'running' %}<b>Playing now on {{ job.device }}</b>{% else %}Queued on {{ job.device }}{% endif %}
+    <p style="margin:0 0 .4rem">{% if job.state == 'running' %}<b>Playing now on {{ job.device }}</b>{% elif job.error and job.error.startswith('waiting for') %}<b>Waiting for {{ job.device }}</b> to come back (off or in Windows) — it resumes on its own, checked every 5 min{% else %}Queued on {{ job.device }}{% endif %}
       (job <a href="{{ url_for('views.job_detail', job_id=job.id) }}">{{ job.id }}</a>).
       {% if job.state == 'running' %}Results below fill in as each game finishes.{% endif %}</p>
   {% endfor %}

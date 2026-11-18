@@ -2464,9 +2464,15 @@ def cmd_games(conn, args):
         return
     if not device or device == "server":
         _warn_if_busy("these games")
-    _print_games(game.run(conn, path, path.stem, enemy, runs=runs,
-                          enemy_hands=ehands, workers=workers, from_end=from_end,
-                          first=first, device=device), first)
+    try:
+        res = game.run(conn, path, path.stem, enemy, runs=runs, enemy_hands=ehands,
+                       workers=workers, from_end=from_end, first=first, device=device)
+    except remote.DeviceDown as e:
+        # SystemExit, not an exception: `run` below prints and swallows
+        # those, and the job would end "done" with its games unplayed.
+        print(f"device went away: {e}; the finished games are kept")
+        raise SystemExit(remote.EXIT_DOWN)
+    _print_games(res, first)
 
 
 COMMANDS = {

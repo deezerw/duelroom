@@ -20,7 +20,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from skills import db, engine
+from skills import db, engine, remote
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "results" / "joblogs"
@@ -162,6 +162,15 @@ def run(conn, job):
         _finish(conn, job["id"], "failed", str(e))
         return "failed"
 
+    if code == remote.EXIT_DOWN:
+        # Its device is off or in Windows. Back in the queue: the lane waits
+        # and retries, and the games already played are not played again.
+        tail = "\n".join(log.read_text().splitlines()[-1:]) if log.exists() else ""
+        with conn:
+            conn.execute("UPDATE jobs SET state='queued', started_at=NULL, pid=NULL, "
+                         "error=? WHERE id=?",
+                         (f"waiting for {device_of(job)}: {tail[-300:]}", job["id"]))
+        return "waiting"
     if code != 0:
         tail = "\n".join(log.read_text().splitlines()[-3:]) if log.exists() else ""
         _finish(conn, job["id"], "failed", f"exit {code}: {tail[-400:]}")

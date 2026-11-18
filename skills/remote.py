@@ -63,6 +63,9 @@ STATIC = (
 STAMP = Path.home() / ".duelroom-solver-stamp"
 WAKE_WAIT_S = 240
 SSH_LOST = 255
+# A job process exits with this when its device went away (EX_TEMPFAIL):
+# the worker queues the job again instead of failing it, and games resume.
+EXIT_DOWN = 75
 
 
 class DeviceDown(RuntimeError):

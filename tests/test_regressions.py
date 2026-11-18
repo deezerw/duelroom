@@ -5819,3 +5819,35 @@ def test_remote_solve_mirrors_the_command(tmp_path, monkeypatch):
     calls.clear()
     with pytest.raises(remote.DeviceDown):
         remote.run(dev, ["/bin/solver", "LOSE"], {}, 300)
+
+
+def test_device_down_requeues_the_job_instead_of_ending_it(tmp_path, monkeypatch):
+    """The PC going away mid-job (off, or booted into Windows) used to end the
+    games job "done": the dispatcher swallows exceptions, so exit 0. It now
+    exits EXIT_DOWN and the job goes back in the queue to resume."""
+    import pytest
+    import daemon
+    from skills import db, game, remote
+    from web import jobs
+
+    def gone(*a, **k):
+        raise remote.DeviceDown("duelpc did not wake")
+    monkeypatch.setattr(game, "run", gone)
+    monkeypatch.setattr(daemon, "_resolve_deck", lambda name, conn: tmp_path / "deck.ydk")
+    with pytest.raises(SystemExit) as e:
+        daemon.cmd_games(None, ["deck", "Angelechy-Meta", "--device", "duelpc"])
+    assert e.value.code == remote.EXIT_DOWN
+
+    conn = db.connect(tmp_path / "t.db")
+    monkeypatch.setattr(jobs, "LOGS", tmp_path / "logs")
+
+    class Proc:
+        pid = 1
+        def wait(self):
+            return remote.EXIT_DOWN
+    monkeypatch.setattr(jobs.subprocess, "Popen", lambda *a, **k: Proc())
+    jid = jobs.enqueue(conn, "games", "deck", enemy="E", device="duelpc")
+    assert jobs.run(conn, jobs.claim(conn, "duelpc")) == "waiting"
+    row = conn.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+    assert row["state"] == "queued" and row["error"].startswith("waiting for duelpc")
+    assert jobs.claim(conn, "duelpc")["id"] == jid

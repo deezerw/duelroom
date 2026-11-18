@@ -24,6 +24,7 @@ from skills import db, remote  # noqa: E402
 from web import jobs  # noqa: E402
 
 POLL_S = 3
+RETRY_S = 300     # a job whose device is away: try again this often
 _stop = threading.Event()
 
 
@@ -43,6 +44,8 @@ def lane(device):
               flush=True)
         state = jobs.run(conn, job)
         print(f"worker[{device}]: job {job['id']} -> {state}", flush=True)
+        if state == "waiting":
+            _stop.wait(RETRY_S)
 
 
 def main():
@@ -51,14 +54,19 @@ def main():
     conn = db.connect()
 
     # A job left 'running' by a crashed worker would block the queue
-    # forever, since nothing else ever clears that state.
+    # forever, since nothing else ever clears that state. Games resume
+    # where they stopped, so those go back in the queue; the rest fail.
     with conn:
+        q = conn.execute(
+            "UPDATE jobs SET state='queued', started_at=NULL, pid=NULL, "
+            "error='worker restarted while this job was running; resuming' "
+            "WHERE state='running' AND kind='games'").rowcount
         n = conn.execute(
             "UPDATE jobs SET state='failed', error='worker restarted while "
             "this job was running', finished_at=datetime('now') "
             "WHERE state='running'").rowcount
-    if n:
-        print(f"worker: reset {n} orphaned running job(s)", flush=True)
+    if q or n:
+        print(f"worker: {q} orphaned games job(s) requeued, {n} failed", flush=True)
 
     lanes = [threading.Thread(target=lane, args=(d,), name=d, daemon=True)
              for d in remote.DEVICES]
