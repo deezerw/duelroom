@@ -104,3 +104,15 @@ every flip one direction: their kill check 38 -> 53 -> 65% lost; our break going
 33 -> 49 -> 58% won. Turn 3 had the goal[0] bug (42 lines dropped, re-run on the hands
 whose goal opens with a board piece). Running now on duelpc: t3 refill, then kill and brk
 at 8x/16x (`--stages kill,brk --levels 8,16`). Budgets change only once both flatten.
+
+**2026-11-18, plateau at 8x/16x** (kill and brk, same 72 runs):
+- brk (our break going second): 33 / 49 / 58 / **81 / 81%** won at 1/2/4/8/16x, 0 flips 8x -> 16x
+  and seeds agree 100% from 8x: converged at 8x (480 s).
+- kill (their turn-2 kill check): 38 / 53 / 65 / 75 / **92%** lost, every flip toward lost, still
+  climbing at 16x (320 s a defence). NOT converged.
+- t3 (13 board-target hands only): 87 / 89 / 94% won, small; et1 and t1 flat.
+Read together: given time, the ATTACKER beats the scripted defender on both sides (we break
+theirs 81%, they kill through ours 92%+). A fixed script is visible to the attacker's
+rollouts (CLAUDE.md "The limit, seen in a trace"), so more attacker budget increasingly
+measures "can the search play around the script", not a real game. Budgets NOT changed;
+asked the user whether to strengthen the defender first.
