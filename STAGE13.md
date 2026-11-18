@@ -78,5 +78,5 @@ hand (Dominus Impulse, Ghost Ogre). (b) is now -3 Engraver +3 Alexandrite going 
 which must read "hurts": -7.3% (95% -15.4 to +1.0), 46% -> 39% on 240 pairings. The right
 direction, the interval just touches zero. Next: the main deck is being re-trained (job
 448, Trivikarma fix), so its games go stale; once they are re-played, run (b) again with 4
-runs instead of 2 (half the interval width is the extra pairings' sqrt(2)) before
+runs instead of 2 (about 0.7x the interval width, if run noise dominates) before
 calling the gate.
