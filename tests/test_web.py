@@ -1277,3 +1277,18 @@ def test_jobs_page_and_its_live_panel_render(client):
     r = client.get("/jobs/live")
     assert r.status_code == 200 and b"refreshes every 10 s" in r.data
 
+
+def test_new_banlist_banner_shows_and_dismisses(client, monkeypatch):
+    from web import views
+    note = {"name": "2026.10 TCG", "engine": "2026.09 TCG", "found_at": "x",
+            "changes": [("Ash Blossom", "Unlimited", "Limited")],
+            "decks": {"imported": [("Ash Blossom", 3, 1)]}}
+    monkeypatch.setattr(views, "_banlist_note", lambda c: note)
+    acked = []
+    from skills import banlist
+    monkeypatch.setattr(banlist, "ack", lambda c: acked.append(1))
+    _logged_in(client)
+    r = client.get("/jobs")
+    assert b"New TCG banlist: 2026.10 TCG" in r.data and b"3x Ash Blossom (max 1)" in r.data
+    client.post("/banlist/ack")
+    assert acked

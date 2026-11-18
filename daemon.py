@@ -34,6 +34,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   hand <deck.ydk>           exact opening-hand math
   pilot <deck> <cards>      solve ONE hand (or `random`): board, steps, weak points
   check <deck.ydk>          legality and banlist check
+  banlist [ack]             is there a newer TCG banlist? (run daily by cron); ack clears the banner
   decks                     list .ydk files in assets/decks/
   import <src> [name]       add a deck: .ydk path, ydke:// URI, or ygoprodeck URL
   mydeck [name]             show or set the deck commands default to
@@ -473,6 +474,31 @@ def cmd_hand(conn, args):
         print(f"  {k:>8}  {b5:6.1f}%  {b6:6.1f}%")
     print("\n  (a floor, not the real brick rate — a hand can hold a starter and")
     print("   still have no line. Stage 3 measures the real number.)")
+
+
+def cmd_banlist(conn, args):
+    from skills import banlist, card_db
+
+    if args and args[0] == "ack":
+        banlist.ack(conn)
+        print("banlist notice cleared")
+        return
+    note = banlist.check(conn)
+    print(f"engine list: {banlist.parse(banlist.LOCAL.read_text())[0]}; "
+          f"upstream: {db.get_meta(conn, 'banlist_upstream')}")
+    if note:
+        print(f"NEW BANLIST: {note['name']} -- {len(note['changes'])} cards changed")
+        for c, a, b in note["changes"]:
+            row = card_db.resolve(conn, c)
+            print(f"  {row['name'] if row else c}: {banlist.WORDS[a]} -> {banlist.WORDS[b]}")
+        for deck, bad in note["decks"].items():
+            print(f"  {deck} breaks it: " + ", ".join(
+                f"{n}x {(card_db.resolve(conn, c) or {'name': c})['name']} (max {m})"
+                for c, n, m in bad))
+    else:
+        print("no new banlist")
+    # the card mirror's own banlist (YGOPRODeck, used by `check`)
+    print(card_db.sync(conn))
 
 
 def cmd_check(conn, args):
@@ -2484,6 +2510,7 @@ COMMANDS = {
     "flex": cmd_flex,
     "hand": cmd_hand,
     "check": cmd_check,
+    "banlist": cmd_banlist,
     "decks": cmd_decks,
     "import": cmd_import,
     "mydeck": cmd_mydeck,

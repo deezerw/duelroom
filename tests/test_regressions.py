@@ -6203,3 +6203,33 @@ def test_our_searches_never_point_sp_at_our_own_cards(monkeypatch, tmp_path):
     assert args[args.index("--no-self-target") + 1] == "29301450"
     assert game.self_target_args() == ["--no-self-target", "29301450"]
 
+
+def test_banlist_check_flags_a_new_list_once_with_changes_and_deck_hits(tmp_path, monkeypatch):
+    """The daily check: upstream's header differs from the engine's list ->
+    one notice (what changed, which decks break it), not again the next day;
+    ack clears the banner."""
+    from skills import banlist, db
+
+    local = tmp_path / "0TCG.lflist.conf"
+    local.write_text("#[2026.09 TCG]\n!2026.09 TCG\n#Forbidden\n111 0 --A\n#Limited\n222 1 --B\n")
+    decks = tmp_path / "decks"
+    decks.mkdir()
+    (decks / "mine.ydk").write_text("#main\n333\n333\n444\n#extra\n!side\n333\n")
+    monkeypatch.setattr(banlist, "LOCAL", local)
+    real_hits = banlist.deck_hits
+    monkeypatch.setattr(banlist, "deck_hits", lambda limits: real_hits(limits, decks))
+    conn = db.connect(tmp_path / "t.db")
+
+    assert banlist.parse(local.read_text()) == ("2026.09 TCG", {111: 0, 222: 1})
+    same = banlist.parse(local.read_text())
+    assert banlist.check(conn, upstream=same) is None          # nothing new
+
+    new = ("2026.10 TCG", {111: 1, 333: 1})                       # A up, B free, 333 hit
+    note = banlist.check(conn, upstream=new)
+    assert note["name"] == "2026.10 TCG" and note["engine"] == "2026.09 TCG"
+    assert note["changes"] == [(111, 0, 1), (222, 1, 3), (333, 3, 1)]
+    assert note["decks"] == {"mine": [(333, 3, 1)]}               # main + side count
+    assert banlist.notice(conn)["name"] == "2026.10 TCG"
+    assert banlist.check(conn, upstream=new) is None              # seen: once only
+    banlist.ack(conn)
+    assert banlist.notice(conn) is None

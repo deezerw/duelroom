@@ -678,6 +678,14 @@ and is dead without it. **Fixed 2026-11-18 at the user's request** (`drill.NEEDS
 and `game._pieces` counts only live pieces (a bare Desirae neither). Bests re-scored: hands
 0, 1, 2, 5, 6 lost one interruption each; re-trained 2026-11-18.
 
+**Daily banlist check (2026-11-18, user asked):** cron 06:15 runs `daemon.py banlist`
+(log results/banlist.log): Project Ignis's upstream 0TCG.lflist.conf over HTTPS vs the engine's
+LFLists checkout, plus the card mirror's own sync. A list not seen before shows a banner on every
+page (what changed, which decks break it); `daemon.py banlist ack` or the banner's dismiss clears
+it. Moving the ENGINE to the new list is manual (LFLists + CardScripts + BabelCDB together, then
+setup and the gate). First run found 2026.10 TCG (45 changes) over the engine's 2026.09.
+**Decks live in `engine.DECKS`** (env DUELROOM_DECKS overrides); the tests use pinned copies.
+
 **Patch 0007 (2026-11-18), `--no-self-target`:** at the searcher's single-pick target prompt
 of a listed card's effect (its link is already on the chain there), picks of only its own
 cards are dropped. `game.NO_SELF_TARGET = (S:P Little Knight,)` on our turn 1 and lethal turns:

@@ -23,7 +23,7 @@ from .auth import login_required
 
 bp = Blueprint("views", __name__)
 ROOT = Path(__file__).resolve().parent.parent
-DECKS = ROOT / "assets" / "decks"
+DECKS = engine.DECKS
 ROOT_RESULTS = ROOT / "results"
 IMPACT_READ_S = 3       # replays read per games-page load, at most this long
 
@@ -63,10 +63,37 @@ def _chrome():
     card mirror.
     """
     try:
-        return {"active_deck": db.get_meta(conn(), "active_deck")}
+        c = conn()
+        return {"active_deck": db.get_meta(c, "active_deck"),
+                "banlist_note": _banlist_note(c)}
     except Exception:
         # The chrome must never be the reason a page fails to render.
-        return {"active_deck": None}
+        return {"active_deck": None, "banlist_note": None}
+
+
+def _banlist_note(c):
+    """The daily check's notice of a new TCG banlist (skills/banlist.py),
+    with card names; None (one meta lookup) on every ordinary day."""
+    from skills import banlist
+
+    note = banlist.notice(c)
+    if not note:
+        return None
+    name = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
+    return {**note,
+            "changes": [(name(code), banlist.WORDS[a], banlist.WORDS[b])
+                        for code, a, b in note["changes"]],
+            "decks": {d: [(name(code), n, m) for code, n, m in bad]
+                      for d, bad in note["decks"].items()}}
+
+
+@bp.route("/banlist/ack", methods=["POST"])
+@login_required
+def banlist_ack():
+    from skills import banlist
+
+    banlist.ack(conn())
+    return redirect(request.referrer or url_for("views.index"))
 
 
 @bp.route("/")

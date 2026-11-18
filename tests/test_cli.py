@@ -82,6 +82,7 @@ def test_every_command_is_either_walked_or_excluded():
         "cards", "meta", "images", "setup", "solve", "ladder", "gate",
         "boards", "optimize", "second", "gauntlet", "floodgates", "pilot",
         "train", "import", "export", "snapshot", "threats",
+        "banlist",      # network (GitHub + YGOPRODeck) and writes meta; unit-tested
     }
     registered = set(daemon.COMMANDS)
     missing = registered - walked - excluded

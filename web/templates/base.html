@@ -200,6 +200,23 @@
   </div>
 </header>
 <main>
+  {% if banlist_note and session.get('in') %}
+  <div class="msg">
+    <form method="post" action="{{ url_for('views.banlist_ack') }}" style="float:right;margin:0">
+      <button>dismiss</button></form>
+    <b>New TCG banlist: {{ banlist_note.name }}</b> (the engine still plays {{ banlist_note.engine }})
+    &middot; {{ banlist_note.changes|length }} cards changed
+    {% for d, bad in banlist_note.decks.items() %}
+      &middot; <b>{{ d }}</b> breaks it:
+      {% for n, k, m in bad %}{{ k }}x {{ n }} (max {{ m }}){{ ", " if not loop.last }}{% endfor %}
+    {% endfor %}
+    <details><summary>what changed</summary>
+      <ul>{% for n, a, b in banlist_note.changes %}<li>{{ n }}: {{ a }} &rarr; {{ b }}</li>{% endfor %}</ul>
+      Results so far are measured on the old list; moving the engine to the new one
+      (LFLists + CardScripts + BabelCDB, then setup and the gate) is a separate step.
+    </details>
+  </div>
+  {% endif %}
   {% with msgs = get_flashed_messages() %}
     {% for m in msgs %}<div class="msg">{{ m }}</div>{% endfor %}
   {% endwith %}
