@@ -198,7 +198,7 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
         jobs = [j for j in jobs if (j[0]["hand_index"], j[1]) in allowed]
     # jobs already done are in `jobs` too (one() skips them): the whole plan
     (OUT / "plan.json").write_text(json.dumps(
-        {"keys": [[j[0]["hand_index"], j[1], j[2], j[3]] for j in jobs]}))
+        {"keys": [[j[0]["hand_index"], j[1], j[2], j[4]] for j in jobs]}))
     print(f"{len(jobs)} boards to make on {dev.name} ({dev.workers} at once), "
           f"{len(done)} done", flush=True)
     with ThreadPoolExecutor(dev.workers) as ex:
