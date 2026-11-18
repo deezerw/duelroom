@@ -39,7 +39,10 @@ causal question: same hands, same enemy hands, card X instead of card Y.
 
 ## Steps
 
-1. **Harness + gate.** `side.py`: build the swapped hands, play only the
+1. **Harness + gate.** *Harness built 2026-11-17* (`skills/side.py`, 7fb8a59;
+   test pins the in-place swap and the paired diff). Gate running on the server:
+   `tools/experiments/side_gate.py` (blank -3 Ash +3 Alexandrite going first;
+   Lightning Storm vs the blank going second, 10 enemy hands x 2 runs). `side.py`: build the swapped hands, play only the
    touched pairings, store results keyed by config (like device). Gate before
    anyone reads a number: (a) a blank card (vanilla) swapped for a real hand
    trap must measure as no better or worse; (b) a known strong breaker going
