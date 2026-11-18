@@ -38,7 +38,12 @@ verified.
    games jobs requeue and resume when their device goes away (EXIT_DOWN 75,
    lane retries every 5 min) instead of ending "done"; matchup and per-hand
    intervals on `/games`.
-1. **Away-day runs you can leave alone.**
+1. **Away-day runs you can leave alone.** *Mostly done 2026-11-17:* the /jobs
+   queue per machine with left/time from measured games (c0f91ec); heat log +
+   pause at 3 min over 89 C CPU / 85 C GPU (612629b; measured 75 C with 8
+   solvers); borderline pairings on /games (7c15b38); PyTorch 2.11 cu128 in
+   `~/duelroom-ml` on duelpc (GPU checked). Left: the GPU lane (built with the
+   first GPU job, step 3) and the .ps1 test (needs the user at Windows).
    - A queue view: what will run on duelpc, in order, with an estimate from
      measured throughput (t1_backup: 1440 kill checks in 76 min).
    - Thermal log per job (k10temp, GPU temp/power every minute into the job
@@ -47,14 +52,17 @@ verified.
      drop to 7 workers while a GPU job runs. Measure the X3D cache cost
      first: solver states/s with and without training running.
    - Test `tools/duelpc/reboot-to-duelpc.ps1` once (untested so far).
-2. **Board data.** For each trained hand x enemy hand (going first): K
+2. **Board data.** `tools/ml/board_data.py` built + smoke-tested (one
+   position: 12 turn 1s -> 10 distinct boards, labels mixed); full run waits
+   for the plateau budgets. For each trained hand x enemy hand (going first): K
    distinct end boards (K ~ 10-20) from turn-1 solves that vary the seed and
    the goal (full goal, interruptions only, goal minus one card, ...), each
    through the real kill check (`--goal-win`, OTK_MS, DEFENCES). Store
    board, how it was made, kill-check result per defence. Resumable, on
    duelpc. Start with seeds + goal variants (no solver patch); patch the
    solver to dump distinct end states only if those boards are too alike.
-3. **Board model.** Inputs: our end board, hand, GY, banished (ygorl's
+3. **Board model.** `tools/ml/board_model.py` (offline pick scoring, GBM
+   baseline) written; the GPU network comes after the GBM numbers. Inputs: our end board, hand, GY, banished (ygorl's
    encoder, `ygorl.env.encoding`: 160 cards x 23 features) and the enemy
    deck. Target: survives their turn 2. Within-hand evaluation (Spearman,
    as board_value.py), held-out hands. GBM baseline on the server/CPU first,
@@ -65,7 +73,8 @@ verified.
    the real kill check; report lost-on-turn-2 and wins by turn 3 with
    intervals, and the extra turn-1 time B costs. **Ask the user before
    making B the games' turn 1** (design change).
-1b. **Budget plateau + spread games** (see Decided below) before step 2, so
+1b. **Budget plateau + spread games** -- `tools/experiments/budget_plateau.py`,
+   full run on duelpc started 2026-11-17 (36 positions a side, 2 seeds) (see Decided below) before step 2, so
    the board data is made with converged searches.
 5. **Re-test the deck** vs the meta with the adopted turn 1, intervals shown.
 
