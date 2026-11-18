@@ -514,6 +514,17 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
             "log": str(r["log"]), "defence": chosen}
 
 
+def steer(goal, fallback):
+    """The target a lethal search (our turn 3, or our break going second)
+    is steered by: a BOARD piece of the hand's turn-1 goal. A goal that
+    opens with a hand trap kept in hand ("42141493@hand") posts an empty
+    target, and every line the search reached was then rejected: going
+    first, the 11 of 24 hands whose goal opens that way won 6 of the 564
+    turn 3s they reached, the rest 623 of 728 (found by Stage 13's blank
+    gate, 2026-11-18)."""
+    return next((t for t in goal if not str(t).endswith("@hand")), fallback)
+
+
 def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
           player=0, turn=3, extra=(), binary=None, env_extra=None,
           defences=None):
@@ -768,13 +779,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / f"run{k}"
             scratch.mkdir(parents=True, exist_ok=True)
             goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
-            # The steer for the lethal search: a BOARD piece of the hand's
-            # goal. A goal that opens with hand traps kept in hand
-            # ("42141493@hand") posts an empty target, and every line the
-            # search reached was then rejected -- no line, no damage read.
-            steer = next((t for t in goal if not t.endswith("@hand")),
-                         enemy_target)
-            t2 = turn3(t1["start"], t1["prefix"], steer,
+            t2 = turn3(t1["start"], t1["prefix"], steer(goal, enemy_target),
                        set(theirs) | set(json.loads(t1["pieces"])),
                        scratch, ms, eseed * 100 + k, player=1, turn=2)
             out = {"outcome": "win" if t2["won"] else "no_win",
@@ -795,8 +800,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             else:
                 goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
                 enemy_pieces = _pieces(t2["board"], 1, cards)
-                t3 = turn3(t2["start"], t2["prefix"], goal[0] if goal else
-                           enemy_target, set(theirs) | set(enemy_pieces),
+                t3 = turn3(t2["start"], t2["prefix"], steer(goal, enemy_target),
+                           set(theirs) | set(enemy_pieces),
                            scratch, ms, seed)
                 out = {"outcome": "win" if t3["won"] else "no_win",
                        "damage": t3["damage"], "line": t3["line"],

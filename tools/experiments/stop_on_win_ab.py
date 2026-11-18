@@ -47,7 +47,7 @@ def run_arm(g, arm, k, cards, theirs):
     respond = set(theirs) | set(game._pieces(game.replay(prefix).board, 1, cards))
     scratch = OUT / f"h{g['hand_index']}e{g['enemy_seed']}r{g['run']}" / arm
     t0 = time.time()
-    r = game.turn3(start, prefix, goal[0], respond, scratch, game.engine.SOLVE_MS,
+    r = game.turn3(start, prefix, game.steer(goal, goal[0]), respond, scratch, game.engine.SOLVE_MS,
                    g["enemy_seed"] * 100 + g["run"],
                    # Always stated: game.turn3 passes STOP_ON_WIN itself, and
                    # the solver keeps the LAST value given, so arm A says 0.

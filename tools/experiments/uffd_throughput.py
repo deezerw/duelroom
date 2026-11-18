@@ -51,7 +51,7 @@ def main():
         goal = trainer.split_goal(json.loads(g["best_goal"]))[0]
         respond = set(theirs) | set(game._pieces(game.replay(d / "prefix.yrpX").board, 1, cards))
         scratch = OUT / f"p{i}" / arm
-        r = game.turn3(d / "start.yrpX", d / "prefix.yrpX", goal[0], respond, scratch,
+        r = game.turn3(d / "start.yrpX", d / "prefix.yrpX", game.steer(goal, goal[0]), respond, scratch,
                        game.engine.SOLVE_MS, g["enemy_seed"] * 100 + g["run"],
                        extra=["--stop-on-win", "0"],
                        # game.ARENA_ENV turns uffd on; the control turns it off

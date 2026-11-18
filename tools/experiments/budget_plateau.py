@@ -58,11 +58,6 @@ def kill(start, prefix, enemy_target, ours, scratch, otk_ms, seed):
     return True
 
 
-def steer_for(goal, enemy_target):
-    # As game.run going second: a BOARD piece of the hand's goal.
-    return next((t for t in goal if not t.endswith("@hand")), enemy_target)
-
-
 def plan(conn, dh, n=POSITIONS):
     """Every (stage, stored turn-1 row, rep) this bench runs, seed 0 of every
     stage first: a run cut short still covers every search."""
@@ -160,8 +155,8 @@ def main(limit=None):
                 else:
                     ep = set(theirs) | set(game._pieces(t2["board"], 1, cards))
                     for L in LEVELS:
-                        t3 = game.turn3(t2["start"], t2["prefix"], goal[0] if goal else
-                                        enemy_target, ep, scratch / f"L{L}", sms * L, seed)
+                        t3 = game.turn3(t2["start"], t2["prefix"], game.steer(goal, enemy_target),
+                                        ep, scratch / f"L{L}", sms * L, seed)
                         rec["levels"][L] = {"won": int(t3["won"]), "damage": t3["damage"]}
             elif stage == "et1":
                 for L in LEVELS:
@@ -171,14 +166,14 @@ def main(limit=None):
                     if t1 is None:
                         rec["levels"][L] = {"ok": 0}
                         continue
-                    b = game.turn3(t1["start"], t1["prefix"], steer_for(goal, enemy_target),
+                    b = game.turn3(t1["start"], t1["prefix"], game.steer(goal, enemy_target),
                                    set(theirs) | set(game._pieces(t1["board"], 0, cards)),  # turn 1's seat, as game.run
                                    scratch / f"L{L}b", sms, seed, player=1, turn=2)
                     rec["levels"][L] = {"ok": 1, "reached": int(t1["reached"]),
                                         "won": int(b["won"])}
             elif stage == "brk":
                 for L in LEVELS:
-                    b = game.turn3(r["start"], r["prefix"], steer_for(goal, enemy_target),
+                    b = game.turn3(r["start"], r["prefix"], game.steer(goal, enemy_target),
                                    set(theirs) | set(json.loads(r["pieces"] or "[]")),
                                    scratch / f"L{L}", sms * L, seed, player=1, turn=2)
                     rec["levels"][L] = {"won": int(b["won"]), "damage": b["damage"]}

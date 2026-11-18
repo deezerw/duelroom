@@ -6035,3 +6035,19 @@ def test_live_time_left_is_only_the_rate_seen_under_watch(tmp_path, monkeypatch)
     left, seen = watch._left("k", 104, 200, now=2200)             # 4 in 1200 s
     assert seen == 4 and left == 96 * 300
     assert watch._left("k", 5, 200, now=2300) == (None, 0), "a restarted count starts over"
+
+
+def test_lethal_searches_are_never_steered_by_a_card_kept_in_hand():
+    # Going first, turn 3 was steered by goal[0]; for the 11 of 24 hands
+    # whose goal opens "<hand trap>@hand" that posts an empty target and
+    # every line is rejected: they won 6 of 564 turn 3s (board-target hands
+    # 623 of 728). Going second had the fix; turn 3 did not.
+    import inspect
+    from skills import game
+    assert game.steer(["14558127@hand", "42141493@hand", "82135803"], "E") == "82135803"
+    assert game.steer(["7436169@szone:fd", "1"], "E") == "7436169@szone:fd"
+    assert game.steer(["14558127@hand"], "E") == "E"
+    assert game.steer([], "E") == "E"
+    src = inspect.getsource(game.run)
+    assert src.count("turn3(") == 2 and src.count("steer(goal, enemy_target)") == 2
+    assert "goal[0]" not in src

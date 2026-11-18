@@ -61,7 +61,7 @@ def run_arm(g, arm, deck, enemy, theirs, cards):
     game.DEFENDER = "smart" if smart else "greedy"
     t0 = time.time()
     try:
-        r = game.turn3(start, prefix, goal[0], respond, scratch, engine.SOLVE_MS,
+        r = game.turn3(start, prefix, game.steer(goal, goal[0]), respond, scratch, engine.SOLVE_MS,
                        g["enemy_seed"] * 100 + g["run"], binary=binary,
                        defences=(1,))      # one script per arm, not the family
     finally:
