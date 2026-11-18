@@ -65,12 +65,26 @@ verified.
    the real kill check; report lost-on-turn-2 and wins by turn 3 with
    intervals, and the extra turn-1 time B costs. **Ask the user before
    making B the games' turn 1** (design change).
+1b. **Budget plateau + spread games** (see Decided below) before step 2, so
+   the board data is made with converged searches.
 5. **Re-test the deck** vs the meta with the adopted turn 1, intervals shown.
 
-## Open question for the user before step 2 sizes runs
+## Decided (user, 2026-11-17): play as well as possible, then spread the games
 
-The interval is driven by HOW MANY hands (24 ours, 10 theirs), not replays:
-resampling hands only gives 16-38%, enemy hands only 22-32%, and each pairing
-is replayed 10 times. Fewer replays (1-2) and more trained hands / enemy
-hands would narrow the range for the same compute. That changes the games'
-design (RUNS, trainer hand count): ask before doing it.
+The user plays real matches from this data, so the solver's decisions must be
+as close to optimal as the compute allows; within that, the games may change.
+
+- **Play quality first: the budget plateau.** On a fixed sample of pairings
+  (both sides, all three searches: our turn 1, their turn-2 kill check, our
+  turn 3 / going-second break), run 1x, 2x, 4x the current budget (SOLVE_MS
+  60 s, OTK_MS 20 s), paired seeds. A search whose result still moves from
+  2x to 4x is not converged: raise it until it stops. Our side and their
+  side both count -- a lazy enemy flatters your deck just as much.
+- **Then spread the games.** Replays of one pairing are near-copies
+  (resampling hands only gives 16-38%, enemy hands only 22-32%); RUNS goes
+  10 -> 2, and the freed compute buys more enemy hands and more trained
+  hands. Two replays stay as a consistency check: a pairing whose two runs
+  disagree is marked "borderline" on /games (the line is there, the solver
+  only finds it sometimes -- a real opponent may or may not).
+- Old 10-run games stay readable but are never pooled with the new ones
+  (same rule as devices).

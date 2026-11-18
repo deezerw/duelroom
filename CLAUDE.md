@@ -408,6 +408,7 @@ stage is complete and verified.
 10. ~~Tests on another machine~~ — **done** (`remote.py`; duelpc runs games jobs, results keyed by device, Wake-on-LAN; see "Tests on another machine")
 11. `STAGE11.md` — Pick the turn-1 board that survives: away-day runs on duelpc, board data, a learned board choice, paired A/B (prerequisites done)
 12. `STAGE12.md` — A move prior for the search (GPU), only if Stage 11 pays off
+13. `STAGE13.md` — Side cards: paired in/out swaps on the games harness, going first and second, with intervals (replaces the broken `optimizer.side_plan`)
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,

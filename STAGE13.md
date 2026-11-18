@@ -1,0 +1,61 @@
+# Stage 13 — Side cards: which ones actually help, against what
+
+Goal (user, 2026-11-17): know which side cards to bring and what to take out,
+from games played as well as the solver can play them, to use in real matches.
+Same rules as Stage 11: engine-played numbers, paired A/B, 95% intervals.
+Delete this file when every step is done and verified.
+
+## Why a new harness (the old one is broken)
+
+`optimizer.side_plan` / `propose_side` exist but are deliberately unreachable:
+they score through `breaking.going_second`, which is UNSUPPORTED (CLAUDE.md
+Known limitations; 0 of 4 against one vanilla Alexandrite Dragon). The games
+harness (`game.py`, Stage 9) is the trustworthy one: real turn-1 boards, the
+smart defender, turn 2 / turn 3. Side testing is built on it, and the old
+side plan is deleted once this works.
+
+`impact.py` already says how games went when a card WAS used vs was not, but
+that is observational (good hands use more cards). A side decision needs the
+causal question: same hands, same enemy hands, card X instead of card Y.
+
+## Design: a paired swap
+
+- **A side config** = the main deck with swaps (in X, out Y), e.g. +2 Evenly
+  Matched -2 Ash going second.
+- **Same hands, card swapped in place.** Each trained hand that holds Y gets X
+  in Y's slot; hands without Y are unchanged and their games are reused, not
+  replayed (they are identical by construction). Same enemy hands, same seeds.
+  So the comparison is exact for the hands it touches, and the cost is only
+  the touched hands.
+- **Changed hands need new lines**: the trainer re-solves only those (X may
+  open a line, or just be a hand trap the defender fires: `game.respond_codes`
+  reads it from the deck already).
+- **Both sides of the coin**, going first and going second separately: a
+  board breaker can be gold going second and a dead card going first.
+- **The result per config**: change in win rate (and killed on turn 2 going
+  first) vs the main deck, paired by pairing, with a crossed-bootstrap 95%
+  interval on the DIFFERENCE, plus how often X was drawn and how often it was
+  used. Verdict: helps / hurts / can't tell yet (interval crosses 0).
+
+## Steps
+
+1. **Harness + gate.** `side.py`: build the swapped hands, play only the
+   touched pairings, store results keyed by config (like device). Gate before
+   anyone reads a number: (a) a blank card (vanilla) swapped for a real hand
+   trap must measure as no better or worse; (b) a known strong breaker going
+   second (Evenly Matched / Lightning Storm vs a built Angelechy board) must
+   measure as a clear gain. If either fails, the harness is wrong: stop.
+2. **Candidates.** Side cards from the meta lists of the enemy archetype
+   (`deck_cards.section='side'`), the user's own side, and the common hand
+   traps / breakers. "Out" candidates: the lowest-impact cards from
+   `impact.py` for that matchup, and dead-going-first / dead-going-second
+   cards from the games' "used" data.
+3. **Screen, then confirm.** A cheap pass (fewer enemy hands) on every
+   in/out pair drops the clear losers; the survivors get the full run on
+   duelpc away days. Report only confirmed results as advice.
+4. **Their side too.** Games 2 and 3: the enemy sides in against you. Run the
+   enemy's side configs from its meta list against your main deck, so you see
+   which of their side cards hurt you most (what to play around).
+5. **`/side` page**: per matchup, going first / going second: the configs
+   that help with intervals, what to take out, how often the card is drawn
+   and used, and Watch links for games where it made the difference.
