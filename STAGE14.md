@@ -49,3 +49,22 @@ both sides, as everywhere in the solver.
 4. If it saves a real share: make it the games' turn-2 check (ask the user first: it is
    the measurement every number rests on), re-check the plateau, set budgets, re-play.
    If not: write down that the boards really are breakable, and go on with budgets.
+
+## Result, kill check (2026-11-18): the searched defender stops nothing real
+
+72 plateau runs at 4x (OTK_MS x 4), duelpc, 0 failures, 2.5 min and 5 searches per position.
+Attacker wins: scripted family 1+2 65%, searched 74% (it starts from ONE script), beats
+both 57%. It takes away 6 of the scripted wins and gives 12 -- seed noise from one more
+randomized search, not defence: 10 runs learned a rule, and in all 10 the attacker
+re-planned around it and won; 19 runs were held by the plain script; the rest the attacker
+beat every reply on its line (8 of its lines passed no defender window with any choice).
+Seeds agree on 81% of positions.
+
+**Read:** our turn-1 boards really are breakable; no single reply at any window saves them.
+The lever is the board, not the defender (see the game review of h16/e1009 run 8: the
+games' turn 1 falls back by goal overlap and leaves free interruptions in hand). DEFENCES
+stays (1, 2); `game.searched_defence` stays as a tool, not the games' check.
+
+Not run: the brk stage (their board, we break). Their turn-1 board comes from a ONE-card
+target (Angelechy Endgame Problem@szone), so the enemy activates it and passes; measuring
+a defender on that board says nothing until the enemy has real goals (asked the user).
