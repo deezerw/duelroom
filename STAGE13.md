@@ -69,3 +69,14 @@ causal question: same hands, same enemy hands, card X instead of card Y.
 steered by `goal[0]`, and "14558127@hand" posts an empty target (fixed, `game.steer`, see
 CLAUDE.md "Going second"). Bad games deleted; `side_gate.py` now also re-plays the main
 deck's runs 0..1. Re-run it after the current process ends, then read (a) again.
+
+**2026-11-18, second read (after the steer fix): (a) PASSES, (b) is underpowered.**
+(a) blank vs main going first: -1.2% (95% -8.5 to +5.4), as a blank should. Lightning
+Storm read -2.1% vs the blank, but it was the wrong "must help" control: it resolved in all
+15 games it was drawn and cleared their backrow, yet Angelechy stops the break from the
+hand (Dominus Impulse, Ghost Ogre). (b) is now -3 Engraver +3 Alexandrite going second,
+which must read "hurts": -7.3% (95% -15.4 to +1.0), 46% -> 39% on 240 pairings. The right
+direction, the interval just touches zero. Next: the main deck is being re-trained (job
+448, Trivikarma fix), so its games go stale; once they are re-played, run (b) again with 4
+runs instead of 2 (half the interval width is the extra pairings' sqrt(2)) before
+calling the gate.
