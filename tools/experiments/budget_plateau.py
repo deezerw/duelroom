@@ -51,7 +51,7 @@ def kill(start, prefix, enemy_target, ours, scratch, otk_ms, seed):
     base = ["--start", str(start), "--root", str(prefix), "--no-ref",
             "--target", enemy_target, "--player", "1", "--turns", "2"]
     for v in game.DEFENCES:
-        k = game._solve(prefix, base + game.defender_args(ours, hold_until=v)
+        k = game._solve(prefix, base + game.defence_args(ours, v)
                         + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
                         scratch, f"otk-h{v}", otk_ms, seed)
         if not (k["solution"] and game._winner(k["solution"]) == 1):

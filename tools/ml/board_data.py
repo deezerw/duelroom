@@ -135,7 +135,7 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
                     k = game._solve(prefix, ["--start", start, "--root", prefix, "--no-ref",
                                              "--target", enemy_target, "--player", "1",
                                              "--turns", "2"]
-                                    + game.defender_args(ours | set(ours_hand), hold_until=v)
+                                    + game.defence_args(ours | set(ours_hand), v)
                                     + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
                                     scratch, f"otk-h{v}", OTK_MS, seed)
                     lost.append(int(bool(k["solution"]) and game._winner(k["solution"]) == 1))

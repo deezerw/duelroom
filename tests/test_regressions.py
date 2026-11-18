@@ -6051,3 +6051,28 @@ def test_lethal_searches_are_never_steered_by_a_card_kept_in_hand():
     src = inspect.getsource(game.run)
     assert src.count("turn3(") == 2 and src.count("steer(goal, enemy_target)") == 2
     assert "goal[0]" not in src
+
+
+def test_defence_scripts_vary_order_and_hold_and_keep_the_default_flags(monkeypatch):
+    # A fixed defender script is visible to the attacker's rollouts; the
+    # family a kill must beat gets named scripts beside hold-until ints.
+    from skills import game
+    TRAP, NEG, REST = 100, 200, 300
+    monkeypatch.setattr(game, "is_hand_trap", lambda c, cards: c == TRAP)
+    monkeypatch.setattr(game, "_is_negate", lambda c, cards: c == NEG)
+    assert game.respond_order([REST, NEG, TRAP], None) == [TRAP, NEG, REST]
+    assert game.respond_order([REST, NEG, TRAP], None, "negates") == [NEG, TRAP, REST]
+    assert game.respond_order([REST, 301, NEG, TRAP], None, "reverse") == [TRAP, NEG, 301, REST]
+
+    def flags(d):
+        a = game.defence_args([TRAP, NEG, REST], d, cards=object())
+        return {k: a[a.index(k) + 1] for k in ("--opp-respond", "--opp-hold", "--opp-hold-until")
+                if k in a}
+    assert flags(1) == {"--opp-respond": "100|200|300", "--opp-hold": "200|300"}
+    assert game.defence_args([TRAP, NEG, REST], 1, cards=object()) == \
+        game.defender_args([TRAP, NEG, REST], cards=object()), "today's script unchanged"
+    assert flags(2)["--opp-hold-until"] == "2"
+    assert "--opp-hold" not in flags(0), "0 = nothing held"
+    assert flags("all2") == {"--opp-respond": "100|200|300", "--opp-hold": "100|200|300",
+                             "--opp-hold-until": "2"}
+    assert flags("neg1")["--opp-respond"] == "200|100|300"

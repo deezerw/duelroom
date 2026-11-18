@@ -203,6 +203,16 @@ DEFENDER = "smart"
 # win against EVERY one. Costs one kill search per entry, one lethal search
 # per entry for won turns. (1,) = a single script.
 DEFENCES = (1, 2)
+# Named scripts a DEFENCES entry may also be (an int n = SCRIPTS-free
+# "hold board pieces until n monsters", as above). Candidates measured by
+# tools/experiments/defender_family.py: answer order (`respond_order`
+# tiers), what is held, and until when. hold_until 0 = nothing held.
+SCRIPTS = {
+    "neg1": {"order": "negates", "hold_until": 1},   # negates before hand traps
+    "rev1": {"order": "reverse", "hold_until": 1},   # same tiers, last-listed first
+    "all1": {"hold_traps": True, "hold_until": 1},   # hand traps wait too
+    "all2": {"hold_traps": True, "hold_until": 2},
+}
 
 
 def _interrupts(code, cards):
@@ -243,36 +253,54 @@ def respond_codes(deck, cards=None, extra=()):
                   | {int(c) for c in extra})
 
 
-def respond_order(codes, cards):
-    """The defender's pieces, earliest answers first: hand traps, then
-    negates, then the rest; stable (numeric) within a tier."""
+def respond_order(codes, cards, order="traps"):
+    """The defender's pieces, earliest answers first. "traps": hand traps,
+    then negates, then the rest, numeric within a tier; "negates": negates
+    first, then hand traps; "reverse": the "traps" tiers, last code first."""
     codes = sorted({int(c) for c in codes if c})
-    tier = {c: (0 if is_hand_trap(c, cards) else 1 if _is_negate(c, cards) else 2)
-            for c in codes}
-    return sorted(codes, key=lambda c: (tier[c], c))
+    trap = {c: is_hand_trap(c, cards) for c in codes}
+    neg = {c: _is_negate(c, cards) for c in codes}
+    if order == "negates":
+        key = {c: (0 if neg[c] else 1 if trap[c] else 2, c) for c in codes}
+    elif order == "reverse":
+        key = {c: (0 if trap[c] else 1 if neg[c] else 2, -c) for c in codes}
+    elif order == "traps":
+        key = {c: (0 if trap[c] else 1 if neg[c] else 2, c) for c in codes}
+    else:
+        raise ValueError(f"unknown respond order {order!r}")
+    return sorted(codes, key=key.get)
 
 
-def defender_args(respond, cards=None, smart=None, hold_until=1):
+def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
+                  hold_traps=False):
     """Solver flags for the non-searching side. `respond`: the codes it may
-    use (ordered by `respond_order`); with the smart defender, every piece
-    that is not a hand trap is held until the attacker controls `hold_until`
-    monsters."""
+    use (ordered by `respond_order(order)`); with the smart defender, every
+    piece that is not a hand trap (every piece, with `hold_traps`) is held
+    until the attacker controls `hold_until` monsters (0: nothing held)."""
     smart = (DEFENDER == "smart") if smart is None else smart
     if cards is None:
         from ygorl.engine.duel import default_cards
         cards = default_cards()
-    codes = respond_order(respond, cards)
+    codes = respond_order(respond, cards, order)
     args = ["--opp-greedy"]
     if codes:
         args += ["--opp-respond", "|".join(map(str, codes))]
     if smart:
         args.append("--opp-smart")
-        hold = [c for c in codes if not is_hand_trap(c, cards)]
-        if hold:
+        hold = [c for c in codes if hold_traps or not is_hand_trap(c, cards)]
+        if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:
                 args += ["--opp-hold-until", str(int(hold_until))]
     return args
+
+
+def defence_args(respond, defence, cards=None):
+    """`defender_args` for one DEFENCES entry: an int n (hold until n) or a
+    SCRIPTS name."""
+    if isinstance(defence, str):
+        return defender_args(respond, cards, **SCRIPTS[defence])
+    return defender_args(respond, cards, hold_until=defence)
 
 
 def _damage(prefix, approach, player):
@@ -487,7 +515,7 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
         best = None
         for v in defences:
             label = "t2-otk" if v == defences[0] else f"t2-otk-h{v}"
-            k = _solve(prefix, base + defender_args(our_respond, hold_until=v)
+            k = _solve(prefix, base + defence_args(our_respond, v)
                        + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
                        scratch, label, otk_ms, seed)
             if k["solution"] and _winner(k["solution"]) == 1:
@@ -499,7 +527,7 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
         if best is None:
             return {"lost": True, "line": first_kill, "defence": None}
         chosen = best[1]
-    r = _solve(prefix, base + defender_args(our_respond, hold_until=chosen),
+    r = _solve(prefix, base + defence_args(our_respond, chosen),
                scratch, "t2", ms, seed)
     # No line at all: the enemy passes its turn from the root.
     src = r["solution"] or r["approach"] or prefix
@@ -542,7 +570,7 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
         args = ["--start", start, "--root", prefix, "--no-ref",
                 "--target", our_target, "--player", str(player), "--turns", str(turn),
                 "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
-            + defender_args(enemy_respond, hold_until=v) + list(extra)
+            + defence_args(enemy_respond, v) + list(extra)
         r = _solve(prefix, args, scratch, label, ms, seed, binary=binary,
                    env_extra=env_extra)
         if r["solution"] and _winner(r["solution"]) == player:
