@@ -41,7 +41,7 @@ ENEMY_HANDS = 10
 # Budgets: the games' until the plateau test (tools/experiments/
 # budget_plateau.py) says a search needs more.
 T1_MS = engine.SOLVE_MS
-OTK_MS = game.OTK_MS
+OTK_MS = game.OTK_MS * 4     # Stage 15: the plateau says 1x misses most kills
 _lock = threading.Lock()
 
 
@@ -56,11 +56,35 @@ def signature(board):
     return hashlib.sha1(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def variants(goal, pieces):
+def free_targets(conn, hand, goal):
+    """Opening-hand cards whose whole play is putting them down -- Field and
+    Continuous Spells face up, Traps set -- and that the goal leaves out
+    (Stage 15: 31% of the games' turn-1 boards ended with a Scream, a
+    Perlereino or a Sulliek still in hand). Quick-Plays stay in hand."""
+    from skills import card_db
+
+    have = {int(str(t).split("@")[0]) for t in goal}
+    out = []
+    for c in dict.fromkeys(int(x) for x in hand):
+        r = card_db.resolve(conn, c)
+        if not r or c in have:
+            continue
+        if r["type"].startswith("Trap"):
+            out.append(f"{c}@szone:fd")
+        elif r["type"].startswith("Spell") and r["race"] in ("Field", "Continuous"):
+            out.append(f"{c}@szone")
+    return out
+
+
+def variants(goal, pieces, free=()):
     out = [("full", goal)]
     ints = [t for t in goal if int(str(t).split("@")[0]) in pieces]
     if ints and ints != goal:
         out.append(("int", ints))
+    if free:
+        out.append(("free", goal + list(free)))
+        if ints and ints != goal:
+            out.append(("intfree", ints + list(free)))
     if len(goal) > 1:
         out += [(f"minus{i}", goal[:i] + goal[i + 1:]) for i in range(len(goal))]
     return out
@@ -164,7 +188,9 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
     # position with one board says nothing within-hand).
     jobs = [(h, e, name, goal, rep)
             for e in seeds for h in hands
-            for name, goal in variants(trainer.split_goal(json.loads(h["best_goal"]))[0], pieces)
+            for name, goal in variants(trainer.split_goal(json.loads(h["best_goal"]))[0], pieces,
+                                       free_targets(conn, json.loads(h["hand"]),
+                                                    trainer.split_goal(json.loads(h["best_goal"]))[0]))
             for rep in range(REPS)]
     if limit:
         order = list(dict.fromkeys((h["hand_index"], e) for h, e, *_ in jobs))

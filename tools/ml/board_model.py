@@ -92,9 +92,12 @@ def picks(rows, scores):
         # The games play the full goal ONCE: its expected label over the
         # full-goal turn 1s (a board made twice counts twice), not the
         # better of its seeds.
-        full = [r["lost"] for r, _ in bs for v in r["variants"] if v == "full"]
+        def made_by(name):
+            xs = [r["lost"] for r, _ in bs for v in r["variants"] if v == name]
+            return sum(xs) / len(xs) if xs else None
         out[pos] = {
-            "full": sum(full) / len(full) if full else None,
+            "full": made_by("full"),
+            "free": made_by("free"),       # the goal + the hand's free cards (Stage 15)
             "pieces": max(bs, key=lambda b: (len(b[0]["pieces"]), -b[1]))[0]["lost"],
             "random": sum(r["lost"] for r, _ in bs) / len(bs),
             "model": min(bs, key=lambda b: b[1])[0]["lost"],     # lowest P(lost)
@@ -153,11 +156,13 @@ def main():
         if not sub:
             continue
         print(f"\n{subset} ({len(sub)}): lost on turn 2 with the board picked by")
-        for m in ("full", "pieces", "random", "model", "oracle"):
+        for m in ("full", "free", "pieces", "random", "model", "oracle"):
             vals = [v[m] for v in sub.values() if v[m] is not None]
-            print(f"  {m:7} {sum(vals) / len(vals):.0%}")
-        d, lo, hi = boot_diff(sub, "model", "full")
-        print(f"  model - full: {d:+.1%} (95% {lo:+.1%} to {hi:+.1%}); negative = fewer losses")
+            if vals:
+                print(f"  {m:7} {sum(vals) / len(vals):.0%}  ({len(vals)} positions)")
+        for m in ("pieces", "free", "model"):
+            d, lo, hi = boot_diff(sub, m, "full")
+            print(f"  {m} - full: {d:+.1%} (95% {lo:+.1%} to {hi:+.1%}); negative = fewer losses")
 
 
 if __name__ == "__main__":

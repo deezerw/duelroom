@@ -410,6 +410,7 @@ stage is complete and verified.
 12. `STAGE12.md` — A move prior for the search (GPU), only if Stage 11 pays off
 13. `STAGE13.md` — Side cards: paired in/out swaps on the games harness, going first and second, with intervals (replaces the broken `optimizer.side_plan`)
 14. `STAGE14.md` — A searched defender: best replies on the attacker's line, then the attacker re-plans (scripts proved readable)
+15. `STAGE15.md` — Turn 1 that adapts to disruption: several goals asked, the board with the most live interruptions kept, free cards played
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
