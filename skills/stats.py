@@ -120,7 +120,7 @@ def trials_needed(effect, baseline=0.5, z=1.96, power=0.84):
     return math.ceil(2 * ((z + power) ** 2) * var / (effect ** 2))
 
 
-def crossed_bootstrap(cells, reps=2000, seed=0, level=0.95):
+def crossed_bootstrap(cells, reps=2000, seed=0, level=0.95, bounds=(0.0, 1.0)):
     """Interval for a pooled rate over a crossed design: `cells` maps
     (hand, enemy_hand) -> list of 0/1 outcomes.
 
@@ -129,19 +129,21 @@ def crossed_bootstrap(cells, reps=2000, seed=0, level=0.95):
     interval over the pooled games is far too narrow. This resamples hands
     and enemy hands independently (with replacement) and recomputes the
     pooled rate -- the standard bootstrap for a two-way random design,
-    slightly conservative. Returns (point, low, high).
+    slightly conservative. Values may be any numbers (a paired difference
+    per cell, say); `bounds` is the "know nothing" interval returned when
+    there is too little to resample. Returns (point, low, high).
     """
     import random
 
     cells = {k: v for k, v in cells.items() if v}
     if not cells:
-        return (0.0, 0.0, 1.0)
+        return (0.0, *bounds)
     hands = sorted({h for h, _e in cells})
     ehands = sorted({e for _h, e in cells})
     sums = {k: (sum(v), len(v)) for k, v in cells.items()}
     point = sum(s for s, _n in sums.values()) / sum(n for _s, n in sums.values())
     if len(hands) == len(ehands) == 1:
-        return (point, 0.0, 1.0)    # one pairing: its replays say nothing about others
+        return (point, *bounds)    # one pairing: its replays say nothing about others
     rng = random.Random(seed)
     rates = []
     for _ in range(reps):

@@ -5922,3 +5922,60 @@ def test_queue_estimate_counts_what_is_left_and_never_guesses(tmp_path):
     assert abs(est["seconds"] - (10 * 80 + 5 * engine.SOLVE_MS / 1000) / w) < 1e-6
     q = jobs.queue(conn)
     assert [r["id"] for r in q["duelpc"]["queued"]] == [j] and not q["server"]["queued"]
+
+
+def test_side_config_swaps_the_same_copies_and_compares_paired(tmp_path, monkeypatch):
+    """A side config changes only the swapped cards: the hand's copy of Y
+    becomes X, the deck order keeps every other card where it was, a goal
+    that held Y in hand drops it, and the comparison is per pairing."""
+    import json
+    from pathlib import Path
+    from skills import db, side, trainer
+    from skills.deck import Deck
+
+    monkeypatch.setattr(side, "SIDE_DIR", tmp_path / "side")
+    base = tmp_path / "base.ydk"
+    src = Deck.from_ydk(Path("assets/decks/imported.ydk"))
+    Deck(name="base", main=list(src.main), extra=list(src.extra), side=[]).write_ydk(base)
+    main = [int(c) for c in src.main]
+    Y, X = 14558127, 43096270            # Ash Blossom -> a vanilla
+    assert main.count(Y) == 3
+    hand = [Y, *[c for c in main if c != Y][:4]]
+    rest = list(main)
+    for c in hand:
+        rest.remove(c)
+    order = rest + hand                   # the hand at the tail
+    conn = db.connect(tmp_path / "t.db")
+    dh = trainer.deck_hash(base)
+    rec = {"start": {"decks": {"a": {"main": order}}}, "lines": []}
+    with conn:
+        conn.execute("INSERT INTO trainer_hands (deck_hash, deck, hand_index, hand_seed, hand, "
+                     "best_goal, best_record) VALUES (?,?,?,?,?,?,?)",
+                     (dh, "base", 0, "1", json.dumps(hand),
+                      json.dumps([f"{Y}@hand", str(hand[1])]), json.dumps(rec)))
+        conn.execute("INSERT INTO trainer_prefs VALUES ('base','interrupter',?, '', 'x')", (Y,))
+
+    r = side.make(conn, "base", [(Y, X, 1)], base_path=base)
+    assert (r["hands"], r["hands_touched"], r["goals_changed"]) == (1, 1, 1)
+    row = conn.execute("SELECT * FROM trainer_hands WHERE deck_hash=?", (r["deck_hash"],)).fetchone()
+    new_order = json.loads(row["best_record"])["start"]["decks"]["a"]["main"]
+    assert json.loads(row["hand"])[0] == X and new_order[-5:][0] == X
+    assert [c for c in new_order[:-5]] == rest        # every other card in place
+    assert json.loads(row["best_goal"]) == [str(hand[1])]
+    assert trainer.prefs(conn, r["name"])["interrupters"] == {Y}
+    assert Deck.from_ydk(r["path"]).main.count(Y) == 2
+
+    # paired comparison: the config wins one more pairing out of two
+    monkeypatch.setattr(side.engine, "ROOT", tmp_path)
+    (tmp_path / "assets" / "decks").mkdir(parents=True)
+    base.rename(tmp_path / "assets" / "decks" / "base.ydk")
+    with conn:
+        for h, outs in ((dh, ["win", "lost_t2", "no_win", "no_win"]),
+                        (r["deck_hash"], ["win", "lost_t2", "win", "win"])):
+            for i, (e, k) in enumerate(((1000, 0), (1000, 1), (1001, 0), (1001, 1))):
+                conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                             "enemy_seed, first, device, run, outcome, created) "
+                             "VALUES (?,?,0,0,?,1,'server',?,?,'x')", (h, "E", e, k, outs[i]))
+    c = side.compare(conn, "base", r["name"], "E", first=True)
+    assert c["pairings"] == 2 and abs(c["win"][0] - 0.5) < 1e-9
+    assert (c["base_win"], c["side_win"]) == (0.25, 0.75)
