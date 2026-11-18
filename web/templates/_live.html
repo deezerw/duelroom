@@ -1,0 +1,49 @@
+{# The Jobs page's live panel: what each machine is doing right now, queued
+   or not (skills/watch.py). Fetched again every few seconds by jobs.html. #}
+{% macro dur(s) %}{% if s is none %}—{% elif s >= 3600 %}{{ (s / 3600)|round(1) }} h{% elif s >= 60 %}{{ (s / 60)|round|int }} min{% else %}{{ s|int }} s{% endif %}{% endmacro %}
+{% macro bar(frac, color='var(--accent)') %}<span style="display:inline-block;vertical-align:middle;width:120px;height:7px;background:var(--line);border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:{{ (frac * 100)|round(1) }}%;background:{{ color }}"></span></span>{% endmacro %}
+{% for name, d in live.items() %}
+  <div class="panel"{% if d.scripts or d.solvers %} style="border-color:#86d98b44"{% endif %}>
+    <strong>{{ name }}</strong>
+    {% if d.scripts or d.solvers %}<span class="pill ok">working</span> <span class="muted">{{ d.solvers|length }} solver{{ '' if d.solvers|length == 1 else 's' }} running</span>
+    {% else %}<span class="muted">idle</span>{% endif %}
+    {% set t = d.temps or (d.scripts|map(attribute='temps')|select|first) %}
+    {% if t %}<span class="muted mono" style="margin-left:8px">{{ t[6:] }}</span>{% endif %}
+
+    {% for s in d.scripts %}
+      <div style="margin-top:10px">
+        <b>{{ s.name }}</b> <span class="muted mono">{{ s.path }} {{ s.args|join(' ') }}</span>
+        <span class="muted">· running {{ dur(s.running_s) }}</span>
+        {% set p = s.progress %}
+        {% if p and p.error %}<div class="muted">progress unreadable: {{ p.error }}</div>
+        {% elif p and p.total %}
+          <div style="margin-top:4px">{{ bar(p.done / p.total, 'var(--ok)') }}
+            <span class="mono">{{ p.done }} / {{ p.total }}</span>
+            <span class="muted">({{ (100 * p.done / p.total)|round|int }}%) ·
+            {% if s.left_s is not none %}about {{ dur(s.left_s) }} left at the rate seen here
+            {% else %}time left shown once {{ 3 - (s.watched or 0) }} more finish while this page watches{% endif %}</span></div>
+          {% if p.parts %}<table style="margin-top:4px;width:auto">
+            {% for label, n, of in p.parts %}<tr><td class="muted" style="padding:1px 10px 1px 0">{{ label }}</td>
+              <td style="padding:1px 8px 1px 0">{{ bar(n / of if of else 0, 'var(--ok)' if n >= of else 'var(--accent)') }}</td>
+              <td class="mono" style="padding:1px 0">{{ n }} / {{ of }}{% if n >= of %} ✓{% endif %}</td></tr>{% endfor %}
+          </table>{% endif %}
+        {% else %}<div class="muted">no progress() in this script — its log is below</div>{% endif %}
+        {% if s.tail %}<details style="margin-top:4px"><summary class="muted" style="cursor:pointer">last log lines <span class="mono">{{ s.log }}</span></summary>
+          <pre class="mono" style="white-space:pre-wrap;font-size:11.5px;margin:4px 0 0;max-height:220px;overflow:auto">{{ s.tail|join('\n') }}</pre></details>{% endif %}
+      </div>
+    {% endfor %}
+
+    {% if d.solvers %}
+    <table style="margin-top:8px">
+      <thead><tr><th>solving</th><th>for</th><th>of its budget</th><th></th></tr></thead>
+      <tbody>{% for v in d.solvers %}
+        <tr><td class="mono">{{ v.tag }}</td><td class="muted">{{ v.script or '' }}</td>
+          <td>{% if v.frac is not none %}{{ bar(v.frac, 'var(--warn)' if v.frac > 0.9 else 'var(--accent)') }}{% endif %}</td>
+          <td class="mono muted">{{ dur(v.running_s) }}{% if v.budget_s %} / {{ dur(v.budget_s) }}{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% endif %}
+  </div>
+{% endfor %}
+<p class="muted" style="font-size:12px;margin:2px 0 14px">Live from the process table, updated {{ now }} · refreshes every 10 s.
+  A solve that stops before its budget found what it was looking for.</p>

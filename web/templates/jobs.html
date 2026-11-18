@@ -4,6 +4,25 @@
   <h1>Jobs</h1>
   <div class="sub">Solver runs queue here: one at a time per machine, the machines side by side.</div>
 </div>
+<h2>Right now</h2>
+<div id="live">{% include "_live.html" %}</div>
+<script>
+  // Refresh the live panel in place; keep open log disclosures open.
+  setInterval(async () => {
+    const box = document.getElementById("live");
+    const open = [...box.querySelectorAll("details[open] .mono")].map(e => e.textContent);
+    try {
+      const r = await fetch("{{ url_for('views.job_live') }}", {credentials: "same-origin"});
+      if (!r.ok) return;
+      box.innerHTML = await r.text();
+      box.querySelectorAll("details").forEach(d => {
+        const m = d.querySelector("summary .mono");
+        if (m && open.includes(m.textContent)) d.open = true;
+      });
+    } catch (e) {}
+  }, 10000);
+</script>
+<h2>Queue</h2>
 {% macro dur(s) %}{% if s >= 3600 %}{{ (s / 3600)|round(1) }} h{% else %}{{ (s / 60)|round|int }} min{% endif %}{% endmacro %}
 {% for d in devices %}
   <div class="panel"{% if d.rows %} style="border-color:#7aa2f744"{% endif %}>

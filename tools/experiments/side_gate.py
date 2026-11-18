@@ -43,6 +43,30 @@ def main():
     summary()
 
 
+def progress():
+    """For the Jobs page: games played per pass (hands x enemy hands x runs each)."""
+    from skills import trainer
+    conn = db.connect()
+    hands = conn.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? AND "
+                         "best_goal IS NOT NULL",
+                         (trainer.deck_hash(side.deck_file(BASE)),)).fetchone()[0]
+    per = hands * ENEMY_HANDS * side.RUNS
+    parts = []
+    for label, swap, first in (("blank, going first", VANILLA, 1),
+                               ("blank, going second", VANILLA, 0),
+                               ("Storm, going second", STORM, 0)):
+        path = side.deck_file(side.config_name(BASE, [(ASH, swap, 3)]))
+        n = 0
+        if path.exists():
+            n = conn.execute(
+                "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+                "AND enemy_seed >= 1000 AND enemy_seed < ? AND run < ?",
+                (trainer.deck_hash(path), ENEMY, first, 1000 + ENEMY_HANDS,
+                 side.RUNS)).fetchone()[0]
+        parts.append((label, n, per))
+    return {"done": sum(p[1] for p in parts), "total": per * len(parts), "parts": parts}
+
+
 def summary():
     conn = db.connect()
     blank, storm = configs(conn)

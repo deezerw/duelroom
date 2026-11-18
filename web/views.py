@@ -14,7 +14,7 @@ import json
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
                     trainer, game, impact, remote, stops,
-                    report as report_mod, scenarios, stats)
+                    report as report_mod, scenarios, stats, watch)
 from skills import deck as deck_mod
 from skills.deck import Deck
 
@@ -904,7 +904,15 @@ def job_list():
                         "up": remote.reachable(dev), "rows": rows, "total_s": total,
                         "temps": temps})
     return render_template("jobs.html", devices=devices, device_of=jobs.device_of,
-                           rows=jobs.recent(c), kinds=jobs.KINDS)
+                           rows=jobs.recent(c), kinds=jobs.KINDS, live=watch.snapshot(),
+                           now=datetime.now().strftime("%H:%M:%S"))
+
+
+@bp.route("/jobs/live")
+@login_required
+def job_live():
+    return render_template("_live.html", live=watch.snapshot(),
+                           now=datetime.now().strftime("%H:%M:%S"))
 
 
 @bp.route("/jobs/<int:job_id>")

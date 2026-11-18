@@ -63,23 +63,9 @@ def steer_for(goal, enemy_target):
     return next((t for t in goal if not t.endswith("@hand")), enemy_target)
 
 
-def main(limit=None):
-    from ygorl.engine.duel import default_cards
-
-    dev = remote.current()
-    remote.prepare(dev)
-    conn = db.connect()
-    cards = default_cards()
-    deck = ROOT / "assets" / "decks" / f"{DECK}.ydk"
-    enemy_deck = ROOT / "assets" / "decks" / f"{ENEMY}.ydk"
-    dh = trainer.deck_hash(deck)
-    enemy_target = game.scenarios.target_for(ENEMY)
-    theirs = game.enemy_respond_codes(enemy_deck, cards)
-    ours_hand = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
-    hands = {r["hand_index"]: dict(r) for r in conn.execute(
-        "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands "
-        "WHERE deck_hash=? AND best_goal IS NOT NULL", (dh,))}
-    n = int(limit) if limit else POSITIONS
+def plan(conn, dh, n=POSITIONS):
+    """Every (stage, stored turn-1 row, rep) this bench runs, seed 0 of every
+    stage first: a run cut short still covers every search."""
     pos = {}
     for first in (1, 0):
         rows = [dict(r) for r in conn.execute(
@@ -97,6 +83,31 @@ def main(limit=None):
         "device='server' AND ok=1 ORDER BY hand_index, enemy_seed", (dh, ENEMY))
         if (r["hand_index"], r["enemy_seed"]) in lives]
     pos["t3"] = random.Random(3).sample(rows, min(n, len(rows)))
+
+    def rows_for(st):
+        return pos["t3"] if st == "t3" else pos[1 if st in STAGES[1] else 0]
+    return [(st, rows_for(st)[i], rep) for rep in range(SEEDS) for i in range(n)
+            for st in (*STAGES[1], *STAGES[0]) if i < len(rows_for(st))]
+
+
+def main(limit=None):
+    from ygorl.engine.duel import default_cards
+
+    dev = remote.current()
+    remote.prepare(dev)
+    conn = db.connect()
+    cards = default_cards()
+    deck = ROOT / "assets" / "decks" / f"{DECK}.ydk"
+    enemy_deck = ROOT / "assets" / "decks" / f"{ENEMY}.ydk"
+    dh = trainer.deck_hash(deck)
+    enemy_target = game.scenarios.target_for(ENEMY)
+    theirs = game.enemy_respond_codes(enemy_deck, cards)
+    ours_hand = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
+    hands = {r["hand_index"]: dict(r) for r in conn.execute(
+        "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands "
+        "WHERE deck_hash=? AND best_goal IS NOT NULL", (dh,))}
+    n = int(limit) if limit else POSITIONS
+    jobs = plan(conn, dh, n)
     OUT.mkdir(parents=True, exist_ok=True)
     res_file = OUT / "results.jsonl"
     done = set()
@@ -184,16 +195,25 @@ def main(limit=None):
             print(f"{job[0]} h{job[1]['hand_index']} e{job[1]['enemy_seed']} r{job[2]}: "
                   f"failed: {type(exc).__name__}: {exc}", flush=True)
 
-    # Seed 0 of every stage first: a run cut short still covers every search.
-    def rows_for(st):
-        return pos["t3"] if st == "t3" else pos[1 if st in STAGES[1] else 0]
-    jobs = [(st, rows_for(st)[i], rep) for rep in range(SEEDS) for i in range(n)
-            for st in (*STAGES[1], *STAGES[0]) if i < len(rows_for(st))]
     print(f"{len(jobs)} tasks on {dev.name} ({dev.workers} at once), "
           f"{len(done)} already done", flush=True)
     with ThreadPoolExecutor(dev.workers) as ex:
         list(ex.map(guarded, jobs))
     summary(res_file)
+
+
+def progress(res_file=OUT / "results.jsonl"):
+    """For the Jobs page: tasks of the full plan done (results from other plans not counted)."""
+    conn = db.connect()
+    keys = [(st, r["hand_index"], r["enemy_seed"], rep) for st, r, rep in
+            plan(conn, trainer.deck_hash(ROOT / "assets" / "decks" / f"{DECK}.ydk"))]
+    done = set()
+    if res_file.exists():
+        for d in map(json.loads, res_file.read_text().splitlines()):
+            done.add((d["stage"], d["hand"], d["eseed"], d["rep"]))
+    parts = [(st, sum(k in done for k in keys if k[0] == st), sum(k[0] == st for k in keys))
+             for st in (*STAGES[1], *STAGES[0])]
+    return {"done": sum(k in done for k in keys), "total": len(keys), "parts": parts}
 
 
 METRIC = {"t1": "lost", "kill": "lost", "t3": "won", "et1": "won", "brk": "won"}

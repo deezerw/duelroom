@@ -170,11 +170,25 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
         order = list(dict.fromkeys((h["hand_index"], e) for h, e, *_ in jobs))
         allowed = set(order[:int(limit)])
         jobs = [j for j in jobs if (j[0]["hand_index"], j[1]) in allowed]
+    # jobs already done are in `jobs` too (one() skips them): the whole plan
+    (OUT / "plan.json").write_text(json.dumps(
+        {"keys": [[j[0]["hand_index"], j[1], j[2], j[3]] for j in jobs]}))
     print(f"{len(jobs)} boards to make on {dev.name} ({dev.workers} at once), "
           f"{len(done)} done", flush=True)
     with ThreadPoolExecutor(dev.workers) as ex:
         list(ex.map(guarded, jobs))
     summary()
+
+
+def progress():
+    """For the Jobs page: turn 1s made of the plan main() wrote."""
+    f, plan = OUT / "boards.jsonl", OUT / "plan.json"
+    if not plan.exists():
+        return None
+    keys = {tuple(k) for k in json.loads(plan.read_text())["keys"]}
+    made = {(d["hand"], d["eseed"], d["variant"], d["rep"])
+            for d in map(json.loads, f.read_text().splitlines())} if f.exists() else set()
+    return {"done": len(keys & made), "total": len(keys), "parts": []}
 
 
 def summary():

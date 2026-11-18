@@ -5979,3 +5979,59 @@ def test_side_config_swaps_the_same_copies_and_compares_paired(tmp_path, monkeyp
     c = side.compare(conn, "base", r["name"], "E", first=True)
     assert c["pairings"] == 2 and abs(c["win"][0] - 0.5) < 1e-9
     assert (c["base_win"], c["side_win"]) == (0.25, 0.75)
+
+
+def test_live_panel_sees_scripts_outside_the_queue_and_their_solvers(tmp_path, monkeypatch):
+    # Experiments run for hours outside the job queue; the Jobs page showed
+    # both machines idle while they worked. The live panel reads the
+    # process table: the script, its own progress(), its log, its solvers.
+    import os
+    import subprocess
+    import time
+    from skills import watch
+    monkeypatch.setattr(watch, "RATES", tmp_path / "rates.json")
+    solver = tmp_path / "combosolver"
+    os.symlink("/usr/bin/python3", solver)     # argv[0] is the name; sleep rejects the flags
+    script = tmp_path / "tools" / "experiments" / "fake_bench.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "def progress():\n"
+        "    return {'done': 1, 'total': 4, 'parts': [('t1', 1, 2), ('brk', 0, 2)]}\n"
+        "if __name__ == '__main__':\n"
+        f"    subprocess.Popen([{str(solver)!r}, '-c', 'import time; time.sleep(30)', '--solve-ms', '60000', '--outdir',\n"
+        f"                      {str(tmp_path / 'scratch' / 't1-h1-e1000-r0' / 'L2' / 'out-t1')!r}])\n"
+        "    print('temps duelpc: cpu 70 C, gpu 30 C 8 W', flush=True)\n"
+        "    time.sleep(30)\n")
+    log = (tmp_path / "run.log").open("w")
+    p = subprocess.Popen([sys.executable, str(script), "36"], stdout=log, stderr=log,
+                         env={**os.environ, "DUELROOM_DEVICE": "duelpc"})
+    try:
+        for _ in range(50):
+            snap = watch.snapshot()
+            mine = [s for d in snap.values() for s in d["scripts"] if s["pid"] == p.pid]
+            if mine and mine[0]["solvers"] and mine[0]["temps"]:
+                break
+            time.sleep(0.1)
+        s = mine[0]
+        assert s["name"] == "fake_bench" and s["args"] == ["36"]
+        assert s["progress"]["done"] == 1 and s["progress"]["total"] == 4
+        assert s["temps"].startswith("temps duelpc")
+        assert s["left_s"] is None, "no time left before anything finished under watch"
+        (sv,) = s["solvers"]
+        assert sv["tag"] == "t1-h1-e1000-r0/L2" and sv["budget_s"] == 60
+        assert sv["script"] == "fake_bench" and 0 <= sv["frac"] < 1
+        assert any(x is s for x in snap["server"]["scripts"]), "listed where its solver runs"
+    finally:
+        p.kill()
+        subprocess.run(["pkill", "-f", str(solver)])
+
+
+def test_live_time_left_is_only_the_rate_seen_under_watch(tmp_path, monkeypatch):
+    from skills import watch
+    monkeypatch.setattr(watch, "RATES", tmp_path / "rates.json")
+    assert watch._left("k", 100, 200, now=1000) == (None, 0)      # first sight: no rate yet
+    assert watch._left("k", 102, 200, now=1600)[0] is None        # 2 done: too few
+    left, seen = watch._left("k", 104, 200, now=2200)             # 4 in 1200 s
+    assert seen == 4 and left == 96 * 300
+    assert watch._left("k", 5, 200, now=2300) == (None, 0), "a restarted count starts over"

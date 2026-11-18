@@ -1266,3 +1266,11 @@ def test_delete_deck_moves_it_aside_and_respects_jobs(client, tmp_path, monkeypa
         c.commit()
 
     assert client.post("/deck/../etc/delete").status_code in (302, 404)
+
+
+def test_jobs_page_and_its_live_panel_render(client):
+    client.post("/login", data={"password": "pw"})
+    r = client.get("/jobs")
+    assert r.status_code == 200 and b"Right now" in r.data
+    r = client.get("/jobs/live")
+    assert r.status_code == 200 and b"refreshes every 10 s" in r.data
