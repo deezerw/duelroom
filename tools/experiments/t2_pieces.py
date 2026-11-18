@@ -51,7 +51,7 @@ for r in rows:
     pieces = t1.get((r["hand_index"], r["enemy_seed"]), set())
     try:
         ch = turn2_chains(r["line"])
-    except Exception as e:  # noqa
+    except Exception:  # noqa: BLE001 -- counted as unreadable
         stat[grp]["unreadable"] += 1
         continue
     ours = {code for ctl, code in ch if ctl == 0}
