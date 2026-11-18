@@ -671,7 +671,10 @@ to the attacker's rollouts. With Lars held until a monster was out, the enemy pl
 activation to draw it, then effect-less Synchro summons and attacks for lethal. A
 smarter script moves the bar; only a family of scripts (or a search on both sides) moves
 it further. Trivikarma, counted as a piece on 40 of 237 boards, needs Visas Starfrost
-and is dead without it -- a trainer scoring gap the user has asked to leave for now.
+and is dead without it. **Fixed 2026-11-18 at the user's request** (`drill.NEEDS_ON_FIELD`,
+`drill.never_live`): imported runs no Visas, so the trainer no longer counts or asks for it,
+and `game._pieces` counts only live pieces (a bare Desirae neither). Bests re-scored: hands
+0, 1, 2, 5, 6 lost one interruption each; re-trained 2026-11-18.
 
 ### Turn 1 in the trainer's duel (2026-11-13)
 

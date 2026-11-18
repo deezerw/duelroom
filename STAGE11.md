@@ -124,3 +124,9 @@ builds the family greedily. Then: DEFENCES = the family that stops the most, re-
 plateau under it, set budgets, then board data. Side gate (b) (Storm vs blank) read -2.1%
 (can't tell): Storm used in 15/140 games, 0 won -- the break ran at 1x, which the plateau says
 is far from converged; re-run (b) at the new break budget.
+**User chose: fix both.** Trivikarma (no Visas in imported) is dead everywhere now
+(`drill.NEEDS_ON_FIELD`); Desirae was already scored dead bare by the trainer and asked with
+its Sequence (`trainer.with_equips`) -- its dead copies in the GAMES come from turn 1 falling
+short of the goal under hand traps (full goal reached 8-15%), where the solver's best approach
+counts Desirae as overlap without its equip. Open: rank turn-1 approaches by live pieces.
+Re-training imported (8 h job) queued after the side gate.
