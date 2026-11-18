@@ -63,6 +63,7 @@ Fairness rules (STAGE8/9):
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -587,6 +588,111 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
                 "line": str(r["approach"]) if r["approach"] else None,
                 "defence": v}
     return out
+
+
+# --- the searched defender (Stage 14, patch 0006) ------------------------------
+#
+# A fixed script is readable: the attacker's rollouts see what it will do and
+# play around it (tools/experiments/defender_family.py: 8 scripts stopped no
+# more converged kills than 2). The searched defender answers on the attacker's
+# OWN line instead: at each of its chain windows on the winning line it tries
+# the replies it did not make (`_branches`), and the attacker is searched again
+# from just after each. A reply the attacker cannot beat (twice: a search can
+# miss a kill) becomes a RULE, and the attacker re-plans from the root against
+# it -- a rooted re-search alone would freeze the attacker's moves before the
+# window, which flatters the defender.
+
+ROUNDS = 3           # rule rounds before "the defender always had a reply"
+MAX_BRANCHES = 8     # replies tried per attacker line, in line order
+CONFIRM_SEED = 7919  # the second seed a saving reply must hold on
+
+
+def _branches(line, args, scratch, label):
+    """The defender's other replies on `line` (patch 0006 --opp-branches),
+    `args` the search's own flags (--start/--root/--player/defender). Runs
+    here: it is a replay, a second or two. [{k, at, trigger, mons, chosen,
+    alt, file}] in line order."""
+    from ygorl.solver.combo_solver import Workdir
+
+    scratch = Path(scratch)
+    wd = Workdir.create(scratch / f"wd-{label}")
+    out = scratch / f"br-{label}"
+    shutil.rmtree(out, ignore_errors=True)
+    cmd = [str(ROOTED_BIN), str(line), "--workdir", str(wd.path)]
+    for d in wd.scriptdirs:
+        cmd += ["--scriptdir", str(d)]
+    cmd += [str(a) for a in args] + ["--opp-branches", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=engine.env(), timeout=300)
+    f = out / "branches.jsonl"
+    if r.returncode != 0 or not f.exists():
+        raise RuntimeError(f"{label}: --opp-branches failed (exit {r.returncode}): "
+                           f"{(r.stdout or '')[-300:]}")
+    return [json.loads(l) for l in f.read_text().splitlines() if l.strip()]
+
+
+def rule_args(rules):
+    """Solver flags for learnt rules: ("fire"|"skip", piece, trigger, mons)."""
+    out = []
+    for kind, piece, trigger, mons in rules:
+        out += ["--opp-rule" if kind == "fire" else "--opp-skip",
+                f"{int(piece)}:{int(trigger)}@{int(mons)}"]
+    return out
+
+
+def _rule_of(b):
+    """The rule that makes the defender give branch `b`'s reply again."""
+    if b["alt"]:
+        return ("fire", b["alt"], b["trigger"], b["mons"])
+    return ("skip", b["chosen"], b["trigger"], b["mons"])
+
+
+def searched_defence(start, prefix, target, player, turns, respond, scratch, ms, seed,
+                     defence=None, rounds=ROUNDS, max_branches=MAX_BRANCHES):
+    """Can `player` win (lethal by turn `turns`) against a defender that
+    searches its replies? `respond`: the defender's pieces, `defence` the
+    script it starts from (default DEFENCES[0]). Returns {won, why, rules,
+    searches, line}: why = "policy" (no win against the script + rules),
+    "every reply" (the attacker beat every reply on its line), "rounds"
+    (the defender still had a reply after `rounds` rule rounds)."""
+    scratch = Path(scratch)
+    defence = DEFENCES[0] if defence is None else defence
+    base = ["--start", start, "--no-ref", "--target", target,
+            "--player", str(player), "--turns", str(turns)]
+    goal = ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)]
+    rules, searches, line = [], 0, None
+
+    def wins(root, label, s):
+        nonlocal searches
+        searches += 1
+        args = base + ["--root", root] + defence_args(respond, defence) \
+            + rule_args(rules) + goal
+        r = _solve(root, args, scratch, label, ms, s)
+        ok = bool(r["solution"]) and _winner(r["solution"]) == player
+        return r["solution"] if ok else None
+
+    for rnd in range(rounds):
+        line = wins(prefix, f"sd{rnd}", seed + rnd)
+        if not line:
+            return {"won": False, "why": "policy", "rules": rules,
+                    "searches": searches, "line": None}
+        flags = base + ["--root", prefix] + defence_args(respond, defence) + rule_args(rules)
+        saved = None
+        for b in _branches(line, flags, scratch, f"sd{rnd}")[:max_branches]:
+            label = f"sd{rnd}-b{b['k']}"
+            if wins(b["file"], label, seed + rnd):
+                continue
+            if wins(b["file"], label + "-c", seed + rnd + CONFIRM_SEED):
+                continue
+            saved = b
+            break
+        if saved is None:
+            return {"won": True, "why": "every reply", "rules": rules,
+                    "searches": searches, "line": str(line)}
+        new = _rule_of(saved)
+        # the same window keyed both ways: the new reply replaces the old one
+        rules = [r for r in rules if r[1:] != new[1:]] + [new]
+    return {"won": False, "why": "rounds", "rules": rules, "searches": searches,
+            "line": str(line)}
 
 
 def enemy_hand(our_deck, enemy_deck, enemy_seed, scratch):

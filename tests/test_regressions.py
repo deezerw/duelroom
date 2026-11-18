@@ -6110,3 +6110,63 @@ def test_trivikarma_without_visas_is_not_an_interruption_anywhere():
     assert TRIVI in game._pieces(two, 1, cards)
     assert drill.never_live([TRIVI, LARS]) == {TRIVI}
     assert drill.never_live([TRIVI, VISAS]) == set()
+
+
+def test_searched_defender_learns_a_reply_and_the_attacker_replans(monkeypatch, tmp_path):
+    """Stage 14: the attacker's winning line is answered at the defender's
+    windows; a reply the attacker cannot beat on two seeds becomes a rule, the
+    attacker re-plans from the root against it, and a line on which it beats
+    every reply is a loss for the defender."""
+    from skills import game
+
+    calls = []
+
+    def fake_solve(ref, args, scratch, label, ms, seed, **kw):
+        calls.append((label, str(ref), list(args), seed))
+        rules = [args[i + 1] for i, a in enumerate(args) if a in ("--opp-rule", "--opp-skip")]
+        root = args[args.index("--root") + 1]
+        if root == "prefix":
+            # vs the script: wins; vs the learnt rule: wins by another line
+            return {"solution": "lineB" if rules else "lineA", "approach": None, "log": "l"}
+        if root == "A-b1":                      # the reply that stops line A
+            return {"solution": None, "approach": None, "log": "l"}
+        return {"solution": "won-" + root, "approach": None, "log": "l"}
+
+    def fake_branches(line, args, scratch, label):
+        if line == "lineA":
+            return [{"k": 0, "at": 5, "trigger": 0, "mons": 1, "chosen": 7, "alt": 0,
+                     "file": "A-b0"},
+                    {"k": 1, "at": 9, "trigger": 33, "mons": 2, "chosen": 0, "alt": 8,
+                     "file": "A-b1"}]
+        return [{"k": 0, "at": 4, "trigger": 0, "mons": 0, "chosen": 0, "alt": 8,
+                 "file": "B-b0"}]
+
+    monkeypatch.setattr(game, "_solve", fake_solve)
+    monkeypatch.setattr(game, "_branches", fake_branches)
+    monkeypatch.setattr(game, "_winner", lambda path: 1)
+    monkeypatch.setattr(game, "defence_args", lambda respond, defence, cards=None: ["--opp-smart"])
+
+    out = game.searched_defence("start", "prefix", "t", 1, 2, [8], tmp_path, 1000, 50)
+    assert out["won"] is True and out["why"] == "every reply"
+    assert out["rules"] == [("fire", 8, 33, 2)]
+    labels = [c[0] for c in calls]
+    # round 0: line A, reply b0 beaten, reply b1 holds on both seeds;
+    # round 1: line B from the root under the rule, its one reply beaten
+    assert labels == ["sd0", "sd0-b0", "sd0-b1", "sd0-b1-c", "sd1", "sd1-b0"]
+    assert calls[3][3] == 50 + game.CONFIRM_SEED
+    assert "8:33@2" in calls[4][2] and calls[4][2][calls[4][2].index("8:33@2") - 1] == "--opp-rule"
+
+    # no win against the script at all: the policy holds, nothing branched
+    calls.clear()
+    monkeypatch.setattr(game, "_solve", lambda *a, **k: {"solution": None, "approach": None,
+                                                         "log": "l"})
+    out = game.searched_defence("start", "prefix", "t", 1, 2, [8], tmp_path, 1000, 50)
+    assert out == {"won": False, "why": "policy", "rules": [], "searches": 1, "line": None}
+
+
+def test_searched_defender_rule_flags_and_replacement():
+    from skills import game
+
+    assert game.rule_args([("fire", 8, 33, 2), ("skip", 7, 0, 1)]) == [
+        "--opp-rule", "8:33@2", "--opp-skip", "7:0@1"]
+    assert game._rule_of({"alt": 0, "chosen": 7, "trigger": 0, "mons": 1}) == ("skip", 7, 0, 1)
