@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+from skills.engine import DECKS as _DECKS  # tests run on pinned copies (conftest)
 from werkzeug.security import generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -464,7 +466,7 @@ def test_an_uploaded_filename_cannot_escape_the_temp_directory(
         "file": (io.BytesIO(b"#main\n46986414\n"), evil),
         "name": "evil"}, content_type="multipart/form-data")
     assert not Path("/tmp/duelroom-pwned.ydk").exists()
-    assert not (Path(__file__).parent.parent / "assets" / "decks"
+    assert not (_DECKS
                 / "evil.ydk").exists(), "the test wrote into the real deck list"
 
 
@@ -1274,3 +1276,4 @@ def test_jobs_page_and_its_live_panel_render(client):
     assert r.status_code == 200 and b"Right now" in r.data
     r = client.get("/jobs/live")
     assert r.status_code == 200 and b"refreshes every 10 s" in r.data
+

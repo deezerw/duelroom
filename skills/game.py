@@ -823,7 +823,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     workers = workers or dev.workers
     remote.prepare(dev, log=say)
     ms = solve_ms or engine.SOLVE_MS
-    enemy_deck = engine.ROOT / "assets" / "decks" / f"{enemy_name}.ydk"
+    enemy_deck = engine.DECKS / f"{enemy_name}.ydk"
     enemy_target = scenarios.target_for(enemy_name)
     if not enemy_target:
         raise RuntimeError(f"no payoff target for {enemy_name}: run "

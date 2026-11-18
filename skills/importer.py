@@ -20,9 +20,10 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import engine
 from .deck import Deck
 
-DECKS = Path(__file__).resolve().parent.parent / "assets" / "decks"
+DECKS = engine.DECKS
 
 HEADERS = {
     "User-Agent": (

@@ -33,7 +33,7 @@ from pathlib import Path
 from . import engine, stats, trainer
 from .deck import Deck
 
-SIDE_DIR = engine.ROOT / "assets" / "decks" / "side"
+SIDE_DIR = engine.DECKS / "side"
 RUNS = 2
 
 
@@ -65,14 +65,14 @@ def _target_code(t):
 
 def deck_file(name):
     """A config (its name holds "~") lives under SIDE_DIR, a deck in assets/decks."""
-    return (SIDE_DIR if "~" in name else engine.ROOT / "assets" / "decks") / f"{name}.ydk"
+    return (SIDE_DIR if "~" in name else engine.DECKS) / f"{name}.ydk"
 
 
 def make(conn, base_name, swaps, base_path=None):
     """Write the config deck and its trained hands. `swaps`: [(out, in, n)].
     Returns {name, path, deck_hash, hands, hands_touched, goals_changed}.
     Idempotent: the same swaps give the same name and the same rows."""
-    base_path = Path(base_path or engine.ROOT / "assets" / "decks" / f"{base_name}.ydk")
+    base_path = Path(base_path or engine.DECKS / f"{base_name}.ydk")
     d = Deck.from_ydk(base_path)
     main = [int(c) for c in d.main]
     for o, i, n in swaps:

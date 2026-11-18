@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from skills.engine import DECKS as _DECKS  # tests run on pinned copies (conftest)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from skills import config, importer, scenarios, stats  # noqa: E402
@@ -711,7 +713,7 @@ def test_a_one_card_swap_often_leaves_the_hand_unchanged():
     from skills import breaking, db, optimizer
     from ygorl.solver.batch import sample_hand
     conn = db.connect()
-    deck = Deck.from_ydk("assets/decks/kewl-tune.ydk")
+    deck = Deck.from_ydk(str(_DECKS / "kewl-tune.ydk"))
     deck.canonicalise(conn)
     outs = optimizer.removable(conn, deck, "Kewl Tune")
     pool = optimizer.candidate_pool(conn, "Kewl Tune", deck, limit=2)
@@ -740,8 +742,8 @@ def test_a_one_card_swap_often_leaves_the_hand_unchanged():
     reason="engine not built")
 def test_max_turns_is_off_by_one_and_stays_that_way():
     from skills import engine
-    A = "assets/decks/kewl-tune.ydk"
-    B = "assets/decks/sky-striker.ydk"
+    A = str(_DECKS / "kewl-tune.ydk")
+    B = str(_DECKS / "sky-striker.ydk")
     r = engine.duel(A, B, seed=0, max_turns=2)
     assert r["reason"] == "turn_limit"
     assert r["turns"] == 3, (
@@ -1034,8 +1036,7 @@ def test_a_partial_hand_is_filled_from_the_deck_and_says_so():
     from skills import db, handlab
     from skills.deck import Deck
     c = db.connect()
-    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
-                      / "assets" / "decks" / "my-despia.ydk")
+    d = Deck.from_ydk(_DECKS / "my-despia.ydk")
     d.canonicalise(c)
     nadir = handlab.resolve_in_deck(c, d, "nadir")
     hand, filler = handlab.fill_hand(c, d, [nadir], seed=0)
@@ -1053,8 +1054,7 @@ def test_filling_respects_how_many_copies_the_deck_runs():
     from skills import db, handlab
     from skills.deck import Deck
     c = db.connect()
-    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
-                      / "assets" / "decks" / "my-despia.ydk")
+    d = Deck.from_ydk(_DECKS / "my-despia.ydk")
     d.canonicalise(c)
     have = Counter(d.main)
     for seed in range(25):
@@ -1067,8 +1067,7 @@ def test_a_card_not_in_the_deck_is_refused():
     from skills import db, handlab
     from skills.deck import Deck
     c = db.connect()
-    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
-                      / "assets" / "decks" / "my-despia.ydk")
+    d = Deck.from_ydk(_DECKS / "my-despia.ydk")
     d.canonicalise(c)
     with pytest.raises(ValueError):
         handlab.parse_hand(c, d, "Blue-Eyes White Dragon")
@@ -1157,7 +1156,7 @@ def test_the_solver_aims_at_a_board_for_the_hand_you_actually_hold(monkeypatch):
     monkeypatch.setattr(B, "solve_blocking", fake_upstream)
     monkeypatch.setattr(BT, "solve_hand", lambda *a, **k: None)
 
-    deck_path = (Path(__file__).resolve().parent.parent / "assets" / "decks"
+    deck_path = (_DECKS
                  / "my-despia.ydk")
     mine = list(load_ydk(deck_path).main[:5])
 
@@ -1175,8 +1174,7 @@ def test_a_random_hand_is_one_the_deck_could_really_open():
     from skills import db, handlab
     from skills.deck import Deck
     c = db.connect()
-    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
-                      / "assets" / "decks" / "my-despia.ydk")
+    d = Deck.from_ydk(_DECKS / "my-despia.ydk")
     d.canonicalise(c)
     have = Counter(d.main)
     for seed in range(40):
@@ -1191,8 +1189,7 @@ def test_a_dealt_hand_can_be_dealt_again():
     from skills import db, handlab
     from skills.deck import Deck
     c = db.connect()
-    d = Deck.from_ydk(Path(__file__).resolve().parent.parent
-                      / "assets" / "decks" / "my-despia.ydk")
+    d = Deck.from_ydk(_DECKS / "my-despia.ydk")
     d.canonicalise(c)
     first, seed = handlab.random_hand(d)
     assert handlab.random_hand(d, seed)[0] == first
@@ -1734,7 +1731,7 @@ def test_breadth_does_not_ask_for_stacks():
     from ygorl.engine.duel import default_cards
     from ygorl.solver.blocking import blocking_plan
 
-    deck_path = (Path(__file__).resolve().parent.parent / "assets" / "decks"
+    deck_path = (_DECKS
                  / "elfnote.ydk")
     deck = load_ydk(deck_path)
     hand = list(deck.main[:5])
@@ -2036,7 +2033,7 @@ def test_the_opposing_hand_is_dealt_through_the_decklist(tmp_path):
     from skills.breaking import deck_with_hand
     from ygorl.cards.ydk import load_ydk
 
-    src = Path(__file__).resolve().parent.parent / "assets" / "decks" / "kewl-tune.ydk"
+    src = _DECKS / "kewl-tune.ydk"
     original = load_ydk(src)
     hand = list(original.main[:5])
     out = deck_with_hand(src, hand, tmp_path / "dealt.ydk")
@@ -2051,7 +2048,7 @@ def test_the_opposing_hand_is_dealt_through_the_decklist(tmp_path):
 
 def test_a_card_not_in_the_deck_cannot_be_dealt(tmp_path):
     from skills.breaking import deck_with_hand
-    src = Path(__file__).resolve().parent.parent / "assets" / "decks" / "kewl-tune.ydk"
+    src = _DECKS / "kewl-tune.ydk"
     with pytest.raises(ValueError, match="not in the main deck"):
         deck_with_hand(src, [1], tmp_path / "x.ydk")
 
@@ -4547,7 +4544,7 @@ def test_identify_archetype_tuple_stays_index_compatible():
     from skills.deck import Deck
 
     conn = db.connect()
-    d = Deck.from_ydk("assets/decks/blue-eyes-branded-test.ydk")
+    d = Deck.from_ydk(str(_DECKS / "blue-eyes-branded-test.ydk"))
     d.canonicalise(conn)
     got = ms.identify_archetype(conn, d)
     if not got:
@@ -4965,7 +4962,7 @@ def test_trainer_generation_sends_extenders_to_the_solver_not_the_board(monkeypa
     from skills import sweep, trainer
 
     conn = _games_db()
-    deck = Path("assets/decks/kewl-tune.ydk").resolve()
+    deck = Path(str(_DECKS / "kewl-tune.ydk")).resolve()
     dh = trainer.ensure_pool(conn, deck, "kewl-tune", hands=1)
     hand = json.loads(conn.execute("SELECT hand FROM trainer_hands").fetchone()["hand"])
     base, breadth = trainer.breadth_goals(deck, hand, trainer.prefs(conn, "kewl-tune"))
@@ -5661,7 +5658,7 @@ def test_defender_answers_with_every_hand_trap_its_deck_runs():
     cards = default_cards()
     fuwalos, purulia, ash, sp = 42141493, 84192580, 14558127, 29301450
     codes = game.respond_codes(
-        Path(__file__).resolve().parents[1] / "assets" / "decks" / "Angelechy-Meta.ydk", cards)
+        _DECKS / "Angelechy-Meta.ydk", cards)
     assert {fuwalos, purulia, ash} <= set(codes)
     assert sp not in codes                      # not in that main deck
     assert game.is_hand_trap(fuwalos, cards) and not game.is_hand_trap(sp, cards)
@@ -5670,7 +5667,7 @@ def test_defender_answers_with_every_hand_trap_its_deck_runs():
     args = game.defender_args([sp, fuwalos, ash], cards, smart=True)
     assert args[args.index("--opp-hold") + 1] == str(sp)
     with_extra = game.respond_codes(
-        Path(__file__).resolve().parents[1] / "assets" / "decks" / "Angelechy-Meta.ydk",
+        _DECKS / "Angelechy-Meta.ydk",
         cards, extra=[sp])
     assert sp in with_extra
 
@@ -5721,7 +5718,7 @@ def test_template_vs_carries_the_trainers_core_seed(tmp_path):
 
     from skills import breaking
 
-    root = Path(__file__).resolve().parents[1] / "assets" / "decks"
+    root = _DECKS
     words = [11, 22, 33, 44]
     a = breaking.template_vs(tmp_path / "a.yrpX", root / "imported.ydk",
                              root / "Angelechy-Meta.ydk", seed=1000, shuffle=True)
@@ -5955,7 +5952,7 @@ def test_side_config_swaps_the_same_copies_and_compares_paired(tmp_path, monkeyp
 
     monkeypatch.setattr(side, "SIDE_DIR", tmp_path / "side")
     base = tmp_path / "base.ydk"
-    src = Deck.from_ydk(Path("assets/decks/imported.ydk"))
+    src = Deck.from_ydk(Path(str(_DECKS / "imported.ydk")))
     Deck(name="base", main=list(src.main), extra=list(src.extra), side=[]).write_ydk(base)
     main = [int(c) for c in src.main]
     Y, X = 14558127, 43096270            # Ash Blossom -> a vanilla
@@ -5986,9 +5983,9 @@ def test_side_config_swaps_the_same_copies_and_compares_paired(tmp_path, monkeyp
     assert Deck.from_ydk(r["path"]).main.count(Y) == 2
 
     # paired comparison: the config wins one more pairing out of two
-    monkeypatch.setattr(side.engine, "ROOT", tmp_path)
-    (tmp_path / "assets" / "decks").mkdir(parents=True)
-    base.rename(tmp_path / "assets" / "decks" / "base.ydk")
+    monkeypatch.setattr(side.engine, "DECKS", tmp_path / "decks")
+    (tmp_path / "decks").mkdir(parents=True)
+    base.rename(tmp_path / "decks" / "base.ydk")
     with conn:
         for h, outs in ((dh, ["win", "lost_t2", "no_win", "no_win"]),
                         (r["deck_hash"], ["win", "lost_t2", "win", "win"])):
@@ -6205,3 +6202,4 @@ def test_our_searches_never_point_sp_at_our_own_cards(monkeypatch, tmp_path):
     args = seen[-1]
     assert args[args.index("--no-self-target") + 1] == "29301450"
     assert game.self_target_args() == ["--no-self-target", "29301450"]
+

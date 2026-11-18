@@ -31,6 +31,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "ygorl"
+# Every .ydk the app knows. DUELROOM_DECKS points it elsewhere: the tests run
+# on pinned copies (tests/fixtures/decks) so a deck deleted in the UI cannot
+# break them, and nothing a test writes lands among the user's decks.
+DECKS = Path(os.environ.get("DUELROOM_DECKS") or ROOT / "assets" / "decks")
 UPSTREAM_THIRD_PARTY = VENDOR / "third_party"
 
 # Point the engine at the merged card database when it has been built.

@@ -21,7 +21,7 @@ from skills import (breaking, card_db, carddb, config, db, drill, engine,
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
-DECKS = ROOT / "assets" / "decks"
+DECKS = engine.DECKS
 
 BANNER = """\
 duelroom — Yu-Gi-Oh! deck laboratory
@@ -565,7 +565,7 @@ def cmd_doctor(conn, args):
         if not n:
             ok = False
         print(f"    {n:>6}  {label}{flag}")
-    decks = sorted((ROOT / "assets" / "decks").glob("*.ydk"))
+    decks = sorted(DECKS.glob("*.ydk"))
     print(f"    {len(decks):>6}  deck files")
     active = db.get_meta(conn, "active_deck")
     print(f"            active deck: {active or '(none — `import` or `mydeck`)'}")
@@ -1098,7 +1098,7 @@ def cmd_locals(conn, args):
     print("  weight  archetype")
     for k, v in sorted(w.items(), key=lambda kv: -kv[1]):
         print(f"  {v*100:5.1f}%  {k}")
-    decks = [p.stem for p in (ROOT / "assets" / "decks").glob("*.ydk")]
+    decks = [p.stem for p in DECKS.glob("*.ydk")]
     covered, missing = config.coverage(decks)
     print(f"\n  measured decks cover {covered*100:.0f}% of your stated meta")
     if missing:
@@ -2446,7 +2446,7 @@ def cmd_games(conn, args):
             print("--workers must be 1-16")
             return
         del rest[i:i + 2]
-    if not (engine.ROOT / "assets" / "decks" / f"{enemy}.ydk").exists():
+    if not (DECKS / f"{enemy}.ydk").exists():
         print(f"no such enemy deck: {enemy}")
         return
     if rest and rest[0] == "status":

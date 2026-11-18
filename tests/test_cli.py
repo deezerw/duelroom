@@ -19,6 +19,8 @@ import contextlib
 
 import pytest
 
+from skills.engine import DECKS as _DECKS  # tests run on pinned copies (conftest)
+
 import daemon
 from skills import db
 
@@ -114,7 +116,7 @@ def test_doctor_does_not_re_enter_the_test_suite():
 
 def _deck_names():
     from skills import engine
-    return sorted(p.stem for p in (engine.ROOT / "assets" / "decks").glob("*.ydk"))
+    return sorted(p.stem for p in engine.DECKS.glob("*.ydk"))
 
 
 @pytest.mark.parametrize("deck", _deck_names())
