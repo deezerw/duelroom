@@ -130,3 +130,11 @@ its Sequence (`trainer.with_equips`) -- its dead copies in the GAMES come from t
 short of the goal under hand traps (full goal reached 8-15%), where the solver's best approach
 counts Desirae as overlap without its equip. Open: rank turn-1 approaches by live pieces.
 Re-training imported (8 h job) queued after the side gate.
+
+**2026-11-18, defender family result: FLAT.** All 1152 searches. Kill (16x): today's 1+2 lets
+the attacker win 92%; the best family of all 8 scripts 90% (2 of 72 runs, noise); any one
+script alone 94-97%. Brk (8x): 1+2 = 81%, all 8 = 81%, alone 82-92%. Seeds agree under all 8
+on 97%/100% of positions, so the result is not search luck. No scripted defence stops a
+converged attacker: DEFENCES stays (1, 2). Either the boards really are breakable, or only a
+SEARCHED defender (one that plays its own best response instead of a fixed rule) would hold.
+Asked the user before building that (a big change to patch 0004 / the solver).
