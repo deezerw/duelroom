@@ -5799,8 +5799,12 @@ def test_remote_solve_mirrors_the_command(tmp_path, monkeypatch):
     ref.write_text("x")
     calls = []
 
+    state = {"up": True}
+
     def fake_run(argv, **kw):
         calls.append(argv)
+        if argv[-1] == "true":                 # remote._alive's probe
+            return subprocess.CompletedProcess(argv, 0 if state["up"] else 255, "", "")
         rc = 255 if "LOSE" in " ".join(argv) else 0
         return subprocess.CompletedProcess(argv, rc, "out", "err")
 
@@ -5817,8 +5821,24 @@ def test_remote_solve_mirrors_the_command(tmp_path, monkeypatch):
     assert "timeout -s KILL 300" in line and str(ref) in line and "A=1" in line
     assert pull[-1] == f"{out}/" and pull[-2].endswith(f":{out}/")
     calls.clear()
+    state["up"] = False
     with pytest.raises(remote.DeviceDown):
         remote.run(dev, ["/bin/solver", "LOSE"], {}, 300)
+    # 255 while the device still answers: the solver died by a signal, not
+    # the link -- returned as the command's failure, not DeviceDown
+    state["up"] = True
+    assert remote.run(dev, ["/bin/solver", "LOSE"], {}, 300).returncode == 255
+
+
+def test_a_crashed_solve_raises_instead_of_reading_as_no_solution(tmp_path, monkeypatch):
+    import subprocess
+    from skills import game, remote
+
+    monkeypatch.setattr(remote, "current", lambda: remote.DEVICES["server"])
+    monkeypatch.setattr(game.subprocess, "run", lambda *a, **k:
+                        subprocess.CompletedProcess(a[0], -11, "", "segfault"))
+    with pytest.raises(RuntimeError, match="exited -11"):
+        game._solve(tmp_path / "ref.yrpX", [], tmp_path, "otk", 1000, 1)
 
 
 def test_device_down_requeues_the_job_instead_of_ending_it(tmp_path, monkeypatch):

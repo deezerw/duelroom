@@ -160,6 +160,11 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
     log = scratch / f"{label}.log"
     log.write_text((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or "")
                    + f"\n--- exit {r.returncode} ---\n", encoding="utf-8")
+    if r.returncode != 0:
+        # Every stored game's solve exits 0, won or not (12325 logs, 2026-11-18):
+        # anything else is a crash, and reading "no solution" off it would score
+        # a search that never finished -- as a timeout, the game is not recorded.
+        raise RuntimeError(f"{label}: solver exited {r.returncode} (log {log})")
     sols = sorted(out.glob("solution_*.yrp"))
     appr = sorted(out.glob("best_approach*.yrp"))
     return {"solution": sols[0] if sols else None,

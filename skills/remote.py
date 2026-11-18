@@ -327,6 +327,14 @@ class Result:
     stderr: str
 
 
+def _alive(dev):
+    """Does the device still answer? (tells a lost link from a dead command)"""
+    try:
+        return ssh(dev, "true", timeout=20).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
 def run(dev, cmd, env, timeout_s, push_dirs=(), outdir=None):
     """Run `cmd` on `dev` as if here. Every argument that is an existing
     file is pushed first (same absolute path), plus `push_dirs`; `outdir`
@@ -349,8 +357,11 @@ def run(dev, cmd, env, timeout_s, push_dirs=(), outdir=None):
             + " ".join(shlex.quote(str(a)) for a in cmd))
     r = subprocess.run(["ssh", *_ssh_opts(), _target(dev), line],
                        capture_output=True, text=True, timeout=timeout_s + 120)
-    if r.returncode == SSH_LOST:
+    if r.returncode == SSH_LOST and not _alive(dev):
         raise DeviceDown(f"{dev.name}: connection lost: {r.stderr.strip()[-200:]}")
+    # 255 with the device answering: the COMMAND died by a signal (ssh reports
+    # a remote signal as 255) -- a solver crash, which the caller must not take
+    # for a lost device (one segfault ended a 924-board run, 2026-11-18).
     if r.returncode == 137:      # timeout -s KILL
         raise subprocess.TimeoutExpired(cmd, timeout_s)
     if outdir:
