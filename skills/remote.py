@@ -135,6 +135,26 @@ def up(dev):
     return r.returncode == 0
 
 
+def reachable(dev, timeout=2.0):
+    """Quick yes/no for a page: SSH port open within `timeout` (no login).
+    The name lookup (mDNS) runs in a thread so an absent device cannot
+    stall the page past `timeout`."""
+    if not dev.remote:
+        return True
+    ok = []
+
+    def probe():
+        try:
+            with socket.create_connection((dev.host, 22), timeout=timeout):
+                ok.append(True)
+        except OSError:
+            pass
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout + 0.5)
+    return bool(ok)
+
+
 def wake(dev):
     """Send the Wake-on-LAN magic packet (broadcast, ports 9 and 7)."""
     pkt = b"\xff" * 6 + bytes.fromhex(dev.mac.replace(":", "")) * 16

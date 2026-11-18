@@ -242,3 +242,51 @@ def partial(job):
             except json.JSONDecodeError:
                 pass
     return sorted(out, key=lambda r: -r.get("score", 0))
+
+
+# --- the queue, per device ------------------------------------------------
+
+def queue(conn):
+    """{device: {"running": job or None, "queued": [jobs in claim order]}}
+    for every known device."""
+    out = {d: {"running": None, "queued": []} for d in remote.DEVICES}
+    for j in conn.execute("SELECT * FROM jobs WHERE state IN ('queued','running') "
+                          "ORDER BY id"):
+        q = out.setdefault(device_of(j), {"running": None, "queued": []})
+        if j["state"] == "running":
+            q["running"] = j
+        else:
+            q["queued"].append(j)
+    return out
+
+
+def games_estimate(conn, job, dh, hands):
+    """What a games job has left, and roughly how long that is on its device.
+
+    Only from measurements: the mean seconds of the games that device has
+    already played on that side (turns 2-3), and turn 1 at its full budget
+    (it rarely stops early). None for the time when there is nothing
+    measured yet -- a guessed number would read as a measured one."""
+    p = json.loads(job["params"] or "{}")
+    dev = remote.get(device_of(job))
+    first = 0 if p.get("second") else 1
+    runs, ehands = int(p.get("runs", 10)), int(p.get("enemy_hands", 3))
+    seeds = (1000, 1000 + ehands)
+    key = (dh, p.get("enemy", ""), first, dev.name, *seeds)
+    played = conn.execute(
+        "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+        "AND device=? AND enemy_seed >= ? AND enemy_seed < ? AND run < ?",
+        (*key, runs)).fetchone()[0]
+    t1_done = conn.execute(
+        "SELECT COUNT(*) FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=? "
+        "AND device=? AND enemy_seed >= ? AND enemy_seed < ?", key).fetchone()[0]
+    left = max(0, hands * ehands * runs - played)
+    t1_left = max(0, hands * ehands - t1_done)
+    m = conn.execute(
+        "SELECT AVG(seconds), COUNT(*) FROM game_results WHERE device=? AND first=? "
+        "AND outcome != 'no_t1' AND seconds IS NOT NULL", (dev.name, first)).fetchone()
+    secs = None
+    if m[1]:
+        secs = (left * m[0] + t1_left * engine.SOLVE_MS / 1000) / dev.workers
+    return {"games": hands * ehands * runs, "left": left, "t1_left": t1_left,
+            "seconds": secs, "basis": m[1]}

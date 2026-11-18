@@ -5892,3 +5892,33 @@ def test_heat_pauses_only_on_sustained_heat_and_resumes_cool():
     assert h.update(None)            # unreadable: no change
     assert not h.update(cool)
     assert h.update({"cpu": 40, "gpu": remote.GPU_HOT, "gpu_w": 250.0}) is False
+
+
+def test_queue_estimate_counts_what_is_left_and_never_guesses(tmp_path):
+    """A games job's estimate: games and turn 1s still to play on ITS device,
+    timed only from games that device has played; none measured -> None."""
+    from skills import db, engine, remote
+    from web import jobs
+
+    conn = db.connect(tmp_path / "t.db")
+    j = jobs.enqueue(conn, "games", "d", enemy="E", runs=2, enemy_hands=2, device="duelpc")
+    job = conn.execute("SELECT * FROM jobs WHERE id=?", (j,)).fetchone()
+    est = jobs.games_estimate(conn, job, "dh", hands=3)
+    assert (est["games"], est["left"], est["t1_left"], est["seconds"]) == (12, 12, 6, None)
+    with conn:
+        conn.execute("INSERT INTO game_turn1 (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, ok, created) VALUES ('dh','E',0,0,1000,1,'duelpc',1,'x')")
+        for run in (0, 1):
+            conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                         "enemy_seed, first, device, run, outcome, seconds, created) "
+                         "VALUES ('dh','E',0,0,1000,1,'duelpc',?,'win',80,'x')", (run,))
+        # the server's games say nothing about duelpc's speed
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, "
+                     "enemy_seed, first, device, run, outcome, seconds, created) "
+                     "VALUES ('dh','E',1,0,1000,1,'server',0,'win',999,'x')")
+    est = jobs.games_estimate(conn, job, "dh", hands=3)
+    w = remote.DEVICES["duelpc"].workers
+    assert (est["left"], est["t1_left"]) == (10, 5)
+    assert abs(est["seconds"] - (10 * 80 + 5 * engine.SOLVE_MS / 1000) / w) < 1e-6
+    q = jobs.queue(conn)
+    assert [r["id"] for r in q["duelpc"]["queued"]] == [j] and not q["server"]["queued"]

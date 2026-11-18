@@ -2,23 +2,41 @@
 {% block body %}
 <div class="page-head">
   <h1>Jobs</h1>
-  <div class="sub">Solver runs queue here, one at a time.</div>
+  <div class="sub">Solver runs queue here: one at a time per machine, the machines side by side.</div>
 </div>
-{% if running %}
-  <div class="panel" style="border-color:#7aa2f744">
-    <strong>Running:</strong> job {{ running.id }} — {{ kinds[running.kind][1] }}
-    {% if running.deck %}on <code>{{ running.deck }}</code>{% endif %}
-    · <a href="{{ url_for('views.job_detail', job_id=running.id) }}">watch</a>
-    <p class="muted" style="margin:6px 0 0">One solver job runs at a time. The
-      engine takes 6 of 8 cores; two sweeps at once make both slower.</p>
+{% macro dur(s) %}{% if s >= 3600 %}{{ (s / 3600)|round(1) }} h{% else %}{{ (s / 60)|round|int }} min{% endif %}{% endmacro %}
+{% for d in devices %}
+  <div class="panel"{% if d.rows %} style="border-color:#7aa2f744"{% endif %}>
+    <strong>{{ d.name }}</strong> <span class="muted">{{ d.label }}</span>
+    {% if d.remote %}· {% if d.up %}<span class="pill ok">on</span>{% else %}<span class="pill">off or in Windows</span>
+      <span class="muted">— its jobs wait; the next one wakes it (Wake-on-LAN)</span>{% endif %}{% endif %}
+    {% if d.temps %}<div class="muted mono" style="margin-top:4px">{{ d.temps }}</div>{% endif %}
+    {% if d.rows %}
+    <table style="margin-top:6px">
+      <thead><tr><th>#</th><th>job</th><th>state</th><th>left</th><th>about</th></tr></thead>
+      <tbody>
+      {% for r in d.rows %}{% set j = r.job %}
+        <tr>
+          <td class="mono"><a href="{{ url_for('views.job_detail', job_id=j.id) }}">{{ j.id }}</a></td>
+          <td>{{ kinds[j.kind][1] if j.kind in kinds else j.kind }}
+            <span class="muted">{{ j.deck or '' }}{% if r.params.enemy %} vs {{ r.params.enemy }}{% endif %}{% if r.params.second %} · going second{% endif %}</span></td>
+          <td>{% if j.state == 'running' %}<span class="pill active">running</span>
+              {% elif j.error and j.error.startswith('waiting for') %}<span class="pill">waiting for {{ d.name }}</span>
+              {% else %}<span class="pill">queued</span>{% endif %}</td>
+          <td class="mono">{% if r.est %}{% if r.est.left or r.est.t1_left %}{{ r.est.left }} of {{ r.est.games }} games{% if r.est.t1_left %} + {{ r.est.t1_left }} turn 1s{% endif %}{% else %}all {{ r.est.games }} played{% endif %}{% endif %}</td>
+          <td class="mono">{% if r.est and r.est.seconds is not none %}{{ dur(r.est.seconds) }}{% elif r.est %}<span class="muted">not measured on {{ d.name }} yet</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if d.total_s %}<p class="muted" style="margin:6px 0 0">Queue: about {{ dur(d.total_s) }}, from the average game this machine has played (turn 1 counted at its full budget).</p>{% endif %}
+    {% else %}<p class="muted" style="margin:6px 0 0">Nothing queued.</p>{% endif %}
   </div>
-{% else %}
-  <p class="muted">Nothing running.</p>
-{% endif %}
+{% endfor %}
 
 <div class="panel">
 <table>
-  <thead><tr><th>#</th><th>job</th><th>deck</th><th>state</th>
+  <thead><tr><th>#</th><th>job</th><th>deck</th><th>on</th><th>state</th>
     <th>queued</th><th></th></tr></thead>
   <tbody>
   {% for j in rows %}
@@ -27,6 +45,7 @@
       <td>{{ kinds[j.kind][1] if j.kind in kinds else j.kind }}
           <span class="muted">{{ kinds[j.kind][2] if j.kind in kinds else '' }}</span></td>
       <td class="muted">{{ j.deck or '—' }}</td>
+      <td class="muted">{{ device_of(j) }}</td>
       <td>
         {% if j.state == 'done' %}<span class="pill ok">done</span>
         {% elif j.state == 'running' %}<span class="pill active">running</span>
@@ -42,7 +61,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="muted">No jobs yet.</td></tr>
+    <tr><td colspan="7" class="muted">No jobs yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

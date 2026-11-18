@@ -880,7 +880,30 @@ def watch_train(name, i):
 @login_required
 def job_list():
     c = conn()
-    return render_template("jobs.html", running=jobs.active(c),
+    devices = []
+    for name, q in jobs.queue(c).items():
+        dev = remote.get(name)
+        rows, total = [], 0.0
+        for j in ([q["running"]] if q["running"] else []) + q["queued"]:
+            est = None
+            path = deck_path(j["deck"]) if j["kind"] == "games" and j["deck"] else None
+            if path and path.exists():
+                dh = trainer.deck_hash(path)
+                hands = c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
+                                  "AND best_goal IS NOT NULL", (dh,)).fetchone()[0]
+                est = jobs.games_estimate(c, j, dh, hands)
+                total += est["seconds"] or 0
+            rows.append({"job": j, "est": est, "device": name,
+                         "params": json.loads(j["params"] or "{}")})
+        temps = None
+        if q["running"] and q["running"]["log_path"] and Path(q["running"]["log_path"]).exists():
+            temps = next((l for l in reversed(Path(q["running"]["log_path"])
+                                               .read_text().splitlines())
+                          if l.startswith(f"temps {name}:")), None)
+        devices.append({"name": name, "label": dev.label, "remote": dev.remote,
+                        "up": remote.reachable(dev), "rows": rows, "total_s": total,
+                        "temps": temps})
+    return render_template("jobs.html", devices=devices, device_of=jobs.device_of,
                            rows=jobs.recent(c), kinds=jobs.KINDS)
 
 
