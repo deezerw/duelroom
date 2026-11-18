@@ -19,6 +19,7 @@ search is converged when 2x -> 4x no longer moves its outcome; two seeds
 disagreeing at one level says the same thing from the other side.
 
     DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/budget_plateau.py [positions]
+        [--stages kill,brk] [--levels 8,16]   (more levels: own file, merged by summary)
     venv/bin/python tools/experiments/budget_plateau.py summary
 Resumable: results.jsonl under OUT, one line per (stage, side, hand, seed, rep).
 """
@@ -85,7 +86,7 @@ def plan(conn, dh, n=POSITIONS):
             for st in (*STAGES[1], *STAGES[0]) if i < len(rows_for(st))]
 
 
-def main(limit=None):
+def main(limit=None, stages=None, levels=LEVELS):
     from ygorl.engine.duel import default_cards
 
     dev = remote.current()
@@ -102,9 +103,9 @@ def main(limit=None):
         "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands "
         "WHERE deck_hash=? AND best_goal IS NOT NULL", (dh,))}
     n = int(limit) if limit else POSITIONS
-    jobs = plan(conn, dh, n)
+    jobs = [j for j in plan(conn, dh, n) if not stages or j[0] in stages]
     OUT.mkdir(parents=True, exist_ok=True)
-    res_file = OUT / "results.jsonl"
+    res_file = results_file(levels)
     done = set()
     if res_file.exists():
         for d in map(json.loads, res_file.read_text().splitlines()):
@@ -129,7 +130,7 @@ def main(limit=None):
         start = trainer.hand_start(hrow["best_record"])
         try:
             if stage == "t1":
-                for L in LEVELS:
+                for L in levels:
                     t1 = game.turn1(deck, enemy_deck, json.loads(hrow["hand"]), goal, e,
                                     scratch / f"L{L}", sms * L, seed, theirs, start=start)
                     if t1 is None:
@@ -143,7 +144,7 @@ def main(limit=None):
                                          scratch / f"L{L}k", oms, seed))}
             elif stage == "kill":
                 ours = set(json.loads(r["pieces"] or "[]")) | set(ours_hand)
-                for L in LEVELS:
+                for L in levels:
                     rec["levels"][L] = {"lost": int(kill(r["start"], r["prefix"], enemy_target,
                                                          ours, scratch / f"L{L}", oms * L, seed))}
             elif stage == "t3":
@@ -154,12 +155,12 @@ def main(limit=None):
                     rec["upstream"] = "lost_t2" if t2["lost"] else "won_t2"
                 else:
                     ep = set(theirs) | set(game._pieces(t2["board"], 1, cards))
-                    for L in LEVELS:
+                    for L in levels:
                         t3 = game.turn3(t2["start"], t2["prefix"], game.steer(goal, enemy_target),
                                         ep, scratch / f"L{L}", sms * L, seed)
                         rec["levels"][L] = {"won": int(t3["won"]), "damage": t3["damage"]}
             elif stage == "et1":
-                for L in LEVELS:
+                for L in levels:
                     t1 = game.enemy_turn1(deck, enemy_deck, json.loads(hrow["hand"]), e,
                                           enemy_target, scratch / f"L{L}", sms * L, seed,
                                           ours_hand, start=start)
@@ -172,7 +173,7 @@ def main(limit=None):
                     rec["levels"][L] = {"ok": 1, "reached": int(t1["reached"]),
                                         "won": int(b["won"])}
             elif stage == "brk":
-                for L in LEVELS:
+                for L in levels:
                     b = game.turn3(r["start"], r["prefix"], game.steer(goal, enemy_target),
                                    set(theirs) | set(json.loads(r["pieces"] or "[]")),
                                    scratch / f"L{L}", sms * L, seed, player=1, turn=2)
@@ -194,21 +195,32 @@ def main(limit=None):
           f"{len(done)} already done", flush=True)
     with ThreadPoolExecutor(dev.workers) as ex:
         list(ex.map(guarded, jobs))
-    summary(res_file)
+    summary()
+
+def results_file(levels=LEVELS):
+    """1x/2x/4x in results.jsonl; a run at other levels (`--levels 8,16`) in
+    its own file, merged with it by summary()."""
+    return OUT / ("results.jsonl" if tuple(levels) == LEVELS else
+                  f"results_L{'-'.join(map(str, levels))}.jsonl")
 
 
-def progress(res_file=OUT / "results.jsonl"):
-    """For the Jobs page: tasks of the full plan done (results from other plans not counted)."""
+def progress():
+    """For the Jobs page: the runs going now (by their files), tasks of the plan done."""
     conn = db.connect()
     keys = [(st, r["hand_index"], r["enemy_seed"], rep) for st, r, rep in
             plan(conn, trainer.deck_hash(ROOT / "assets" / "decks" / f"{DECK}.ydk"))]
-    done = set()
-    if res_file.exists():
-        for d in map(json.loads, res_file.read_text().splitlines()):
-            done.add((d["stage"], d["hand"], d["eseed"], d["rep"]))
-    parts = [(st, sum(k in done for k in keys if k[0] == st), sum(k[0] == st for k in keys))
-             for st in (*STAGES[1], *STAGES[0])]
-    return {"done": sum(k in done for k in keys), "total": len(keys), "parts": parts}
+    parts, done_all, total = [], 0, 0
+    for f in sorted(OUT.glob("results*.jsonl")):
+        done = {(d["stage"], d["hand"], d["eseed"], d["rep"])
+                for d in map(json.loads, f.read_text().splitlines())}
+        tag = "" if f.name == "results.jsonl" else " " + f.stem.split("_L")[1].replace("-", "x/") + "x"
+        for st in (*STAGES[1], *STAGES[0]):
+            if any(k[0] == st for k in done):
+                ks = [k for k in keys if k[0] == st]
+                parts.append((st + tag, sum(k in done for k in ks), len(ks)))
+                done_all += parts[-1][1]
+                total += parts[-1][2]
+    return {"done": done_all, "total": total, "parts": parts}
 
 
 METRIC = {"t1": "lost", "kill": "lost", "t3": "won", "et1": "won", "brk": "won"}
@@ -217,24 +229,33 @@ WHAT = {"t1": "our turn 1 -> lost on T2", "kill": "their kill check -> lost on T
         "brk": "our going-second break -> won"}
 
 
-def summary(res_file=OUT / "results.jsonl"):
-    from skills import stats  # noqa: F401  (intervals below are by position)
+def summary(res_file=None):
 
-    recs = [json.loads(l) for l in Path(res_file).read_text().splitlines()]
+    files = [Path(res_file)] if res_file else sorted(OUT.glob("results*.jsonl"))
+    merged = {}
+    for f in files:
+        for d in map(json.loads, f.read_text().splitlines()):
+            k = (d["stage"], d["hand"], d["eseed"], d["rep"])
+            if k in merged:
+                merged[k]["levels"].update(d["levels"])
+            else:
+                merged[k] = d
+    recs = list(merged.values())
     for stage, m in METRIC.items():
-        rs = [d for d in recs if d["stage"] == stage and len(d["levels"]) == len(LEVELS)
-              and all(m in d["levels"][str(L)] for L in LEVELS)]
+        levels = sorted({int(L) for d in recs if d["stage"] == stage for L in d["levels"]})
+        rs = [d for d in recs if d["stage"] == stage and len(d["levels"]) == len(levels)
+              and all(m in d["levels"][str(L)] for L in levels)]
         skipped = sum(1 for d in recs if d["stage"] == stage) - len(rs)
         if not rs:
             continue
         print(f"\n{stage}: {WHAT[stage]}  ({len(rs)} runs, {skipped} without all levels)")
-        for L in LEVELS:
+        for L in levels:
             v = [d["levels"][str(L)][m] for d in rs]
             extra = ""
             if "reached" in rs[0]["levels"][str(L)]:
                 extra = f"   goal reached {sum(d['levels'][str(L)]['reached'] for d in rs) / len(rs):.0%}"
             print(f"  {L}x: {m} {sum(v) / len(v):.0%}{extra}")
-        for a, b in ((1, 2), (2, 4)):
+        for a, b in zip(levels, levels[1:]):
             up = sum(1 for d in rs if d["levels"][str(b)][m] > d["levels"][str(a)][m])
             dn = sum(1 for d in rs if d["levels"][str(b)][m] < d["levels"][str(a)][m])
             print(f"  {a}x -> {b}x: {up} runs went to {m}=1, {dn} went to 0")
@@ -245,8 +266,8 @@ def summary(res_file=OUT / "results.jsonl"):
         pairs = [p for p in by.values() if len(p) >= 2]
         if pairs:
             agree = {L: sum(1 for p in pairs if len({p[k]["levels"][str(L)][m] for k in p}) == 1)
-                     / len(pairs) for L in LEVELS}
-            print("  seeds agree: " + "  ".join(f"{L}x {agree[L]:.0%}" for L in LEVELS)
+                     / len(pairs) for L in levels}
+            print("  seeds agree: " + "  ".join(f"{L}x {agree[L]:.0%}" for L in levels)
                   + f"  ({len(pairs)} positions)")
 
 
@@ -254,4 +275,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "summary":
         summary()
     else:
-        main(*sys.argv[1:2])
+        args, opt = [], {}
+        it = iter(sys.argv[1:])
+        for x in it:
+            if x in ("--stages", "--levels"):
+                opt[x[2:]] = next(it).split(",")
+            else:
+                args.append(x)
+        main(*args[:1], stages=opt.get("stages"),
+             levels=tuple(int(L) for L in opt.get("levels", LEVELS)))
