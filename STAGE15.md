@@ -27,4 +27,7 @@ answer is PICKED, not in the search itself.
 3. **Self-harm**: optional effects whose only legal targets are our own cards (S:P's
    banish on an empty enemy field). Count how often lines do it first; fix in the solver
    only if it is common.
+   *Counted 2026-11-18:* S:P's effect was used in 26 of the 240 stored turn 1s and banished
+   one of OUR cards in 16 (7%; e.g. h0/e1001, h14/e1005, h16/e1009). Real but second to the
+   pick; fix after step 2.
 4. Then the enemy's real goals (train its 10 hands), and re-play everything.
