@@ -68,3 +68,10 @@ stays (1, 2); `game.searched_defence` stays as a tool, not the games' check.
 Not run: the brk stage (their board, we break). Their turn-1 board comes from a ONE-card
 target (Angelechy Endgame Problem@szone), so the enemy activates it and passes; measuring
 a defender on that board says nothing until the enemy has real goals (asked the user).
+
+**2026-11-19, gbrk (the enemy defends with a searched defence, the games' going-second
+positions: their TRAINED turn 1, our break at 8x), 76 positions:** attacker (us) wins 67%
+against the scripted family, 68% against the searched defender; it took away 3 scripted wins
+and gave 4 (seed noise). No reply on our line saves them in 52 positions. Going second, the
+scripted defender does not flatter our breaks: the 66% stands. Both sides of the defender
+question now read "the script is as good as a searched reply"; the searched defender stays a tool.
