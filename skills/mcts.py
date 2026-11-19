@@ -53,9 +53,15 @@ class Search:
     there). `c_puct` as AlphaZero; `max_depth` caps a simulation's descent."""
 
     def __init__(self, session, prior=uniform, value=outcome_only, goal=None,
-                 c_puct=1.5, max_depth=400, seed=0):
+                 c_puct=1.5, max_depth=400, seed=0, observer=None):
+        """`observer`: a ygorl PointObserver that has seen every decision up
+        to the root (a network reads the event history, not just the board).
+        Each simulation carries a copy of it down its path, and `prior` /
+        `value` are then called with it as a third argument."""
         self.session = session
         self.root_snap = session.snapshot()
+        self.observer = observer
+        self._obs = None
         self.prior, self.value, self.goal = prior, value, goal
         self.c, self.max_depth = c_puct, max_depth
         self.rng = random.Random(seed)
@@ -78,8 +84,12 @@ class Search:
 
     def _expand(self):
         point = self.session.point
-        node = Node(point.player, list(self.prior(point, self.session)))
-        return node, float(self.value(point, self.session))
+        if self._obs is None:
+            return (Node(point.player, list(self.prior(point, self.session))),
+                    float(self.value(point, self.session)))
+        self._obs.observe(point)
+        return (Node(point.player, list(self.prior(point, self.session, self._obs))),
+                float(self.value(point, self.session, self._obs)))
 
     def _select(self, node):
         sign = 1.0 if node.player == 0 else -1.0
@@ -93,8 +103,18 @@ class Search:
         return best
 
     def simulate(self):
+        import copy
+
         s = self.session
         s.restore(self.root_snap)
+        self._obs = None
+        if self.observer is not None:
+            o = self.observer
+            # the card database, vocab and encoder never change in a search (and the
+            # database cannot be copied): shared, the event history copied
+            shared = {id(x): x for x in (getattr(o, "cards", None), getattr(o, "vocab", None),
+                                         getattr(o, "encoder", None)) if x is not None}
+            self._obs = copy.deepcopy(o, shared)
         if self.root is None:
             t = self._terminal()
             if t is not None:
@@ -105,6 +125,10 @@ class Search:
         for _depth in range(self.max_depth):
             a = self._select(node)
             path.append((node, a))
+            if self._obs is not None:          # every point is observed once, then decided
+                point = s.point
+                self._obs.observe(point)
+                self._obs.on_decision(point, a)
             s.act(a)
             self.steps += 1
             t = self._terminal()

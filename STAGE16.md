@@ -88,3 +88,8 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   With no net, 400 simulations find a stored kill from 4 and 8 decisions before its end, not
   from 16 or 30 (the tree is too wide without a prior: the net's job). Test:
   test_mcts_finds_a_known_kill_near_its_end.
+- **2026-11-19, net prior wired:** `skills/net_prior.py` (duelpc only: torch) gives the search a
+  ygorl checkpoint's softmax as its prior; the search carries a copy of the event history down
+  each path (card db / vocab / encoder shared). Plumbing check with the 60-line smoke-test net:
+  the stored kill is found from 16 decisions out (uniform prior: not), 1.8 s, 278 net calls --
+  but that line may be in the smoke test's training sample, so not yet evidence.
