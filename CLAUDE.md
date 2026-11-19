@@ -439,7 +439,11 @@ budgets and searched defences come before any side-card comparison.
   and puts older-settings sections (OLD_SECTIONS in web/views.py) in labelled folds.
 - Tests run on a SNAPSHOT of the database (`DUELROOM_DB`, tests/conftest.py) as they run on
   pinned deck copies: the web tests press job buttons.
-- `game._solve` re-runs a SIGSEGV'd search once (CRASH_RETRIES): 1.3% of NRPA-level-3 searches.
+- Patch 0008 (`patches/0008-card-reader-off-arena.patch`): the solver's card-reader callback
+  noted unknown cards into the CardDB's SHARED set with the worker's arena live, so a node was
+  wiped by that worker's next restore -> SIGSEGV in the other worker (8 of 631 NRPA-level-3
+  searches, deterministic per position; found with an ASan build, 2026-11-19). Fixed with
+  ArenaPause. `game._solve` still re-runs a SIGSEGV'd search once (CRASH_RETRIES) as a guard.
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,

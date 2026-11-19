@@ -22,6 +22,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0006-searched-defender.patch" >&2)
 # 0007: --no-self-target, no own-card picks for a listed card's single target.
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0007-no-self-target.patch" >&2)
+# 0008: the card reader's unknown-card note off the arena (a shared set's node
+# wiped by one worker's restore: SIGSEGV in 1.3% of NRPA-level-3 searches).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0008-card-reader-off-arena.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "$(nproc)" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl

@@ -1,0 +1,18 @@
+--- a/solver-patched/duel.cpp
++++ b/solver-patched/duel.cpp
+@@ -41,7 +41,14 @@
+ 		// exactly the problem, a SILENT VANILLA where the deck expects an effect.
+ 		// Recorded in the summary, like missing scripts: without it the duel starts,
+ 		// the line diverges, and nothing says so.
+-		self->db.NoteUnknown(code);
++		{
++			// NoteUnknown inserts into the CardDB's shared set: off the arena, or the
++			// node is wiped by this worker's next restore while the set (shared by
++			// every worker) still points at it -- 8 of 631 level-3 searches died of it
++			// (SIGSEGV in _Rb_tree insert; ASan, 2026-11-19).
++			ArenaPause pause;
++			self->db.NoteUnknown(code);
++		}
+ 		data->code = code;
+ 		return;
+ 	}
