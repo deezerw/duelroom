@@ -34,6 +34,10 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
   # not gain; -3 Engraver +3 vanilla going second must lose) before any side card is read
   venv/bin/python tools/experiments/side_gate.py >> results/experiments/side_gate_honest.log 2>&1
   echo "=== $(date) side gate done ===" >> $LOG
+  # a second opponent: is going first weak in general, or against Angelechy's going-second list?
+  venv/bin/python daemon.py games imported blue_eyes_oct_2026 2 10 --device duelpc \
+      >> results/ml/duelpc_games_first_be.log 2>&1
+  echo "=== $(date) going-first games vs Blue-Eyes done ===" >> $LOG
   venv/bin/python tools/experiments/use_timing.py second >> results/experiments/use_timing/run_second.log 2>&1
   echo "=== $(date) use_timing second done ===" >> $LOG
   venv/bin/python tools/ml/board_data.py 10 180 >> results/ml/boards_run.log 2>&1
