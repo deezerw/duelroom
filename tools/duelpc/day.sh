@@ -48,5 +48,5 @@ while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60;
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
 pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games|side_gate.py|t1_budget.py" 2>/dev/null
 sleep 10
-ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -f combosolver; pkill -f bc_train.py; sudo -n systemctl poweroff' >> $LOG 2>&1
+ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
