@@ -74,3 +74,11 @@ Stored games get the rich kill label nightly (cron 05:40, tools/ml/game_kills.py
 8x SOLVE_MS (the plateau's converged level). The 233 games job 502 had played with the trained
 enemy turn 1 but the 1x break are relabelled `brk1x` (backup duelroom.db.bak-20261119c); they
 compare with `endgame-t1` on the enemy change alone. Re-play: 8 hands x 10 enemy hands x 2 runs.
+
+**2026-11-19, survivor re-check read:** all 63 boards that survived the 4x kill check were
+checked again at 16x: 59 were killed (94%). Of 1063 distinct boards, 4 survive a 16x kill
+check. With a converged-ish kill check, vs Angelechy-Meta going first nearly every board this
+deck makes dies on turn 2 -- the games' going-first numbers (1x kill check: 690 of 1520 lost on
+turn 2) are far too kind. Board picking cannot fix that (nothing to pick); the levers are the
+deck (side/main) and the kill-check budget in the games (Monday: the 32x plateau).
+/games has "What you must stop, by their hand" (stops.by_enemy_hand).
