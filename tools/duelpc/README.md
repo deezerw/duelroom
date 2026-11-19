@@ -73,3 +73,7 @@ stops at the disk question.
   system is up, and `consoleblank=60` in GRUB re-blanks it within a minute if
   anything lights it again. Only the 5 s boot menu and boot messages show.
   Added on the PC by hand 2026-11-19 (not in autoinstall.yaml.in yet).
+- **A day of jobs:** `tools/duelpc/day.sh [HHMM]` wakes the PC, runs its queue (budget
+  plateau kill 32x, use_timing, board data -- each resumable) and at HHMM stops and
+  powers it OFF (never on at night: it is loud). Scheduled with
+  `sudo systemd-run --uid=deezer --on-calendar="<date> 08:30" tools/duelpc/day.sh 2100`.
