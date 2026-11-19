@@ -6417,3 +6417,42 @@ def test_turn2_builds_toward_the_trained_goal_when_it_cannot_kill(tmp_path, monk
     with pytest.raises(Stop):
         game.turn2("s.yrpX", "p.yrpX", "12845564@szone", [], tmp_path, 1000, 1, otk_ms=0)
     assert seen == [("t2", ["12845564@szone"])]
+
+
+def test_relabel_games_moves_runs_and_keeps_turn1(tmp_path, monkeypatch):
+    """A section of games moves to its own label: rows, run folders, line
+    paths; turn 1 is copied (new games still reuse it)."""
+    import sys as _sys
+    from pathlib import Path as _P
+    from skills import db, game
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "tools"))
+    import relabel_games as rl
+
+    monkeypatch.setattr(game, "GAMES", tmp_path / "games")
+    monkeypatch.setattr(rl, "KILLS", tmp_path / "kills.jsonl")
+    conn = db.connect(tmp_path / "t.db")
+    old = game.games_dir("deck", "E", True, "server")
+    run, t1 = old / "h0" / "e1000" / "run0", old / "h0" / "e1000" / "t1"
+    run.mkdir(parents=True)
+    t1.mkdir(parents=True)
+    (run / "line.yrp").write_text("x")
+    (t1 / "prefix.yrpX").write_text("p")
+    with conn:
+        conn.execute("INSERT INTO trainer_hands (deck_hash, deck, hand_index, hand_seed, hand) "
+                     "VALUES ('d', 'deck', 0, '1', '[]')")
+        conn.execute("INSERT INTO game_turn1 (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, ok, start, prefix, created) VALUES "
+                     "('d','E',0,0,1000,1,'server',1,?,?, 'now')",
+                     (str(t1 / "start.yrpX"), str(t1 / "prefix.yrpX")))
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, outcome, line, created) VALUES "
+                     "('d','E',0,0,1000,1,'server',0,'win',?,'now')", (str(run / "line.yrp"),))
+    assert rl.relabel(conn, "deck", "E", True, "old", say=lambda *a: None) == 1
+    new = game.games_dir("deck", "E", True, "old")
+    line = conn.execute("SELECT line FROM game_results WHERE device='old'").fetchone()[0]
+    assert line == str(new / "h0" / "e1000" / "run0" / "line.yrp") and _P(line).exists()
+    assert not run.exists() and (t1 / "prefix.yrpX").exists()
+    devs = {r[0]: r[1] for r in conn.execute("SELECT device, prefix FROM game_turn1")}
+    assert set(devs) == {"server", "old"} and _P(devs["old"]).exists()
+    with pytest.raises(SystemExit):
+        rl.relabel(conn, "deck", "E", True, "old", say=lambda *a: None)
