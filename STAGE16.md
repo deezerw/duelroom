@@ -67,3 +67,13 @@ bottleneck. duelpc runs Mon-Wed days, plus nights if the 2026-11-19 trial is fin
 
 Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest baselines
 (16x kill / 8x break games) are in, because the A/B needs them.
+
+## Progress
+
+- **2026-11-19, step 0 done:** ygorl (the server's built package, Python 3.12) copied into
+  duelpc's `~/duelroom-ml` with numpy/ribs/nashpy; imports, loads 14924 cards, sees the 5070 Ti.
+- **2026-11-19, step 1 done:** `tools/ml/demos.py`: 4748 lines -> demonstrations, 0 rejected
+  (kill 2354, break 1870, board_kill 524; ~1.05M decisions before filtering).
+- **2026-11-19, step 2 built:** `tools/ml/bc_train.py` (turn player only, repeats dropped,
+  held out by deck+hand). Smoke test, 60 lines / 2 epochs: held-out 43% vs 32% uniform. The
+  full run is first in duelpc's 3 AM queue (2026-11-20, tools/duelpc/day.sh) -> results/ml/bc/.
