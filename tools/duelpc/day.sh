@@ -25,7 +25,7 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
   # the honest going-first baseline (16x kill check, trained enemy turn 2), run here and
   # not through the jobs queue: a queued duelpc job is retried with Wake-on-LAN, at night too
   venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
-      --hands 0,3,6,9,12,15,18,21 >> results/ml/duelpc_games_first.log 2>&1
+      >> results/ml/duelpc_games_first.log 2>&1      # every trained hand (resumable)
   echo "=== $(date) going-first games done ===" >> $LOG
   venv/bin/python tools/experiments/use_timing.py second >> results/experiments/use_timing/run_second.log 2>&1
   echo "=== $(date) use_timing second done ===" >> $LOG

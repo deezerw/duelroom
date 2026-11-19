@@ -94,3 +94,10 @@ Ash on Fuwalos 25/38% (8, +12 +-24), Ash on Purulia 50/62% (8, +12 +-24); our Fu
 open window 67/67% (9). Every Ash row favours firing; none is clear of zero yet. More needs
 going-second games for the other Ash hands (11, 13, 23: the 8-hand re-play skipped them).
 Going first (use_timing, 101 windows at 8x kill): fire = hold everywhere, the kill comes anyway.
+
+**2026-11-19, the honest going-first baseline (8 hands x 10 enemy hands x 2 runs, duelpc,
+16x kill check, trained enemy turn 2):** won by turn 3 11/159 = 7%, killed on turn 2 84%. The
+old settings on the same hands (kill1x: 1x kill, one-target enemy turn 2) read 43% / 45%.
+Going second (server, 8x break, trained enemy turn 1): 66% won on turn 2 (was 31% at 1x).
+Against a full-strength Angelechy this deck wins going second and almost never survives going
+first -- the side-card search (the user's end goal) should look at going first.
