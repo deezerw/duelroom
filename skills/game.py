@@ -725,7 +725,7 @@ def enemy_hand(our_deck, enemy_deck, enemy_seed, scratch):
 
 
 def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
-                ms, seed, our_respond, start=None):
+                ms, seed, our_respond, start=None, trained=None):
     """Going second: the enemy's turn 1 into your hand, closed at turn 2.
 
     `start`: the trainer's duel for your hand (`trainer.hand_start`): your
@@ -734,7 +734,11 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     board, reached, enemy_hand}, or None when not even a partial line came
     back -- the bare template would deal them the bottom of their
     unshuffled list, not their hand, so there is no honest position to play
-    from (recorded as no_t1, as going first)."""
+    from (recorded as no_t1, as going first).
+
+    `trained`: (hand, goal) of this enemy hand from the trainer's enemy pool
+    (`trainer.enemy_goal`); its board targets replace `enemy_target`. The
+    hand must be the one dealt here, or the goal belongs to another duel."""
     import random
 
     from ygorl.engine.replay import Replay
@@ -744,6 +748,12 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     scratch = Path(scratch)
     scratch.mkdir(parents=True, exist_ok=True)
     ehand = enemy_hand(our_deck, enemy_deck, enemy_seed, scratch)
+    targets = [enemy_target]
+    if trained:
+        if sorted(trained[0]) != ehand:
+            raise RuntimeError(f"enemy hand {enemy_seed}: trained on {sorted(trained[0])}, "
+                               f"dealt {ehand}")
+        targets = trainer.split_goal(trained[1])[0] or targets
     start = start or {}
     if start.get("order"):
         ours, _tail = ordered_deck(our_deck, start["order"], hand, scratch / "ours.ydk",
@@ -761,8 +771,8 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
                                seed=enemy_seed, shuffle=False,
                                core_seed=start.get("core_seed"))
     args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
-            "--hand", "|".join(map(str, ehand)), "--target", enemy_target] \
-        + defender_args(our_respond)
+            "--hand", "|".join(map(str, ehand))] \
+        + [a for t in targets for a in ("--target", t)] + defender_args(our_respond)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -847,6 +857,14 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     ours_hand = respond_codes(deck_path, cards, extra=ours_extra)
     seeds = [ENEMY_SEED0 + k for k in range(enemy_hands)]
     first = int(bool(first))
+    # Going second: each enemy hand plays toward its own trained goal where
+    # the trainer has one (`train <enemy> --vs <deck>`), else enemy_target.
+    trained = {} if first else {
+        e: g for e in seeds
+        if (g := trainer.enemy_goal(conn, enemy_deck, deck_path, e, with_hand=True))}
+    if not first:
+        say(f"enemy turn 1: {len(trained)}/{len(seeds)} hand(s) on trained goals"
+            + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))
     root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
@@ -875,7 +893,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,
-                             ours_hand, start=start)
+                             ours_hand, start=start, trained=trained.get(eseed))
         rec = {"deck_hash": dh, "enemy": enemy_name,
                "hand_index": row["hand_index"], "board": 0,
                "enemy_seed": eseed, "ok": int(t1 is not None)}

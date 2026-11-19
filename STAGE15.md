@@ -54,3 +54,9 @@ games per hand is below the trained board on all 10 hands (the games' boards fac
 traps, the trainer's do not, so the gap is an upper bound). NOT wired into game.enemy_turn1
 yet (trainer.enemy_goal is the lookup): asking the user, since it changes every game going
 second and old games stop being comparable.
+**User chose: switch it (2026-11-19).** game.run going second passes each enemy hand's trained
+goal (trainer.enemy_goal, refused if the dealt hand differs) to enemy_turn1. The old imported vs
+Angelechy-Meta going-second games (240 turn 1s, 2400 games) are relabelled device
+`endgame-t1` with their files under `Angelechy-Meta@endgame-t1/` (readable on /games, never
+pooled); DB backup data/duelroom.db.bak-20261119. The three side variants still play the old
+enemy turn 1 (no enemy pool for their decks yet). Next: re-play going second on duelpc.

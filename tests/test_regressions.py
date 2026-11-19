@@ -6279,3 +6279,27 @@ def test_szone_value_counts_a_monster_placed_as_a_continuous_spell():
     p = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": p["values"]}
     _, goals = trainer.breadth_goals(DECKS / "Angelechy-Meta.ydk", [], p)
     assert any(t[-1] == f"{code}@szone" and lbl == f"piece:{code}@szone" for t, lbl in goals)
+
+
+def test_enemy_turn1_plays_toward_the_trained_goal(tmp_path, monkeypatch):
+    """Going second, an enemy hand with a trained goal asks the solver for
+    that goal's board targets instead of the one payoff target, and a goal
+    trained on another hand is refused rather than played."""
+    from skills import game
+    from skills.engine import DECKS
+
+    seen = []
+    monkeypatch.setattr(game, "enemy_hand", lambda *a: [1, 2, 3])
+    monkeypatch.setattr(game.breaking, "deck_with_hand", lambda d, h, out: out)
+    monkeypatch.setattr(game.breaking, "template_vs", lambda out, *a, **k: out)
+    monkeypatch.setattr(game, "_solve", lambda tpl, args, *a: seen.append(list(args))
+                        or {"solution": None, "approach": None})
+    args = (DECKS / "imported.ydk", DECKS / "Angelechy-Meta.ydk", [5], 1000,
+            "12845564@szone", tmp_path, 1000, 1, [])
+    assert game.enemy_turn1(*args) is None
+    goal = ["50284408@szone", "40366667@szone:fd"]
+    assert game.enemy_turn1(*args, trained=([3, 1, 2], goal)) is None
+    targets = [[a[i + 1] for i, x in enumerate(a) if x == "--target"] for a in seen]
+    assert targets == [["12845564@szone"], goal]
+    with pytest.raises(RuntimeError, match="trained on"):
+        game.enemy_turn1(*args, trained=([9, 9, 9], goal))

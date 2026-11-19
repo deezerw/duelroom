@@ -623,15 +623,19 @@ def ensure_enemy_pool(conn, deck_path, name, vs_path, hands):
     return dh
 
 
-def enemy_goal(conn, enemy_path, vs_path, enemy_seed):
-    """The trained goal of the enemy's hand for `enemy_seed`, or None."""
+def enemy_goal(conn, enemy_path, vs_path, enemy_seed, with_hand=False):
+    """The trained goal of the enemy's hand for `enemy_seed`, or None;
+    `with_hand`: (hand, goal)."""
     from . import game
 
     r = conn.execute(
-        "SELECT best_goal FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
+        "SELECT hand, best_goal FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
         (enemy_key(deck_hash(enemy_path), deck_hash(vs_path)),
          enemy_seed - game.ENEMY_SEED0)).fetchone()
-    return json.loads(r["best_goal"]) if r and r["best_goal"] else None
+    if not r or not r["best_goal"]:
+        return None
+    goal = json.loads(r["best_goal"])
+    return (json.loads(r["hand"]), goal) if with_hand else goal
 
 
 def starter_estimate(deck_path, k, skip=(), solve_ms=STARTER_MS, workers=None):
