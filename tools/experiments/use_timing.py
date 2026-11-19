@@ -43,7 +43,7 @@ from skills import db, engine, game, remote, trainer  # noqa: E402
 DECK, ENEMY = "imported", "Angelechy-Meta"
 OUT = ROOT / "results" / "experiments" / "use_timing"
 KILLS = ROOT / "results" / "ml" / "game_kills.jsonl"
-LEVEL = 4
+LEVEL = 8       # the enemy re-search: 8x OTK_MS (16x converges further; the pilot fits a day)
 MAX_BRANCHES = 8
 _lock = threading.Lock()
 
