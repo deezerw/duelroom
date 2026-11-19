@@ -23,6 +23,9 @@ The script plays the rest of the turn after the branch (one reply changes,
 not the whole policy), and the attacker re-plans around it with full search.
 
     DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/use_timing.py [positions]
+    DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/use_timing.py second [positions]
+        (going second: your hand traps on their turn 1, judged by your break at
+        BREAK_X; results_second.jsonl)
     venv/bin/python tools/experiments/use_timing.py summary
 Resumable: results.jsonl under OUT, one line per branch.
 """
@@ -174,6 +177,117 @@ def main(limit=None):
     summary()
 
 
+# --- going second: your hand traps on THEIR turn 1, judged by your break -------
+
+RESULTS2 = OUT / "results_second.jsonl"
+
+
+def second_positions(conn, dh):
+    """The going-second games' positions (their trained turn 1 into your
+    hand) whose hand holds a hand trap, with the game's run-0 seed."""
+    from skills import scenarios
+
+    traps = set(scenarios.HANDTRAPS)
+    hands = {r["hand_index"]: json.loads(r["hand"]) for r in conn.execute(
+        "SELECT hand_index, hand FROM trainer_hands WHERE deck_hash=?", (dh,))}
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=0 "
+        "AND device='server' AND ok=1 ORDER BY enemy_seed, hand_index", (dh, ENEMY))
+        if traps & set(hands.get(r["hand_index"], []))]
+
+
+def main_second(limit=None):
+    """Each window where one of your pieces could answer their turn 1: the
+    other reply and (control) the line's own, each played on -- their turn 1
+    re-searched from the window toward its trained goal (SOLVE_MS), then
+    your break at game.BREAK_X -- did you win? Same seeds as the game."""
+    from ygorl.engine.duel import default_cards
+    from ygorl.engine.replay import Replay
+
+    from skills import breaking
+
+    dev = remote.current()
+    remote.prepare(dev)
+    conn = db.connect()
+    cards = default_cards()
+    deck = engine.DECKS / f"{DECK}.ydk"
+    enemy_deck = engine.DECKS / f"{ENEMY}.ydk"
+    dh = trainer.deck_hash(deck)
+    enemy_target = game.scenarios.target_for(ENEMY)
+    theirs = game.enemy_respond_codes(enemy_deck, cards)
+    ours = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
+    goals = {r["hand_index"]: trainer.split_goal(json.loads(r["best_goal"]))[0]
+             for r in conn.execute("SELECT hand_index, best_goal FROM trainer_hands "
+                                   "WHERE deck_hash=? AND best_goal IS NOT NULL", (dh,))}
+    OUT.mkdir(parents=True, exist_ok=True)
+    done = set()
+    if RESULTS2.exists():
+        done = {(d["hand"], d["eseed"], d["k"]) for d in map(json.loads, RESULTS2.read_text().splitlines())}
+    todo_pos = second_positions(conn, dh)[:int(limit) if limit else None]
+    jobs = []
+    for p in todo_pos:
+        tg = trainer.enemy_goal(conn, enemy_deck, deck, p["enemy_seed"])
+        targets = trainer.split_goal(tg)[0] if tg else [enemy_target]
+        flags = ["--start", p["start"], "--root", p["start"], "--no-ref"] \
+            + [a for t in targets for a in ("--target", t)] \
+            + ["--player", "0", "--turns", "1"] + game.defender_args(ours)
+        scratch = OUT / "scratch2" / f"h{p['hand_index']}-e{p['enemy_seed']}"
+        try:
+            brs = distinct(game._branches(p["prefix"], flags, scratch, "br"))[:MAX_BRANCHES]
+        except Exception as exc:  # noqa: BLE001 -- that position is skipped, reported
+            print(f"h{p['hand_index']} e{p['enemy_seed']}: no branches: {exc}", flush=True)
+            continue
+        for b in brs:
+            if (p["hand_index"], p["enemy_seed"], b["k"]) not in done:
+                jobs.append((p, flags, b, scratch))
+    print(f"going second: {len(todo_pos)} positions, {len(jobs)} branch(es) on {dev.name} "
+          f"({dev.workers} at once), {len(done)} done", flush=True)
+
+    def play_on(p, flags, root, label, scratch):
+        """Their turn 1 from `root` (the window), then your break: won?"""
+        args = [a if a != p["start"] or i < 2 else root for i, a in enumerate(flags)]
+        r = game._solve(root, args, scratch, f"t1-{label}", engine.SOLVE_MS, p["enemy_seed"])
+        src = r["solution"] or r["approach"] or root
+        pos = game.replay(src, until_turn=2)
+        if pos.winner is not None:
+            return int(pos.winner == 1)
+        start2, prefix2 = breaking.split_position(Replay.from_yrp(src), pos.responses,
+                                                  scratch / f"pos-{label}")
+        t2 = game.turn3(start2, prefix2,
+                        game.steer(goals[p["hand_index"]], enemy_target),
+                        set(theirs) | set(game._pieces(pos.board, 0, cards)),
+                        scratch, engine.SOLVE_MS * game.BREAK_X,
+                        p["enemy_seed"] * 100, player=1, turn=2)
+        return int(bool(t2["won"]))
+
+    def one(job):
+        p, flags, b, scratch = job
+        ctrl = control(p["prefix"], b["file"], scratch / f"c{b['k']}.yrpX")
+        won_b = play_on(p, flags, b["file"], f"b{b['k']}", scratch)
+        won_c = play_on(p, flags, ctrl, f"c{b['k']}", scratch) if ctrl else None
+        # the kill-check schema, "lost" = you did not win: measured() reads both
+        rec = {"hand": p["hand_index"], "eseed": p["enemy_seed"], "k": b["k"],
+               "at": b.get("at"), "trigger": b["trigger"], "mons": b.get("mons"),
+               "chosen": b["chosen"], "alt": b["alt"], "line_lost": None,
+               "branch_lost": 1 - won_b, "control_lost": None if won_c is None else 1 - won_c,
+               "level": game.BREAK_X, "device": dev.name, "side": "second"}
+        with _lock, RESULTS2.open("a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        print(json.dumps(rec), flush=True)
+
+    def guarded(job):
+        try:
+            one(job)
+        except remote.DeviceDown:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- retried on the next run
+            print(f"h{job[0]['hand_index']} e{job[0]['enemy_seed']} b{job[2]['k']}: "
+                  f"failed: {type(exc).__name__}: {exc}", flush=True)
+
+    with ThreadPoolExecutor(dev.workers) as ex:
+        list(ex.map(guarded, jobs))
+
+
 def summary():
     """Per (your card, their trigger): killed when you fire vs when you hold, by window."""
     from skills import card_db
@@ -208,5 +322,7 @@ def summary():
 if __name__ == "__main__":
     if sys.argv[1:2] == ["summary"]:
         summary()
+    elif sys.argv[1:2] == ["second"]:
+        main_second(*sys.argv[2:3])
     else:
         main(*sys.argv[1:2])

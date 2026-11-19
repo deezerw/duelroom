@@ -12,8 +12,8 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
 (
   venv/bin/python tools/experiments/budget_plateau.py --stages kill --levels 32 >> results/experiments/plateau_32.log 2>&1
   echo "=== $(date) plateau 32x done ===" >> $LOG
-  venv/bin/python tools/experiments/use_timing.py 240 >> results/experiments/use_timing/run.log 2>&1
-  echo "=== $(date) use_timing 240 done ===" >> $LOG
+  venv/bin/python tools/experiments/use_timing.py second >> results/experiments/use_timing/run_second.log 2>&1
+  echo "=== $(date) use_timing second done ===" >> $LOG
   venv/bin/python tools/ml/board_data.py 10 180 >> results/ml/boards_run.log 2>&1
   echo "=== $(date) board data done ===" >> $LOG
 ) &
