@@ -42,9 +42,21 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
   venv/bin/python tools/experiments/side_gate.py >> results/experiments/side_gate_honest.log 2>&1
   echo "=== $(date) side gate done ===" >> $LOG
   # a second opponent: is going first weak in general, or against Angelechy's going-second list?
-  venv/bin/python daemon.py games imported blue_eyes_oct_2026 2 10 --device duelpc \
-      >> results/ml/duelpc_games_first_be.log 2>&1
-  echo "=== $(date) going-first games vs Blue-Eyes done ===" >> $LOG
+  # only once its 10 game hands are trained (the server trains them after its own jobs) and
+  # the trainer is not still improving them: never a mix of trained and one-target turns
+  if venv/bin/python -c "
+from skills import db, engine, trainer
+c = db.connect()
+dh = trainer.enemy_key(trainer.deck_hash(engine.DECKS / 'blue_eyes_oct_2026.ydk'),
+                       trainer.deck_hash(engine.DECKS / 'imported.ydk'))
+n = c.execute('SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? AND best_goal IS NOT NULL', (dh,)).fetchone()[0]
+raise SystemExit(0 if n >= 10 else 1)" && ! ps -eo cmd | grep -q "[d]aemon.py train blue_eyes_oct_2026"; then
+    venv/bin/python daemon.py games imported blue_eyes_oct_2026 2 10 --device duelpc \
+        >> results/ml/duelpc_games_first_be.log 2>&1
+    echo "=== $(date) going-first games vs Blue-Eyes done ===" >> $LOG
+  else
+    echo "=== $(date) Blue-Eyes games skipped: its enemy hands are not trained yet ===" >> $LOG
+  fi
   venv/bin/python tools/experiments/use_timing.py second >> results/experiments/use_timing/run_second.log 2>&1
   echo "=== $(date) use_timing second done ===" >> $LOG
   venv/bin/python tools/ml/board_data.py 10 180 >> results/ml/boards_run.log 2>&1
@@ -53,7 +65,7 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
 work=$!
 while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60; done
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
-pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games|side_gate.py|t1_budget.py" 2>/dev/null
+pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games .*--device duelpc|side_gate.py|t1_budget.py" 2>/dev/null
 sleep 10
 ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
