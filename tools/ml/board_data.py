@@ -23,6 +23,7 @@ stopped, and the line itself -- far more to learn from than lost/not.
 
     DUELROOM_DEVICE=duelpc venv/bin/python tools/ml/board_data.py [enemy hands] [limit]
     venv/bin/python tools/ml/board_data.py summary
+    DUELROOM_DEVICE=duelpc venv/bin/python tools/ml/board_data.py recheck
 Resumable: boards.jsonl + replays under OUT.
 """
 
@@ -132,7 +133,8 @@ def kill_detail(k, prefix, defence, lost, keep):
     line = k["solution"] if lost else k["approach"]
     d["damage"] = 8000 if lost else game._damage(prefix, k["approach"], 1)
     if line:
-        kept = shutil.copy(line, Path(keep) / f"kill-h{defence}{Path(line).suffix}")
+        kept = (shutil.copy(line, Path(keep) / f"kill-h{defence}{Path(line).suffix}")
+                if keep else line)      # None: read it where it is (tools/ml/game_kills.py)
         d["line"] = str(kept)
         try:
             d.update(turn2_read(kept))
@@ -258,6 +260,81 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
     summary()
 
 
+RECHECK_MS = game.OTK_MS * 16    # the kill plateau still climbed at 16x (STAGE11)
+
+
+def recheck(workers=None):
+    """Kill-check every board that SURVIVED again at RECHECK_MS (idea 3).
+
+    A found kill is proof; a survival may only mean the search ran out of
+    time, and survivors are the few boards a pick model learns most from.
+    Same seeds and defences as the first check; a defence that holds ends
+    the board as before. Appends {hand, eseed, sig, lost16, kill} to
+    rechecks.jsonl (resumable); the first label is left as it was."""
+    from ygorl.engine.duel import default_cards
+
+    dev = remote.current()
+    remote.prepare(dev)
+    conn = db.connect()
+    cards = default_cards()
+    deck = ROOT / "assets" / "decks" / f"{DECK}.ydk"
+    ours_hand = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
+    enemy_target = game.scenarios.target_for(ENEMY)
+    out_file = OUT / "rechecks.jsonl"
+    done = set()
+    if out_file.exists():
+        done = {(d["hand"], d["eseed"], d["sig"]) for d in map(json.loads, out_file.read_text().splitlines())}
+    todo = [d for d in map(json.loads, (OUT / "boards.jsonl").read_text().splitlines())
+            if d.get("ok") and not d.get("dup") and d.get("lost") == 0 and d.get("prefix")
+            and (d["hand"], d["eseed"], d["sig"]) not in done]
+    print(f"{len(todo)} survivor(s) to re-check at {RECHECK_MS // 1000} s on {dev.name}", flush=True)
+
+    def one(d):
+        tag = f"h{d['hand']}-e{d['eseed']}-{d['variant']}-r{d['rep']}"
+        scratch = OUT / "scratch" / f"recheck-{tag}"
+        keep = Path(d["prefix"]).parent
+        seed = d["eseed"] * 100 + 60 + d["rep"]
+        ours = set(d["pieces"])
+        lost, detail = [], []
+        try:
+            for v in game.DEFENCES:
+                k = game._solve(d["prefix"], ["--start", d["start"], "--root", d["prefix"],
+                                              "--no-ref", "--target", enemy_target,
+                                              "--player", "1", "--turns", "2"]
+                                + game.defence_args(ours | set(ours_hand), v)
+                                + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
+                                scratch, f"otk16-h{v}", RECHECK_MS, seed)
+                lost.append(int(bool(k["solution"]) and game._winner(k["solution"]) == 1))
+                x = kill_detail(k, d["prefix"], v, lost[-1], None)
+                if x.get("line"):
+                    x["line"] = shutil.copy(x["line"], keep / f"kill16-h{v}{Path(x['line']).suffix}")
+                detail.append(x)
+                if not lost[-1]:
+                    break
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        rec = {"hand": d["hand"], "eseed": d["eseed"], "sig": d["sig"], "otk_ms": RECHECK_MS,
+               "lost16": int(all(lost)), "kill": detail}
+        with _lock, out_file.open("a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        print(f"{tag}: lost at 16x {rec['lost16']}", flush=True)
+
+    def guarded(d):
+        try:
+            one(d)
+        except remote.DeviceDown:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- retried on the next run
+            print(f"recheck h{d['hand']} e{d['eseed']}: failed: {type(exc).__name__}: {exc}",
+                  flush=True)
+
+    with ThreadPoolExecutor(int(workers or dev.workers)) as ex:
+        list(ex.map(guarded, todo))
+    rs = [json.loads(l) for l in out_file.read_text().splitlines()]
+    print(f"re-checked {len(rs)}: {sum(r['lost16'] for r in rs)} killed at 16x "
+          f"({sum(r['lost16'] for r in rs) / max(1, len(rs)):.0%} of the survivors were false)")
+
+
 def progress():
     """For the Jobs page: turn 1s made of the plan main() wrote."""
     f, plan = OUT / "boards.jsonl", OUT / "plan.json"
@@ -290,5 +367,7 @@ def summary():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "summary":
         summary()
+    elif len(sys.argv) > 1 and sys.argv[1] == "recheck":
+        recheck(*sys.argv[2:3])
     else:
         main(*sys.argv[1:3])
