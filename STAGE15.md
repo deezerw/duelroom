@@ -101,3 +101,13 @@ old settings on the same hands (kill1x: 1x kill, one-target enemy turn 2) read 4
 Going second (server, 8x break, trained enemy turn 1): 66% won on turn 2 (was 31% at 1x).
 Against a full-strength Angelechy this deck wins going second and almost never survives going
 first -- the side-card search (the user's end goal) should look at going first.
+
+**2026-11-19, why going first is weak (user asked):** in the honest going-first games the enemy
+fires 2.2 interruptions on our turn 1 on average (168 turn 1s; 2 untouched), opening ~3 cards
+usable on our turn -- 22 of its 43 main cards act on our turn (11 hand traps, 11 Dominus from
+hand) plus 3 Opening to e4 (only when WE go first): a going-second list. Our turn 1 then reaches
+its full goal 4/80, ends with 0 pieces 22/80 and 1 piece 44/80 (the trainer's untouched boards
+average ~4.8), and Mulcharmy draws leave them ~6 cards (up to 13) for turn 2. Levers on our
+side: turn 1 that adapts to disruption (this stage), turn-1 budget against the CONVERGED kill
+check (`tools/experiments/t1_budget.py`, queued on duelpc), the omniscient attacker (it sees our
+hand and set cards), and a second enemy deck to tell "weak going first" from "weak vs Angelechy".
