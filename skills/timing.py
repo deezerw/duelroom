@@ -75,6 +75,9 @@ def scores(conn, dh, enemy, own=None, first=True, device="server",
 
 # --- measured: fire or hold at the same window --------------------------------
 
+MEASURED_FOR = ("imported", "Angelechy-Meta", True)    # use_timing.py's DECK, ENEMY, going first
+
+
 def measured_file():
     from .engine import ROOT
     return ROOT / "results" / "experiments" / "use_timing" / "results.jsonl"

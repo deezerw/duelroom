@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer, game, impact, remote, stops,
+                    trainer, game, impact, remote, stops, timing,
                     report as report_mod, scenarios, stats, watch)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -592,6 +592,13 @@ def games_view(name=None):
                    "by": [(snm(b), n) for b, n in r["by"]]} for r in st["theirs"]]
         yours = [{**r, "name": snm(r["code"]),
                   "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
+        timing_rows = None
+        if (name, enemy, bool(first)) == timing.MEASURED_FOR and device == "server":
+            m = timing.measured()
+            if m:
+                timing_rows = {**m, "rows": [{**r, "piece_name": nm(r["piece"]),
+                                              "trigger_name": nm(r["trigger"]) if r["trigger"]
+                                              else "an open window"} for r in m["rows"]]}
         must = [{**h, "hand": [nm(x) for x in h["hand"]],
                  "kill_cards": [(snm(x), share) for x, share in h["kill_cards"]],
                  "must": [{"name": snm(m[0]), "held": m[1:3], "lost": m[3:5],
@@ -608,6 +615,7 @@ def games_view(name=None):
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours, "must": must,
+                        "timing": timing_rows,
                         "unread_stops": unread_stops})
     active_jobs = [{**dict(j), "device": _job_device(j)} for j in _games_jobs(c, name)]
     busy = {j["device"] for j in active_jobs}

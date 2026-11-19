@@ -230,6 +230,30 @@
     {% endfor %}
     </tbody>
   </table>
+  {% if e.timing %}
+  <h3 style="margin:16px 0 4px">Best time to use (measured)</h3>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">At the same moment of their
+    turn, the same position: you fire the card, or you hold it, and they search their kill
+    again from there ({{ e.timing.level }}x budget). <b>Their kill rate</b> each way, paired
+    over {{ e.timing.windows }} moments. A plus sign = firing there stops more kills than holding.
+    Moments where one card was weighed against another are left out.</div>
+  <table class="impact">
+    <thead><tr><th>your card</th><th>when they…</th><th>fire vs hold</th>
+      <th class="extra">their kill rate: fired / held</th><th class="extra">moments</th></tr></thead>
+    <tbody>
+    {% for r in e.timing.rows %}
+      <tr class="{{ 'few-games' if r.few }}">
+        <td>{{ r.piece_name }}</td>
+        <td>{{ r.trigger_name }}</td>
+        <td><span class="rate {{ 'pos' if r.gain > 0 else ('neg' if r.gain < 0 else '') }}">{{ '%+d'|format((r.gain * 100)|round|int) }}</span>
+          <span class="muted">± {{ (r.ci * 100)|round|int }}</span>{% if r.few %}<span class="muted"> · few</span>{% endif %}</td>
+        <td class="extra">{{ (r.fired * 100)|round|int }}% / {{ (r.held * 100)|round|int }}%</td>
+        <td class="extra">{{ r.n }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% if e.must %}
   <h3 style="margin:16px 0 4px">What you must stop, by their hand</h3>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their turn only

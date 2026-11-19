@@ -6368,3 +6368,27 @@ def test_must_stop_by_enemy_hand_compares_held_and_lost_games(tmp_path):
     assert (h["games"], h["lost"]) == (3, 2)
     assert dict(h["kill_cards"]) == {7: 1.0, 8: 1.0}
     assert h["must"] == [(7, 1, 1, 0, 2, [(5, 1)])]
+
+
+def test_measured_timing_pairs_fire_and_hold_at_the_same_window(tmp_path):
+    """The causal "best time to use": a window's two replies, both searched
+    from the window (the control), paired; piece-vs-piece windows and
+    windows without a control are left out."""
+    import json
+    from skills import timing
+
+    f = tmp_path / "r.jsonl"
+    rows = [
+        # line fired 5 on trigger 9 (control: killed), branch held (killed)
+        {"chosen": 5, "alt": 0, "trigger": 9, "branch_lost": 1, "control_lost": 1, "level": 8},
+        # line held, branch fired 5 (not killed); control of the hold: killed
+        {"chosen": 0, "alt": 5, "trigger": 9, "branch_lost": 0, "control_lost": 1, "level": 8},
+        {"chosen": 5, "alt": 6, "trigger": 9, "branch_lost": 0, "control_lost": 1, "level": 8},
+        {"chosen": 0, "alt": 5, "trigger": 9, "branch_lost": 0, "control_lost": None, "level": 8},
+    ]
+    f.write_text("\n".join(json.dumps({"line_lost": 0, **r}) for r in rows))
+    m = timing.measured(f)
+    [r] = m["rows"]
+    assert (r["piece"], r["trigger"], r["n"]) == (5, 9, 2)
+    assert (r["fired"], r["held"], r["gain"]) == (0.5, 1.0, 0.5)
+    assert m["level"] == 8
