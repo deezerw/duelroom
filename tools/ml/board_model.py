@@ -33,8 +33,15 @@ ZONES = ("mzone", "szone", "hand", "grave", "banished", "extra_faceup")
 FOLDS = 6
 
 
+RECHECKS = BOARDS.with_name("rechecks.jsonl")
+
+
 def load():
-    """One row per distinct board per position: (pos, sig) -> record."""
+    """One row per distinct board per position: (pos, sig) -> record.
+
+    A board re-checked at 16x (`board_data.py recheck`) takes that label:
+    a survival at 4x may only have been the search's clock. Its 4x label
+    stays as `lost4`."""
     rows = {}
     for d in map(json.loads, BOARDS.read_text().splitlines()):
         if not d.get("ok") or "lost" not in d:
@@ -42,6 +49,11 @@ def load():
         k = (d["hand"], d["eseed"], d["sig"])
         r = rows.setdefault(k, {**d, "variants": []})
         r["variants"].append(d["variant"])
+    if RECHECKS.exists():
+        for c in map(json.loads, RECHECKS.read_text().splitlines()):
+            r = rows.get((c["hand"], c["eseed"], c["sig"]))
+            if r is not None:
+                r["lost4"], r["lost"] = r["lost"], c["lost16"]
     return list(rows.values())
 
 
@@ -147,6 +159,11 @@ def main():
         for i, p in zip(te, m.predict_proba([X[i] for i in te])[:, 1]):
             scores[i] = p
     res = picks(rows, scores)
+    re = [r for r in rows if "lost4" in r]
+    if re:
+        print(f"{len(re)} survivor(s) re-checked at 16x: "
+              f"{sum(r['lost'] for r in re)} were killed after all (labels corrected)")
+    print(f"{sum(1 for r in rows if r.get('kill'))} board(s) carry the rich kill label")
     print(f"{len(rows)} distinct boards, {len(res)} positions, "
           f"{sum(v['mixed'] for v in res.values())} where the board decides; "
           f"held-out by hand, {FOLDS} folds")
