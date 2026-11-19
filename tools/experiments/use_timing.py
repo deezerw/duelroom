@@ -262,6 +262,9 @@ def main_second(limit=None):
 
     def one(job):
         p, flags, b, scratch = job
+        # one folder per window: the break search writes fixed names (t2, t2-h2)
+        # and the windows of one position run side by side
+        scratch = scratch / f"k{b['k']}"
         ctrl = control(p["prefix"], b["file"], scratch / f"c{b['k']}.yrpX")
         won_b = play_on(p, flags, b["file"], f"b{b['k']}", scratch)
         won_c = play_on(p, flags, ctrl, f"c{b['k']}", scratch) if ctrl else None
