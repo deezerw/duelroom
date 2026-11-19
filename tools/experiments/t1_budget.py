@@ -96,7 +96,11 @@ def main(limit=POSITIONS, levels=LEVELS):
 
 
 def summary():
-    recs = [json.loads(l) for l in (OUT / "results.jsonl").read_text().splitlines()]
+    f = OUT / "results.jsonl"
+    if not f.exists():
+        print("no results yet")
+        return
+    recs = [json.loads(l) for l in f.read_text().splitlines()]
     by = {}
     for d in recs:
         if d.get("ok"):
