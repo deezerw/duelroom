@@ -27,6 +27,10 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
   venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
       >> results/ml/duelpc_games_first.log 2>&1      # every trained hand (resumable)
   echo "=== $(date) going-first games done ===" >> $LOG
+  # Stage 13's gate under the honest settings (blank -3 Ash +3 vanilla going first must
+  # not gain; -3 Engraver +3 vanilla going second must lose) before any side card is read
+  venv/bin/python tools/experiments/side_gate.py >> results/experiments/side_gate_honest.log 2>&1
+  echo "=== $(date) side gate done ===" >> $LOG
   venv/bin/python tools/experiments/use_timing.py second >> results/experiments/use_timing/run_second.log 2>&1
   echo "=== $(date) use_timing second done ===" >> $LOG
   venv/bin/python tools/ml/board_data.py 10 180 >> results/ml/boards_run.log 2>&1
@@ -35,7 +39,7 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
 work=$!
 while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60; done
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
-pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games" 2>/dev/null
+pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games|side_gate.py" 2>/dev/null
 sleep 10
 ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -f combosolver; pkill -f bc_train.py; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG

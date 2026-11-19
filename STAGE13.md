@@ -80,3 +80,10 @@ direction, the interval just touches zero. Next: the main deck is being re-train
 448, Trivikarma fix), so its games go stale; once they are re-played, run (b) again with 4
 runs instead of 2 (about 0.7x the interval width, if run noise dominates) before
 calling the gate.
+
+**2026-11-19:** the gate is re-run under the honest settings (16x kill check, 8x break, trained
+enemy turns) in duelpc's day queue right after the all-hands going-first baseline
+(tools/duelpc/day.sh -> results/experiments/side_gate_honest.log). Read (a) and (b) before any
+side card. First candidates once it passes, going first (where the deck loses: 84% killed on
+turn 2): +1 Nibiru -1 Trivikarma, +1 Ghost Ogre -1 Trivikarma (both already in the side deck;
+Trivikarma is dead without Visas).
