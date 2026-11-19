@@ -79,6 +79,11 @@ ENEMY_HANDS = 3      # fixed enemy hands, shared by every one of your hands
 ENEMY_SEED0 = 1000   # enemy hand k is dealt by seed ENEMY_SEED0 + k
 WORKERS = 4         # games at once; 2 solver threads each = 8 cores
 OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
+# Going second, your break (turn 2) searches BREAK_X x the solve budget: the
+# budget plateau (STAGE11, 2026-11-18) won 33 / 49 / 58 / 81 / 81% at 1 / 2 /
+# 4 / 8 / 16x, 0 flips from 8x to 16x and seeds agreeing 100% from 8x. At
+# 1x the games undersold every going-second hand. User chose 8x 2026-11-19.
+BREAK_X = 8
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -899,7 +904,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
-        f"{ms // 1000} s per search, target {enemy_target}, on {device} "
+        f"{ms // 1000} s per search{'' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
+        f"target {enemy_target}, on {device} "
         f"({workers} at once)")
 
     def t1_for(row, eseed):
@@ -990,7 +996,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
             t2 = turn3(t1["start"], t1["prefix"], steer(goal, enemy_target),
                        set(theirs) | set(json.loads(t1["pieces"])),
-                       scratch, ms, eseed * 100 + k, player=1, turn=2)
+                       scratch, ms * BREAK_X, eseed * 100 + k, player=1, turn=2)
             out = {"outcome": "win" if t2["won"] else "no_win",
                    "damage": t2["damage"], "line": t2["line"],
                    "enemy_reached": int(t1["reached"])}

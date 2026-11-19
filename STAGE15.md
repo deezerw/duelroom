@@ -70,3 +70,7 @@ the user's PC runs Mon-Wed and short daytime windows only (loud), the server nig
 trainer.enemy_goal(hand=...) serves them the goals trained against imported; their old
 going-second games are relabelled `endgame-t1` too (backup duelroom.db.bak-20261119b).
 Stored games get the rich kill label nightly (cron 05:40, tools/ml/game_kills.py).
+**2026-11-19, user chose: break at 8x.** game.BREAK_X = 8: going second, the break searches
+8x SOLVE_MS (the plateau's converged level). The 233 games job 502 had played with the trained
+enemy turn 1 but the 1x break are relabelled `brk1x` (backup duelroom.db.bak-20261119c); they
+compare with `endgame-t1` on the enemy change alone. Re-play: 8 hands x 10 enemy hands x 2 runs.
