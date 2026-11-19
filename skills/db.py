@@ -1,9 +1,14 @@
 """SQLite schema and connection handling for duelroom."""
 
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "duelroom.db"
+# DUELROOM_DB: another database (the tests run on a snapshot copy: the web
+# tests press job buttons, and on the live database the worker could pick a
+# job up between the press and the test's cancel -- hours of solver).
+DB_PATH = Path(os.environ.get("DUELROOM_DB")
+               or Path(__file__).resolve().parent.parent / "data" / "duelroom.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (

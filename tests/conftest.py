@@ -31,3 +31,21 @@ shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "decks", _decks,
                 dirs_exist_ok=True)
 os.environ["DUELROOM_DECKS"] = str(_decks)
 atexit.register(shutil.rmtree, _decks, True)
+
+# ...and on a SNAPSHOT of the database (sqlite's backup API: consistent under
+# WAL while the live app writes). The web tests press job buttons; on the live
+# database each press queued a real job the test then cancelled -- 111 runs of
+# cancelled gate/ladder/optimize/solve rows by 2026-11-19, and a worker that
+# polled in between would have started hours of solver on the server.
+import sqlite3 as _sqlite3
+
+_db_dir = Path(tempfile.mkdtemp(prefix="duelroom-test-db-"))
+_live_db = Path(__file__).resolve().parent.parent / "data" / "duelroom.db"
+_test_db = _db_dir / "duelroom.db"
+if _live_db.exists():
+    _src, _dst = _sqlite3.connect(_live_db), _sqlite3.connect(_test_db)
+    _src.backup(_dst)
+    _dst.close()
+    _src.close()
+os.environ["DUELROOM_DB"] = str(_test_db)
+atexit.register(shutil.rmtree, _db_dir, True)

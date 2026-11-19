@@ -45,6 +45,7 @@ the code it was loaded under, so the copy behaves as the card. Nothing else
 from the pre-release sets comes in.
 """
 
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -56,7 +57,8 @@ UPSTREAM = VENDOR / "third_party"
 SHADOW = ROOT / "vendor" / "third_party_merged"
 
 LINKED = ("ygopro-core", "LFLists")
-MIRROR = ROOT / "data" / "duelroom.db"     # the YGOPRODeck card mirror (card_db)
+MIRROR = Path(os.environ.get("DUELROOM_DB")      # the YGOPRODeck card mirror (card_db),
+              or ROOT / "data" / "duelroom.db")   # skills.db's database
 TABLES = ("datas", "texts")
 
 
