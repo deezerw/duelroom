@@ -6258,3 +6258,24 @@ def test_enemy_pool_holds_the_games_hands_and_gives_their_goal(tmp_path, monkeyp
         trainer._set_best(conn, dh, 1, [0, 3, 2, 1, 0, -9], ["123@mzone"], {}, 1, "trainer")
     assert trainer.enemy_goal(conn, e, us, game.ENEMY_SEED0 + 1) == ["123@mzone"]
     assert trainer.enemy_goal(conn, e, DECKS / "Angelechy-Meta.ydk", game.ENEMY_SEED0 + 1) is None
+
+
+def test_szone_value_counts_a_monster_placed_as_a_continuous_spell():
+    """Angelechy's board is its Synchros face-up in the spell & trap zone;
+    a value in zone "szone" counts them there, not in a monster zone, and
+    the trainer asks for each as `<code>@szone`."""
+    from skills import trainer
+    from skills.engine import DECKS
+
+    code = 50284408         # Angelechy Castellan
+    p = {"values": {(code, "szone"): 2}}
+    def line(zone):
+        return {"board": {"players": [{zone: [{"code": code, "position": 5}]}, {}]},
+                "actions": []}
+    sz = trainer.line_key(line("szone"), [], p=p)
+    mz = trainer.line_key(line("mzone"), [], p=p)
+    assert sz[1] == 2 and sz[2] == 2
+    assert mz[1] == 0 and mz[2] == 0
+    p = {"avoid": set(), "interrupters": set(), "extenders": set(), "values": p["values"]}
+    _, goals = trainer.breadth_goals(DECKS / "Angelechy-Meta.ydk", [], p)
+    assert any(t[-1] == f"{code}@szone" and lbl == f"piece:{code}@szone" for t, lbl in goals)

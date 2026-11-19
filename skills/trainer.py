@@ -182,7 +182,11 @@ def set_pref(conn, name, kind, code, zone="", on=True):
 
 
 VALUE_MAX = 5
-VALUE_ZONES = {"field": "on the field", "grave": "in the GY", "hand": "in the hand"}
+VALUE_ZONES = {"field": "on the field", "grave": "in the GY", "hand": "in the hand",
+               "szone": "as a Continuous Spell"}
+# "szone": a monster placed face-up in the spell & trap zone (Angelechy's
+# board is Endgame Problem plus Angelechy Synchros there; in a monster zone
+# they only banish on their own turn). Asked for as `<code>@szone`.
 
 
 def _value_zone(where):
@@ -438,7 +442,8 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
         n += worth(code, _value_zone(where))
         neg += int(bool(negate))
     field_marked = set(p["interrupters"]) | {c for (c, z), v in vals.items() if z == "field"}
-    extra = _extra_on_field(board, field_marked, cards, worth)
+    sz_marked = {c for (c, z), v in vals.items() if z == "szone"}
+    extra = _extra_on_field(board, field_marked, cards, worth, sz_marked)
     other = _extra_off_field(board, vals, cards, held, worth)
     avoided = used = 0
     if ((p["avoid"] or p["extenders"]) and start is not None
@@ -451,20 +456,27 @@ def line_key(line, opening, cards=None, start=None, p=None, conn=None):
             _num(n + extra + other), neg, used, -len(line.get("actions") or [])]
 
 
-def _extra_on_field(board, codes, cards, worth=None):
+def _extra_on_field(board, codes, cards, worth=None, sz_codes=()):
     """The player's own interrupters face-up on the field that upstream's
-    script reading did not already count (`worth(code)` each, default 1)."""
+    script reading did not already count (`worth(code)` each, default 1).
+    `sz_codes`: cards valued face-up in the spell & trap zone (zone
+    "szone"); there they count that value instead."""
     from ygorl.solver.blocking import card_interruptions
 
-    if not codes:
+    if not codes and not sz_codes:
         return 0
     me = (board.get("players") or [{}])[0]
     n = 0
-    for c in (*(me.get("mzone") or []), *(me.get("szone") or [])):
-        if (c["code"] in codes and c.get("position", 0) & 0x5
-                and not any(i.where == "field"
-                            for i in card_interruptions(c["code"], cards))):
-            n += worth(c["code"]) if worth else 1
+    for zone in ("mzone", "szone"):
+        for c in me.get(zone) or []:
+            if not c.get("position", 0) & 0x5:
+                continue
+            if zone == "szone" and c["code"] in sz_codes:
+                n += worth(c["code"], "szone") if worth else 1
+            elif (c["code"] in codes
+                  and not any(i.where == "field"
+                              for i in card_interruptions(c["code"], cards))):
+                n += worth(c["code"]) if worth else 1
     return n
 
 
@@ -834,6 +846,8 @@ def breadth_goals(deck_path, hand, p):
     codes = [int(x.password) for x in bp.pieces if int(x.password) not in dead]
     codes += sorted(c for c in p["interrupters"] if c not in codes)
     goals = [([*bp.base, str(c)], f"piece:{c}") for c in codes]
+    goals += [([*bp.base, f"{c}@szone"], f"piece:{c}@szone")
+              for c in sorted({c for (c, z), v in p["values"].items() if z == "szone" and v})]
     if bp.base:
         goals.append((list(bp.base), "base"))
     return list(bp.base), goals
