@@ -187,6 +187,33 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
             "log": log, "rc": r.returncode}
 
 
+def solve_stats(log):
+    """What a solve's log says about how hard it worked, beyond won or not
+    (Stage 15: a richer label per kill check). {first_win_s, wins, states,
+    seconds, lines}: first_win_s is the process clock at the rollouts' first
+    win (None: none there -- a solution then came from the finisher, or
+    there is none); states sums the probe and every rollout phase;
+    rollout_s is the rollout phases' time (the finisher's comes after)."""
+    import re
+
+    text = Path(log).read_text(encoding="utf-8", errors="replace")
+    out = {"first_win_s": None, "wins": 0, "states": 0, "rollout_s": None, "lines": 0}
+    m = re.search(r"first win at ([\d.]+) s .*?(\d+) win\(s\) recorded", text)
+    if m:
+        out["first_win_s"], out["wins"] = float(m.group(1)), int(m.group(2))
+    out["states"] = sum(int(x) for x in re.findall(r"rollouts\s+(\d+) states", text))
+    probe = re.search(r"^\s*(\d+) states, [\d.]+ s: at best", text, re.M)
+    if probe:
+        out["states"] += int(probe.group(1))
+    m = re.search(r"^\s*total: ([\d.]+) s", text, re.M)
+    if m:
+        out["rollout_s"] = float(m.group(1))
+    m = re.search(r"(\d+) line\(s\) reaching the board", text)
+    if m:
+        out["lines"] = int(m.group(1))
+    return out
+
+
 def _solve_remote(dev, cmd, env, limit_s, workdir, outdir):
     """One solve on another machine (skills/remote.py). A lost connection
     wakes the device and retries ONCE; a second loss ends the job rather

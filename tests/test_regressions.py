@@ -6303,3 +6303,24 @@ def test_enemy_turn1_plays_toward_the_trained_goal(tmp_path, monkeypatch):
     assert targets == [["12845564@szone"], goal]
     with pytest.raises(RuntimeError, match="trained on"):
         game.enemy_turn1(*args, trained=([9, 9, 9], goal))
+
+
+def test_solve_stats_reads_the_effort_of_a_kill_check(tmp_path):
+    """The richer kill-check label (Stage 15) is read off the solver's log:
+    the first win's clock and count, the states searched, the lines."""
+    from skills import game
+
+    log = tmp_path / "otk.log"
+    log.write_text(
+        "  5843 states, 3.4 s: at best 1 of the 1 target cards, 2 monster(s)\n"
+        "  greedy+novelty    :      545 rollouts      16590 states        0 novelty cuts\n"
+        "  NRPA              :      793 rollouts      70326 states      797 adaptations\n"
+        "  total: 6.2 s, at best 1 of the 1 target cards, 5 monster(s)\n"
+        "  stop-on-win 4: first win at 20.1 s (process clock), 4 win(s) recorded\n"
+        "  4 line(s) reaching the board.\n")
+    assert game.solve_stats(log) == {"first_win_s": 20.1, "wins": 4,
+                                     "states": 16590 + 70326 + 5843,
+                                     "rollout_s": 6.2, "lines": 4}
+    log.write_text("  stop-on-win 4: no win in the rollouts\n")
+    assert game.solve_stats(log) == {"first_win_s": None, "wins": 0, "states": 0,
+                                     "rollout_s": None, "lines": 0}

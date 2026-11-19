@@ -16,6 +16,11 @@ hand and the enemy hand are fixed, so what differs is the board alone.
 Each board keeps its closed turn-1 replay (start + prefix, a few KB), so it
 can be labelled again later -- turn 3, another enemy -- without re-solving.
 
+Each kill check also records `kill` (one entry per defence tried,
+`kill_detail`): time to the first win, wins, states searched, the LP taken
+when it did not kill, the enemy cards played, ours that fired, what we
+stopped, and the line itself -- far more to learn from than lost/not.
+
     DUELROOM_DEVICE=duelpc venv/bin/python tools/ml/board_data.py [enemy hands] [limit]
     venv/bin/python tools/ml/board_data.py summary
 Resumable: boards.jsonl + replays under OUT.
@@ -90,6 +95,52 @@ def variants(goal, pieces, free=()):
     return out
 
 
+def turn2_read(path):
+    """{played, fired, stops} of the enemy's turn 2 in a kill-check replay
+    (`stops.Reader`, our seat 0): the enemy cards it played, our cards that
+    chained, and what we stopped ([kind, by, code])."""
+    import ygorl.engine.messages as M
+    from ygorl.engine.replay import Replay
+
+    from skills.stops import Reader
+
+    rep, rd, fired = Replay.from_yrp(Path(path)), Reader(0), []
+
+    class _Obs:
+        def on_start(self, core):
+            pass
+
+        def on_buffer(self, core, buf):
+            for raw in M.split_messages(buf):
+                m = M.decode_message(raw)
+                rd.feed(m)
+                if (type(m).__name__ == "Chaining" and rd.turn == 2 and m.code
+                        and m.loc.controller == 0):
+                    fired.append(m.code)
+
+    rep.duel().replay(rep.responses, observer=_Obs())
+    return {"played": sorted(c for c, t in rd.played.items() if t == 2),
+            "fired": fired, "stops": [s[1:] for s in rd.stops if s[0] == 2]}
+
+
+def kill_detail(k, prefix, defence, lost, keep):
+    """One kill check, labelled past won-or-not (Stage 15, "richer label"):
+    how hard the search worked (`game.solve_stats`), the LP it took when it
+    did not kill, what was played and stopped along its line (the kill, or
+    its best approach), and that line kept under `keep` for later reads."""
+    d = {"defence": defence, "lost": lost, **game.solve_stats(k["log"])}
+    line = k["solution"] if lost else k["approach"]
+    d["damage"] = 8000 if lost else game._damage(prefix, k["approach"], 1)
+    if line:
+        kept = shutil.copy(line, Path(keep) / f"kill-h{defence}{Path(line).suffix}")
+        d["line"] = str(kept)
+        try:
+            d.update(turn2_read(kept))
+        except Exception as exc:  # noqa: BLE001 -- the label stands without it
+            d["read_error"] = f"{type(exc).__name__}: {exc}"
+    return d
+
+
 def main(enemy_hands=ENEMY_HANDS, limit=None):
     from ygorl.engine.duel import default_cards
 
@@ -154,7 +205,7 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
                 start = shutil.copy(t1["start"], keep / "start.yrpX")
                 prefix = shutil.copy(t1["prefix"], keep / "prefix.yrpX")
                 rec.update(start=str(start), prefix=str(prefix))
-                lost = []
+                lost, detail = [], []
                 for v in game.DEFENCES:
                     k = game._solve(prefix, ["--start", start, "--root", prefix, "--no-ref",
                                              "--target", enemy_target, "--player", "1",
@@ -163,9 +214,10 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
                                     + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
                                     scratch, f"otk-h{v}", OTK_MS, seed)
                     lost.append(int(bool(k["solution"]) and game._winner(k["solution"]) == 1))
+                    detail.append(kill_detail(k, prefix, v, lost[-1], keep))
                     if not lost[-1]:
                         break       # a defence held: not lost, as game.turn2
-                rec.update(lost=int(all(lost)), per_defence=lost)
+                rec.update(lost=int(all(lost)), per_defence=lost, kill=detail)
                 with _lock:
                     seen[key] = rec["lost"]
         finally:
