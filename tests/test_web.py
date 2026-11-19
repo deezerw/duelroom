@@ -910,10 +910,12 @@ def test_chrome_names_the_active_deck_and_the_current_page(client, path):
     import re
     _logged_in(client)
     body = client.get(path, follow_redirects=True).get_data(as_text=True)
-    # Three labelled nav groups, so a link's purpose is visible.
-    for group in ("decks", "analyse", "system"):
-        assert f'class="lbl">{group}<' in body, \
-            f"{path} is missing the '{group}' nav group"
+    # The four places (2026-11-19 simplification): decks, train, games, jobs.
+    nav = body[body.index('<nav class="nav">'):body.index('</nav>')]
+    for place in ("decks", "train", "games", "jobs"):
+        assert f">{place}</a>" in nav, f"{path} is missing the '{place}' nav link"
+    for gone in (">report<", ">handtraps<", ">threats<", ">drill<"):
+        assert gone not in nav, f"{path} still has {gone} in the nav"
     # Exactly one nav link marked current.
     assert len(re.findall(r'class="on"', body)) == 1, \
         f"{path} does not mark exactly one nav link as current"

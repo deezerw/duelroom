@@ -530,6 +530,13 @@ def _enemy_decks(name):
     return out
 
 
+OLD_SECTIONS = {
+    "endgame-t1": "older settings: the enemy's turn 1 aimed at one card (Endgame Problem)",
+    "brk1x": "older settings: your going-second break searched 1x (now 8x)",
+    "kill1x": "older settings: their kill check searched 1x (now 16x), one-target turn 2",
+}
+
+
 def _job_device(job):
     return json.loads(job["params"] or "{}").get("device") or "server"
 
@@ -617,6 +624,11 @@ def games_view(name=None):
                         "theirs": theirs, "yours": yours, "must": must,
                         "timing": timing_rows,
                         "unread_stops": unread_stops})
+    # Sections played under older settings (relabelled devices, STAGE15) fold away
+    # under the current ones: readable, never mistaken for today's numbers.
+    for e in enemies:
+        e["old"] = OLD_SECTIONS.get(e["device"])
+    enemies.sort(key=lambda e: bool(e["old"]))
     active_jobs = [{**dict(j), "device": _job_device(j)} for j in _games_jobs(c, name)]
     busy = {j["device"] for j in active_jobs}
     return render_template(
@@ -625,7 +637,8 @@ def games_view(name=None):
                           "AND best_goal IS NOT NULL", (dh,)).fetchone()[0],
         active_jobs=active_jobs, running=jobs.active(c),
         devices=[(d.name, d.label) for d in remote.DEVICES.values() if d.name not in busy],
-        runs=game.RUNS, enemy_hands=game.ENEMY_HANDS,
+        # STAGE11 "spread the games": 2 replays of more enemy hands, not 10 of 3
+        runs=2, enemy_hands=10,
         near_dud=int(game.NEAR_DUD_RATE * 100), solve_s=engine.SOLVE_MS // 1000,
         otk_s=game.OTK_MS // 1000, min_side=impact.MIN_SIDE,
         built=game.ROOTED_BIN.exists())

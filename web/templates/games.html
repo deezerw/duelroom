@@ -2,6 +2,19 @@
 {% block title %}games {{ name }} · duelroom{% endblock %}
 {% block body %}
 <style>
+  details.block{margin:14px 0 0;border-top:1px solid var(--line);padding-top:10px}
+  details.block > summary{cursor:pointer;font-weight:600;font-size:14px;list-style:none;
+    display:flex;align-items:center;gap:8px;padding:4px 0}
+  details.block > summary::-webkit-details-marker{display:none}
+  details.block > summary::before{content:"▸";color:var(--faint);transition:transform .15s}
+  details.block[open] > summary::before{transform:rotate(90deg)}
+  details.oldsec{margin:18px 0;border:1px dashed var(--line);border-radius:10px;padding:8px 14px;
+    opacity:.8}
+  details.oldsec > summary{cursor:pointer;color:var(--dim);font-size:13px;padding:4px 0}
+  details.oldsec[open]{opacity:1}
+</style>
+
+<style>
   .startform{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
   .startform label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
   .startform input,.startform select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
@@ -67,6 +80,7 @@
     <p style="margin:0">No enemy deck with a known payoff yet. Export a meta list on
       the meta page first.</p>
   {% else %}
+  <details class="block" style="border:0;margin:0;padding:0"><summary>Play more games</summary>
     <form class="startform" method="post" action="{{ url_for('views.games_start', name=name) }}">
       <label>enemy deck
         <select name="enemy">{% for o in options %}<option>{{ o }}</option>{% endfor %}</select></label>
@@ -93,10 +107,13 @@
       Going second faces the same enemy opening hands as going first, and your
       hand is the trained hand plus one draw. It resumes where it stopped.
     </details>
+  </details>
   {% endif %}
 </div>
 
 {% for e in enemies %}
+{% if e.old %}<details class="oldsec"><summary>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }} ·
+  <span class="faint">{{ e.old }}</span></summary>{% endif %}
 <div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}{% if e.device != 'server' %} · on {{ e.device }}{% endif %}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
   {% set o = e.overall %}
@@ -110,9 +127,9 @@
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
      href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **e.watch_args) }}">▶ Watch latest game</a>
   {% if e.openings %}
-  <div class="openings">Enemy opening hands (identical for every one of your hands):
+  <details class="note openings"><summary>their {{ e.openings|length }} opening hands (the same for every one of your hands)</summary>
     <ul>{% for seed, cards in e.openings %}<li><b>{{ loop.index }}</b> — {{ cards|join(', ') }}</li>{% endfor %}</ul>
-  </div>
+  </details>
   {% endif %}
   <div class="legend">
     <span><i class="dot win"></i>won {{ 'by turn 3' if e.first else 'on turn 2' }}</span>
@@ -147,7 +164,7 @@
     </tbody>
   </table>
 
-  <h3 style="margin:16px 0 4px">Card impact</h3>
+  <details class="block"><summary>Card impact</summary>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">How much more often you win
     the games where you <b>used</b> a card (summoned it, or activated it) than the games where
     the <b>same opening hand against the same enemy hand</b> got through without it, pooled.
@@ -187,7 +204,8 @@
   <p class="muted" style="margin:0;font-size:12.5px">No games read yet.</p>
   {% endif %}
 
-  <h3 style="margin:16px 0 4px">What you stopped</h3>
+  </details>
+  <details class="block"><summary>What you stopped</summary>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their cards you
     <b>negated</b> or <b>removed</b> (destroyed, banished, bounced) with an effect, and how
     much more often you won when that card was stopped than when it went through — among the
@@ -230,8 +248,47 @@
     {% endfor %}
     </tbody>
   </table>
+  <details class="note"><summary>reading these numbers</summary>
+    <b>Their cards:</b> +18 means that, among games where they played the card, you won 18
+    points more often when it was stopped than when it resolved. {% if e.first %}Turn 2 is their
+    turn (your board interrupting them); turn 3 is yours (breaking what they left).{% else %}Turn 1
+    is their turn (your hand traps interrupting them); turn 2 is yours (breaking their board).{% endif %} <b>Your cards:</b>
+    games where the card stopped something against games where it did not. A negation is
+    credited to your chain link above theirs; <b>a field effect</b> = negated with no link of
+    yours above it (a continuous negate on the field). Not counted: battle, and floodgates
+    that stop an activation before it happens. The defender is greedy — it uses each
+    interruption on the FIRST thing it can — so a card stopped "every time" may only mean it
+    is the first thing they play.
+  </details>
+  {% endif %}
+  </details>
+  {% if e.must %}
+  <details class="block"><summary>What you must stop, by their hand</summary>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their turn only
+    ({{ 'turn 2' if e.first else 'turn 1' }}). <b>They win with</b>: the cards their winning
+    turns played. <b>Stopped</b>: how often you stopped a card in the games you got through
+    against the games you lost, when they played it. A gap points at what to stop; it is not
+    proof (a board that stops more is also a better board).</div>
+  <table class="impact">
+    <thead><tr><th>their hand</th><th>{{ 'lost on their turn' if e.first else 'not won' }}</th>
+      <th class="extra">they win with</th><th>stopped: got through / lost</th></tr></thead>
+    <tbody>
+    {% for h in e.must %}
+      <tr>
+        <td>{{ h.hand|join(', ') }}</td>
+        <td>{{ h.lost }} of {{ h.games }}</td>
+        <td class="extra">{% for n, share in h.kill_cards %}{{ n }} <span class="muted">{{ (share * 100)|round|int }}%</span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        <td>{% for m in h.must %}<b>{{ m.name }}</b> {{ m.held[0] }}/{{ m.held[1] }}
+              <span class="muted">vs {{ m.lost[0] }}/{{ m.lost[1] }}{% if m.by %} · {{ m.by[0][0] }}{% endif %}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% if not h.must %}<span class="muted">nothing stopped in a game you got through</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </details>
+  {% endif %}
   {% if e.timing %}
-  <h3 style="margin:16px 0 4px">Best time to use (measured)</h3>
+  <details class="block"><summary>Best time to use (measured)</summary>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">At the same moment of their
     turn, the same position: you fire the card, or you hold it, and the game is searched on
     from there both ways ({% if e.first %}their kill check, {{ e.timing.level }}x{% else %}their
@@ -254,45 +311,10 @@
     {% endfor %}
     </tbody>
   </table>
-  {% endif %}
-  {% if e.must %}
-  <h3 style="margin:16px 0 4px">What you must stop, by their hand</h3>
-  <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their turn only
-    ({{ 'turn 2' if e.first else 'turn 1' }}). <b>They win with</b>: the cards their winning
-    turns played. <b>Stopped</b>: how often you stopped a card in the games you got through
-    against the games you lost, when they played it. A gap points at what to stop; it is not
-    proof (a board that stops more is also a better board).</div>
-  <table class="impact">
-    <thead><tr><th>their hand</th><th>{{ 'lost on their turn' if e.first else 'not won' }}</th>
-      <th class="extra">they win with</th><th>stopped: got through / lost</th></tr></thead>
-    <tbody>
-    {% for h in e.must %}
-      <tr>
-        <td>{{ h.hand|join(', ') }}</td>
-        <td>{{ h.lost }} of {{ h.games }}</td>
-        <td class="extra">{% for n, share in h.kill_cards %}{{ n }} <span class="muted">{{ (share * 100)|round|int }}%</span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
-        <td>{% for m in h.must %}<b>{{ m.name }}</b> {{ m.held[0] }}/{{ m.held[1] }}
-              <span class="muted">vs {{ m.lost[0] }}/{{ m.lost[1] }}{% if m.by %} · {{ m.by[0][0] }}{% endif %}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
-            {% if not h.must %}<span class="muted">nothing stopped in a game you got through</span>{% endif %}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-  <details class="note"><summary>reading these numbers</summary>
-    <b>Their cards:</b> +18 means that, among games where they played the card, you won 18
-    points more often when it was stopped than when it resolved. {% if e.first %}Turn 2 is their
-    turn (your board interrupting them); turn 3 is yours (breaking what they left).{% else %}Turn 1
-    is their turn (your hand traps interrupting them); turn 2 is yours (breaking their board).{% endif %} <b>Your cards:</b>
-    games where the card stopped something against games where it did not. A negation is
-    credited to your chain link above theirs; <b>a field effect</b> = negated with no link of
-    yours above it (a continuous negate on the field). Not counted: battle, and floodgates
-    that stop an activation before it happens. The defender is greedy — it uses each
-    interruption on the FIRST thing it can — so a card stopped "every time" may only mean it
-    is the first thing they play.
   </details>
   {% endif %}
 </div>
+{% if e.old %}</details>{% endif %}
 {% endfor %}
 
 <details class="note" style="margin-top:14px"><summary>how the enemy and your board are played</summary>

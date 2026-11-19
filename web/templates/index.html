@@ -4,8 +4,7 @@
 <div class="page-head">
   <h1>Decks</h1>
   <div class="sub">{{ decks|length }} list{{ '' if decks|length == 1 else 's' }}.
-    The <b>active</b> one is what report, handtraps, threats and drill use when
-    you do not name a deck.</div>
+    The <b>active</b> one is what train and games open on.</div>
   <div class="acts">
     <a class="btn primary" href="{{ url_for('views.build') }}">Build a deck</a>
     <a class="btn" href="{{ url_for('views.import_deck') }}">Import</a>

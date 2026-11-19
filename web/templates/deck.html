@@ -10,7 +10,7 @@
   <div class="acts">
     <a class="btn primary" href="{{ url_for('views.pilot', name=name) }}">Pilot a hand</a>
     <a class="btn" href="{{ url_for('views.train_view', name=name) }}">Train</a>
-    <a class="btn" href="{{ url_for('views.report', name=name) }}">Report</a>
+    <a class="btn" href="{{ url_for('views.games_view', name=name) }}">Games</a>
     <a class="btn" href="{{ url_for('views.build', name=name) }}">Edit</a>
     <a class="btn" href="{{ url_for('views.download_ydk', name=name) }}">Download .ydk</a>
     <form method="post" action="{{ url_for('views.delete_deck', name=name) }}" style="margin:0"
