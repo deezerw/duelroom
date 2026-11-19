@@ -60,3 +60,9 @@ Angelechy-Meta going-second games (240 turn 1s, 2400 games) are relabelled devic
 `endgame-t1` with their files under `Angelechy-Meta@endgame-t1/` (readable on /games, never
 pooled); DB backup data/duelroom.db.bak-20261119. The three side variants still play the old
 enemy turn 1 (no enemy pool for their decks yet). Next: re-play going second on duelpc.
+
+**2026-11-19, richer kill labels (user: "start working 1").** board_data records per kill
+check (`kill`): first win's clock, wins, states searched, LP taken when not killed, enemy cards
+played, ours that fired, our stops, and the line (kept). Boards from 1203 on have it; earlier
+ones are lost/not only (their scratch is gone). The model step reads it once there is enough:
+the user's PC runs Mon-Wed and short daytime windows only (loud), the server nights.
