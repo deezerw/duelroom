@@ -233,13 +233,14 @@
   {% if e.timing %}
   <h3 style="margin:16px 0 4px">Best time to use (measured)</h3>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">At the same moment of their
-    turn, the same position: you fire the card, or you hold it, and they search their kill
-    again from there ({{ e.timing.level }}x budget). <b>Their kill rate</b> each way, paired
-    over {{ e.timing.windows }} moments. A plus sign = firing there stops more kills than holding.
-    Moments where one card was weighed against another are left out.</div>
+    turn, the same position: you fire the card, or you hold it, and the game is searched on
+    from there both ways ({% if e.first %}their kill check, {{ e.timing.level }}x{% else %}their
+    turn 1, then your break at {{ e.timing.level }}x{% endif %}). <b>How often you lose</b> each
+    way, paired over {{ e.timing.windows }} moments. A plus sign = firing there loses less than
+    holding. Moments where one card was weighed against another are left out.</div>
   <table class="impact">
     <thead><tr><th>your card</th><th>when they…</th><th>fire vs hold</th>
-      <th class="extra">their kill rate: fired / held</th><th class="extra">moments</th></tr></thead>
+      <th class="extra">you lose: fired / held</th><th class="extra">moments</th></tr></thead>
     <tbody>
     {% for r in e.timing.rows %}
       <tr class="{{ 'few-games' if r.few }}">

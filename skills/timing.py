@@ -75,15 +75,18 @@ def scores(conn, dh, enemy, own=None, first=True, device="server",
 
 # --- measured: fire or hold at the same window --------------------------------
 
-MEASURED_FOR = ("imported", "Angelechy-Meta", True)    # use_timing.py's DECK, ENEMY, going first
+MEASURED_FOR = ("imported", "Angelechy-Meta")    # use_timing.py's DECK, ENEMY
 
 
-def measured_file():
+def measured_file(first=True):
+    """use_timing.py's results: going first (their kill check), or going
+    second (`use_timing.py second`: their turn 1, judged by your break)."""
     from .engine import ROOT
-    return ROOT / "results" / "experiments" / "use_timing" / "results.jsonl"
+    d = ROOT / "results" / "experiments" / "use_timing"
+    return d / ("results.jsonl" if first else "results_second.jsonl")
 
 
-def measured(path=None, min_windows=3):
+def measured(path=None, min_windows=3, first=True):
     """The causal rating (tools/experiments/use_timing.py): per (your card,
     their trigger), their kill rate when you fired it at a window against
     when you held it at the SAME window, paired. [{piece, trigger, n,
@@ -93,7 +96,7 @@ def measured(path=None, min_windows=3):
     None when nothing is measured yet."""
     import math
 
-    path = path or measured_file()
+    path = path or measured_file(first)
     if not path.exists():
         return None
     pair = defaultdict(list)

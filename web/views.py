@@ -593,8 +593,8 @@ def games_view(name=None):
         yours = [{**r, "name": snm(r["code"]),
                   "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
         timing_rows = None
-        if (name, enemy, bool(first)) == timing.MEASURED_FOR and device == "server":
-            m = timing.measured()
+        if (name, enemy) == timing.MEASURED_FOR and device == "server":
+            m = timing.measured(first=bool(first))
             if m:
                 timing_rows = {**m, "rows": [{**r, "piece_name": nm(r["piece"]),
                                               "trigger_name": nm(r["trigger"]) if r["trigger"]
