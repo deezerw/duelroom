@@ -2459,7 +2459,7 @@ def cmd_stops(conn, args):
 
 def cmd_games(conn, args):
     """`games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N]
-    [--from-end] [--device NAME]` / `games <deck> <enemy> status [--second]
+    [--from-end] [--device NAME] [--hands 0,3,..]` / `games <deck> <enemy> status [--second]
     [--device NAME]`: your turn 1,
     their turn 2, your turn 3 -- does the hand win by then? `--second`: their
     turn 1, your turn 2 -- do you kill through their board? `--from-end`
@@ -2495,6 +2495,15 @@ def cmd_games(conn, args):
             print("--workers must be 1-16")
             return
         del rest[i:i + 2]
+    hands = None        # every trained hand
+    if "--hands" in rest:
+        i = rest.index("--hands")
+        try:
+            hands = [int(x) for x in rest[i + 1].split(",")]
+        except (IndexError, ValueError):
+            print("--hands takes hand indices: --hands 0,3,6")
+            return
+        del rest[i:i + 2]
     if not (DECKS / f"{enemy}.ydk").exists():
         print(f"no such enemy deck: {enemy}")
         return
@@ -2514,8 +2523,9 @@ def cmd_games(conn, args):
     if not device or device == "server":
         _warn_if_busy("these games")
     try:
-        res = game.run(conn, path, path.stem, enemy, runs=runs, enemy_hands=ehands,
-                       workers=workers, from_end=from_end, first=first, device=device)
+        res = game.run(conn, path, path.stem, enemy, hands=hands, runs=runs,
+                       enemy_hands=ehands, workers=workers, from_end=from_end,
+                       first=first, device=device)
     except remote.DeviceDown as e:
         # SystemExit, not an exception: `run` below prints and swallows
         # those, and the job would end "done" with its games unplayed.

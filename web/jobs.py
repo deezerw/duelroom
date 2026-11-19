@@ -57,7 +57,8 @@ KINDS = {
     "games":   (lambda d, p: ["games", d, p.get("enemy", ""),
                               str(p.get("runs", 10)), str(p.get("enemy_hands", 3))]
                 + (["--second"] if p.get("second") else [])
-                + (["--device", p["device"]] if p.get("device") else []),
+                + (["--device", p["device"]] if p.get("device") else [])
+                + (["--hands", ",".join(map(str, p["hands"]))] if p.get("hands") else []),
                 "finish the game vs a meta deck", "hours, resumable"),
 }
 
@@ -273,13 +274,17 @@ def games_estimate(conn, job, dh, hands):
     runs, ehands = int(p.get("runs", 10)), int(p.get("enemy_hands", 3))
     seeds = (1000, 1000 + ehands)
     key = (dh, p.get("enemy", ""), first, dev.name, *seeds)
+    only = ""           # a job over some hands (`--hands`) counts those alone
+    if p.get("hands"):
+        hands = len(p["hands"])
+        only = " AND hand_index IN (%s)" % ",".join(str(int(h)) for h in p["hands"])
     played = conn.execute(
         "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
-        "AND device=? AND enemy_seed >= ? AND enemy_seed < ? AND run < ?",
+        "AND device=? AND enemy_seed >= ? AND enemy_seed < ? AND run < ?" + only,
         (*key, runs)).fetchone()[0]
     t1_done = conn.execute(
         "SELECT COUNT(*) FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=? "
-        "AND device=? AND enemy_seed >= ? AND enemy_seed < ?", key).fetchone()[0]
+        "AND device=? AND enemy_seed >= ? AND enemy_seed < ?" + only, key).fetchone()[0]
     left = max(0, hands * ehands * runs - played)
     t1_left = max(0, hands * ehands - t1_done)
     m = conn.execute(

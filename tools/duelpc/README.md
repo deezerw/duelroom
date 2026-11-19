@@ -68,3 +68,8 @@ stops at the disk question.
 - Secure Boot can stay on (Ubuntu's boot chain is signed).
 - Leave Windows' **Fast Startup** off, or Wake-on-LAN after a Windows
   shutdown may not work.
+- **Monitors stay off in Linux** (OLED burn-in): `screen-off.service` powers the
+  console down (`echo 4 > /sys/class/graphics/fb0/blank`, DPMS off) once the
+  system is up, and `consoleblank=60` in GRUB re-blanks it within a minute if
+  anything lights it again. Only the 5 s boot menu and boot messages show.
+  Added on the PC by hand 2026-11-19 (not in autoinstall.yaml.in yet).
