@@ -93,3 +93,9 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   each path (card db / vocab / encoder shared). Plumbing check with the 60-line smoke-test net:
   the stored kill is found from 16 decisions out (uniform prior: not), 1.8 s, 278 net calls --
   but that line may be in the smoke test's training sample, so not yet evidence.
+- **2026-11-19, step 4 data:** `tools/ml/value_data.py` -> results/ml/value/positions.jsonl,
+  positions at the start of their turn 2 labelled by HARDNESS (from the enemy's side: +1 killed
+  at once ... 0 ... -1 untouched; the defender keeps its best defence), never mixing kill
+  budgets. Now: 200 board_data positions at 80 s (99% lost, median +0.78) and 2000 old games at
+  20 s (46% lost, median -0.44). The honest 16x going-first games (duelpc, running) become the
+  main set; a value head is trained on it once there are enough.
