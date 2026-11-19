@@ -66,6 +66,25 @@ def positions(conn, dh):
     return sorted(out, key=lambda p: (p["enemy_seed"], p["hand_index"]))
 
 
+def control(line, branch, out):
+    """The line's own reply at the branch's window: the line's answers cut
+    to the branch file's length (the branch differs in its last answer
+    only), under the line's header. None if the two do not share the rest."""
+    from ygorl.engine.replay import Replay
+
+    src, br = Replay.from_yrp(Path(line)), Replay.from_yrp(Path(branch))
+    n = len(br.responses)
+    if len(src.responses) < n or src.responses[:n - 1] != br.responses[:n - 1] \
+            or src.responses[n - 1] == br.responses[n - 1]:
+        return None
+    rep = Replay(seed=src.seed, first=src.first, rule_flags=src.rule_flags, player=src.player,
+                 shuffle_decks=src.shuffle_decks, decks=src.decks,
+                 responses=list(src.responses[:n]), seed_words=src.seed_words)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    rep.to_yrpx(Path(out), names=("them", "us"))
+    return Path(out)
+
+
 def distinct(branches):
     """One branch per situation: the same trigger, monsters, reply and
     alternative again later on the line is the same question asked twice."""
@@ -117,14 +136,23 @@ def main(limit=None):
     def one(job):
         p, flags, b, scratch = job
         seed = p["enemy_seed"] * 100 + p["run"]          # the game's kill check seed
-        args = [a if a != p["prefix"] else b["file"] for a in flags] \
-            + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)]
-        r = game._solve(b["file"], args, scratch, f"b{b['k']}", game.OTK_MS * LEVEL, seed)
-        killed = int(bool(r["solution"]) and game._winner(r["solution"]) == 1)
+
+        def kills(root, label):
+            args = [a if a != p["prefix"] else root for a in flags] \
+                + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)]
+            r = game._solve(root, args, scratch, label, game.OTK_MS * LEVEL, seed)
+            return int(bool(r["solution"]) and game._winner(r["solution"]) == 1)
+
+        # Both replies searched from the SAME window with the same budget: the
+        # line's own outcome came from a search that started at the turn's
+        # start, and a search started later reaches deeper.
+        ctrl = control(p["line"], b["file"], scratch / f"c{b['k']}.yrpX")
         rec = {"hand": p["hand_index"], "eseed": p["enemy_seed"], "k": b["k"],
                "at": b.get("at"), "trigger": b["trigger"], "mons": b.get("mons"),
                "chosen": b["chosen"], "alt": b["alt"], "line_lost": p["lost"],
-               "branch_lost": killed, "level": LEVEL, "device": dev.name}
+               "branch_lost": kills(b["file"], f"b{b['k']}"),
+               "control_lost": kills(ctrl, f"c{b['k']}") if ctrl else None,
+               "level": LEVEL, "device": dev.name}
         with _lock, res.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
         print(json.dumps(rec), flush=True)
@@ -159,8 +187,11 @@ def summary():
         fired = d["chosen"] or d["alt"]          # one of the two replies fires a piece
         if not fired or (d["chosen"] and d["alt"]):
             continue                              # piece vs piece: not fire-or-hold
-        lost_fire = d["line_lost"] if d["chosen"] else d["branch_lost"]
-        lost_hold = d["branch_lost"] if d["chosen"] else d["line_lost"]
+        own = d.get("control_lost")
+        if own is None:
+            continue                              # no control at the window: not paired
+        lost_fire = own if d["chosen"] else d["branch_lost"]
+        lost_hold = d["branch_lost"] if d["chosen"] else own
         pair[(fired, d["trigger"])].append((lost_fire, lost_hold))
     print(f"{len(recs)} branch searches; fire vs hold at the same window "
           f"(their kill rate, lower is better for you)")

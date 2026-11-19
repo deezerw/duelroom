@@ -71,3 +71,50 @@ def scores(conn, dh, enemy, own=None, first=True, device="server",
                     "used": sum(1 for g in mine if g[3].get(card)), "targets": targets})
     out.sort(key=lambda r: -r["used"])
     return out
+
+
+# --- measured: fire or hold at the same window --------------------------------
+
+def measured_file():
+    from .engine import ROOT
+    return ROOT / "results" / "experiments" / "use_timing" / "results.jsonl"
+
+
+def measured(path=None, min_windows=3):
+    """The causal rating (tools/experiments/use_timing.py): per (your card,
+    their trigger), their kill rate when you fired it at a window against
+    when you held it at the SAME window, paired. [{piece, trigger, n,
+    fired, held, gain, ci}], biggest gain first; gain = held - fired (points
+    of their kill rate you remove by firing). Windows where the line and
+    its branch both fired (piece vs piece) are not fire-or-hold: left out.
+    None when nothing is measured yet."""
+    import math
+
+    path = path or measured_file()
+    if not path.exists():
+        return None
+    pair = defaultdict(list)
+    level = None
+    for d in map(json.loads, path.read_text().splitlines()):
+        fired = d["chosen"] or d["alt"]
+        if not fired or (d["chosen"] and d["alt"]):
+            continue
+        own = d.get("control_lost")      # the line's reply, re-searched from the window
+        if own is None:
+            continue
+        level = d.get("level", level)
+        lost_fire = own if d["chosen"] else d["branch_lost"]
+        lost_hold = d["branch_lost"] if d["chosen"] else own
+        pair[(fired, d["trigger"])].append((lost_fire, lost_hold))
+    rows = []
+    for (piece, trig), xs in pair.items():
+        n = len(xs)
+        diffs = [h - f for f, h in xs]
+        mean = sum(diffs) / n
+        sd = math.sqrt(sum((x - mean) ** 2 for x in diffs) / (n - 1)) if n > 1 else 1.0
+        rows.append({"piece": piece, "trigger": trig, "n": n,
+                     "fired": sum(f for f, _ in xs) / n, "held": sum(h for _, h in xs) / n,
+                     "gain": mean, "ci": 1.96 * max(sd, 0.5 / math.sqrt(n)) / math.sqrt(n),
+                     "few": n < min_windows})
+    rows.sort(key=lambda r: (r["few"], -r["gain"], -r["n"]))
+    return {"rows": rows, "level": level, "windows": sum(r["n"] for r in rows)}
