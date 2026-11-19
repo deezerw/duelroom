@@ -87,3 +87,10 @@ deck (side/main) and the kill-check budget in the games (Monday: the 32x plateau
 beside ones older than game.FIRST_METHOD_SINCE: relabel the old going-first games (with the
 kill-budget change, after Monday's 32x plateau -- use_timing and Monday's queue read their
 kill lines in place until then).
+
+**2026-11-19, best time to use, going second (use_timing second, 37 windows, 32 paired,
+their trained turn 1, our break at 8x):** Ash on Shatranga lose 33% fired / 67% held (3),
+Ash on Fuwalos 25/38% (8, +12 +-24), Ash on Purulia 50/62% (8, +12 +-24); our Fuwalos at an
+open window 67/67% (9). Every Ash row favours firing; none is clear of zero yet. More needs
+going-second games for the other Ash hands (11, 13, 23: the 8-hand re-play skipped them).
+Going first (use_timing, 101 windows at 8x kill): fire = hold everywhere, the kill comes anyway.
