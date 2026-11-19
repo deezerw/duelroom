@@ -8,6 +8,9 @@ rule, the attacker re-plans), on the plateau's positions and seeds
 
     kill   their kill through our turn-1 board (OTK_MS x L), we defend
     brk    our break through their turn-1 board (SOLVE_MS x L), they defend
+    gbrk   the same on the GAMES' going-second positions (their TRAINED
+           turn 1, 2026-11-19) at game.BREAK_X, seed e*100 = the game's run
+           0: paired with that game's result (the scripted family)
 
 The summary pairs each run with the plateau's scripted result at the same
 level and seed (the DEFENCES family, "beat every script"): how many attacker
@@ -37,7 +40,8 @@ sys.path.insert(0, str(ROOT / "tools" / "experiments"))
 import budget_plateau as bp  # noqa: E402
 
 OUT = ROOT / "results" / "experiments" / "searched_defender"
-LEVEL = {"kill": 4, "brk": 4}
+LEVEL = {"kill": 4, "brk": 4, "gbrk": game.BREAK_X}
+GAME_DEVICE = "server"      # whose going-second games gbrk pairs with
 _lock = threading.Lock()
 
 
@@ -45,15 +49,24 @@ def _key(d):
     return (d["stage"], d["hand"], d["eseed"], d["rep"], d["level"])
 
 
-def jobs(conn, stages=tuple(LEVEL)):
+def jobs(conn, stages=("kill", "brk")):
     dh = trainer.deck_hash(ROOT / "assets" / "decks" / f"{bp.DECK}.ydk")
-    return [(st, r, rep) for st, r, rep in bp.plan(conn, dh) if st in stages]
+    out = [(st, r, rep) for st, r, rep in bp.plan(conn, dh) if st in stages]
+    if "gbrk" in stages:
+        # every going-second game position whose run 0 has been played
+        out += [("gbrk", {**dict(r), "first": 0}, 0) for r in conn.execute(
+            "SELECT t.* FROM game_turn1 t JOIN game_results g USING "
+            "(deck_hash, enemy, hand_index, board, enemy_seed, first, device) "
+            "WHERE t.deck_hash=? AND t.enemy=? AND t.first=0 AND t.device=? AND t.ok=1 "
+            "AND g.run=0 AND g.outcome != 'no_t1' ORDER BY t.enemy_seed, t.hand_index",
+            (dh, bp.ENEMY, GAME_DEVICE))]
+    return out
 
 
 def main(*stages):
     from ygorl.engine.duel import default_cards
 
-    stages = stages or tuple(LEVEL)
+    stages = stages or ("kill", "brk")
     dev = remote.current()
     remote.prepare(dev)
     conn = db.connect()
@@ -76,7 +89,7 @@ def main(*stages):
         h, e, L = r["hand_index"], r["enemy_seed"], LEVEL[stage]
         if (stage, h, e, rep, L) in done:
             return
-        seed = e * 100 + 50 + rep          # the plateau's seeds
+        seed = e * 100 + (rep if stage == "gbrk" else 50 + rep)   # the game's / the plateau's
         scratch = OUT / "scratch" / f"{stage}-h{h}-e{e}-r{rep}"
         pieces = set(json.loads(r["pieces"] or "[]"))
         t0 = time.time()
@@ -124,13 +137,21 @@ def progress():
             for st, r, rep in jobs(db.connect())}
     done = {_key(d) for d in map(json.loads, f.read_text().splitlines())} if f.exists() else set()
     parts = [(st, sum(k in done for k in keys if k[0] == st), sum(k[0] == st for k in keys))
-             for st in LEVEL]
+             for st in ("kill", "brk")]
     return {"done": len(keys & done), "total": len(keys), "parts": parts}
 
 
 def scripted():
-    """The plateau's results: (stage, hand, eseed, rep) -> {level: attacker won}."""
+    """The plateau's results: (stage, hand, eseed, rep) -> {level: attacker won};
+    gbrk: the going-second games' run-0 results at BREAK_X."""
     out = {}
+    conn = db.connect()
+    dh = trainer.deck_hash(ROOT / "assets" / "decks" / f"{bp.DECK}.ydk")
+    for r in conn.execute(
+            "SELECT hand_index, enemy_seed, outcome FROM game_results WHERE deck_hash=? "
+            "AND enemy=? AND first=0 AND device=? AND run=0 AND outcome != 'no_t1'",
+            (dh, bp.ENEMY, GAME_DEVICE)):
+        out[("gbrk", r[0], r[1], 0)] = {game.BREAK_X: int(r[2] == "win")}
     for f in sorted((ROOT / "results" / "experiments" / "budget_plateau").glob("results*.jsonl")):
         for d in map(json.loads, f.read_text().splitlines()):
             k = (d["stage"], d["hand"], d["eseed"], d["rep"])
@@ -145,7 +166,8 @@ def summary():
     recs = [json.loads(l) for l in (OUT / "results.jsonl").read_text().splitlines()]
     base = scripted()
     for stage, what in (("kill", "their kill through our turn-1 board"),
-                        ("brk", "our break through their turn-1 board")):
+                        ("brk", "our break through their turn-1 board"),
+                        ("gbrk", "our break through their TRAINED turn-1 board (games)")):
         rs = [d for d in recs if d["stage"] == stage]
         if not rs:
             continue
