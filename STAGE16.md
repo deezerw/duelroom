@@ -11,6 +11,13 @@ Delete this file when every step is done and verified.
    seeds, held-out hands, with intervals. Each step must beat the one before.
 3. Simple before neural; and every step must pay on its own (the user is not buying a promise
    of step 5).
+4. **The net learns card effectiveness itself** (user, 2026-11-19): its training targets are
+   game outcomes and search visit counts, never the user's card values / interrupter prefs
+   (trainer `card_values`, `trainer_prefs`) or the Angelechy `szone` values Claude set. The
+   scripts (solver, trainer) may keep using those. Imitation of solver lines -- whose goals were
+   chosen with those values -- is only a warm start that self-play must replace; the shipped
+   net is judged on wins. It must also produce its OWN card rankings as an output: the learned
+   value of positions with vs without a card, and paired in/out swaps played by the net.
 
 ## What already exists (vendor/ygorl, M4)
 
@@ -46,8 +53,9 @@ that uses the net.
        patch; Stage 12's "move prior"), batched GPU inference across the 8 solver threads.
    Keep whichever finds wins/boards faster. Success = the same converged result in less time
    (cheaper 16x kill checks and 8x breaks), or a better result at the same time.
-4. **Value net.** Train the critic on our labels: kill-check outcome + effort (time to the
-   first win, damage taken -- Stage 15's rich labels), game outcomes, the 16x rechecks. Use:
+4. **Value net.** Train the critic on outcome labels only: kill-check outcome + effort (time
+   to the first win, damage taken -- Stage 15's rich labels), game outcomes, the 16x rechecks.
+   (No card-value features: the board is the input, the outcome the target.) Use:
    cut lost rollouts early, judge turn-1 boards (Stage 11's board model done properly).
    Measured as within-position ranking on held-out hands, then in the search (A/B).
 5. **Self-play loop (AlphaZero).** Search + net play both sides; the net trains on the
