@@ -6524,3 +6524,28 @@ def test_use_timing_control_is_the_lines_own_reply_at_the_window(tmp_path):
     assert ut.control(src, write("same.yrpX", rs[:k + 1]), tmp_path / "c2.yrpX") is None
     bad = write("bad.yrpX", [other] + rs[1:k + 1])
     assert ut.control(src, bad, tmp_path / "c3.yrpX") is None
+
+
+def test_a_segfaulted_solve_is_rerun_once(tmp_path, monkeypatch):
+    """A SIGSEGV (1.3% of NRPA-level-3 searches, timing-dependent) re-runs
+    the same search once instead of dropping the game; a second crash, or
+    any other non-zero exit, still raises."""
+    import subprocess as sp
+    from skills import game, remote
+
+    monkeypatch.setattr(remote, "current", lambda: remote.get("server"))
+    codes = []
+
+    def run(cmd, **kw):
+        rc = codes.pop(0)
+        return sp.CompletedProcess(cmd, rc, stdout=f"run rc={rc}", stderr="")
+    monkeypatch.setattr(game.subprocess, "run", run)
+    codes[:] = [-11, 0]
+    r = game._solve(tmp_path / "x.yrpX", [], tmp_path, "t", 1000, 1)
+    assert r["rc"] == 0 and "re-run 1" in r["log"].read_text()
+    codes[:] = [-11, -11]
+    with pytest.raises(RuntimeError, match="exited -11"):
+        game._solve(tmp_path / "x.yrpX", [], tmp_path, "t2", 1000, 1)
+    codes[:] = [3]
+    with pytest.raises(RuntimeError, match="exited 3"):
+        game._solve(tmp_path / "x.yrpX", [], tmp_path, "t3", 1000, 1)

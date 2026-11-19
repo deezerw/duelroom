@@ -149,6 +149,15 @@ def _now():
 
 # --- running the rooted solver -----------------------------------------------
 
+# A solver that dies by SIGSEGV is re-run once (exit -11 here, 139 through a
+# shell, 255 from ssh when the remote command was killed and the device is up).
+# Measured 2026-11-19 over 19,155 stored logs: 8 of 631 NRPA-level-3 searches
+# (budgets past 180 s: the 8x break) crashed, 6 of 18,523 at level 2 -- and
+# the crashing command ran clean under gdb: timing, not the position.
+CRASH_RETRIES = 1
+_CRASH_RCS = (-11, 139, 255)
+
+
 def _hard_limit(ms):
     """Seconds before a solver given `ms` counts as hung: its budget twice
     over plus start-up, so a slow but working search is never cut off."""
@@ -175,23 +184,33 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
             "--seed", str(seed), "--outdir", str(out)]
     from . import remote
     dev = remote.current()
-    try:
-        if dev.remote:
-            r = _solve_remote(dev, cmd, {**ARENA_ENV, **(env_extra or {})},
-                              _hard_limit(ms), wd.path, out)
-        else:
-            r = subprocess.run(cmd, capture_output=True, text=True,
-                               env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
-                               timeout=_hard_limit(ms))
-    except subprocess.TimeoutExpired as e:
-        # Measured 2026-11-03: a 60 s turn-2 solve still running after 10.5 h,
-        # ignoring SIGTERM, held one of the run's workers the whole time.
-        # subprocess.run SIGKILLs it; the game is not recorded, so the next
-        # run retries it -- never scored off a half-searched turn.
-        raise RuntimeError(f"{label}: solver hung past {_hard_limit(ms)} s, killed") from e
     log = scratch / f"{label}.log"
-    log.write_text((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or "")
-                   + f"\n--- exit {r.returncode} ---\n", encoding="utf-8")
+    earlier = ""
+    for attempt in range(1 + CRASH_RETRIES):
+        try:
+            if dev.remote:
+                r = _solve_remote(dev, cmd, {**ARENA_ENV, **(env_extra or {})},
+                                  _hard_limit(ms), wd.path, out)
+            else:
+                r = subprocess.run(cmd, capture_output=True, text=True,
+                                   env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
+                                   timeout=_hard_limit(ms))
+        except subprocess.TimeoutExpired as e:
+            # Measured 2026-11-03: a 60 s turn-2 solve still running after 10.5 h,
+            # ignoring SIGTERM, held one of the run's workers the whole time.
+            # subprocess.run SIGKILLs it; the game is not recorded, so the next
+            # run retries it -- never scored off a half-searched turn.
+            raise RuntimeError(f"{label}: solver hung past {_hard_limit(ms)} s, killed") from e
+        text = ((r.stdout or "") + "\n--- stderr ---\n" + (r.stderr or "")
+                + f"\n--- exit {r.returncode} ---\n")
+        if r.returncode not in _CRASH_RCS or attempt == CRASH_RETRIES:
+            break
+        # A segfault, not a verdict: re-run the same search once (same seed --
+        # the crash is timing-dependent, the run that follows is a full one).
+        earlier += text + f"=== crashed (exit {r.returncode}): re-run {attempt + 1} ===\n"
+        shutil.rmtree(out, ignore_errors=True)
+        out.mkdir(parents=True, exist_ok=True)
+    log.write_text(earlier + text, encoding="utf-8")
     if r.returncode != 0:
         # Every stored game's solve exits 0, won or not (12325 logs, 2026-11-18):
         # anything else is a crash, and reading "no solution" off it would score
