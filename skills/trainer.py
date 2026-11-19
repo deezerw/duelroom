@@ -576,6 +576,52 @@ def ensure_starter_pool(conn, deck_path, name, k, skip=()):
     return dh
 
 
+# --- an enemy's hands: what it opens with against one deck ----------------------
+#
+# The games deal the enemy fixed hands (`game.enemy_hand`, seeds 1000+k) and
+# its turn 1 used to aim at one target for every hand (Angelechy-Meta: "the
+# Endgame Problem in the spell zone"), so it activated that and passed. A pool
+# of exactly those hands, trained like any deck's, gives each one a goal of
+# its own. Keyed by both decks: the hand depends on the deck it faces.
+
+def enemy_key(dh, vs_dh):
+    return f"{dh}:vs:{vs_dh}"
+
+
+def ensure_enemy_pool(conn, deck_path, name, vs_path, hands):
+    import tempfile
+
+    from ygorl.solver.batch import hand_seed
+
+    from . import game
+
+    dh = enemy_key(deck_hash(deck_path), deck_hash(vs_path))
+    have = {r[0] for r in conn.execute(
+        "SELECT hand_index FROM trainer_hands WHERE deck_hash=?", (dh,))}
+    with tempfile.TemporaryDirectory() as tmp, conn:
+        for i in range(hands):
+            if i in have:
+                continue
+            hand = game.enemy_hand(vs_path, deck_path, game.ENEMY_SEED0 + i, tmp)
+            conn.execute(
+                "INSERT INTO trainer_hands "
+                "(deck_hash, deck, hand_index, hand_seed, hand) VALUES (?,?,?,?,?)",
+                (dh, name, i, str(hand_seed(0, f"{name}:vs:{Path(vs_path).stem}", i)),
+                 json.dumps(hand)))
+    return dh
+
+
+def enemy_goal(conn, enemy_path, vs_path, enemy_seed):
+    """The trained goal of the enemy's hand for `enemy_seed`, or None."""
+    from . import game
+
+    r = conn.execute(
+        "SELECT best_goal FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
+        (enemy_key(deck_hash(enemy_path), deck_hash(vs_path)),
+         enemy_seed - game.ENEMY_SEED0)).fetchone()
+    return json.loads(r["best_goal"]) if r and r["best_goal"] else None
+
+
 def starter_estimate(deck_path, k, skip=(), solve_ms=STARTER_MS, workers=None):
     """(hands, hours) of the first generation: every hand asks for every
     piece once (about `breadth` goals each)."""
@@ -910,18 +956,21 @@ def plateaued(conn, dh, n):
 
 def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
           per_hand=PER_HAND, solve_ms=None, workers=None, say=print,
-          plateau=None, starters=None, skip=()):
+          plateau=None, starters=None, skip=(), vs=None):
     """Run generations until `generations` are done, `hours` pass, a stop
     is requested, or -- with `plateau` -- that many generations in a row
     improved no hand ("as good as it'll get", STAGE8). Resumable: every
     attempt is committed as it lands, and a killed generation is simply
     started again under a new number. `starters=k`: the starter test's
-    pool of k-card hands (less `skip`) instead of the training hands."""
+    pool of k-card hands (less `skip`) instead of the training hands.
+    `vs=<deck path>`: the enemy pool, the `hands` this deck opens with
+    against that deck in the games (`ensure_enemy_pool`)."""
     import time
 
     engine.require()
     engine.preflight([Path(deck_path)])
     dh = (ensure_starter_pool(conn, deck_path, name, starters, skip) if starters
+          else ensure_enemy_pool(conn, deck_path, name, vs, hands) if vs
           else ensure_pool(conn, deck_path, name, hands))
     rescore_bests(conn, dh, name, say)
     clear_stop(name)
@@ -929,7 +978,7 @@ def train(conn, deck_path, name, generations=None, hours=None, hands=HANDS,
         conn.execute("DELETE FROM trainer_gens WHERE deck_hash=? AND finished IS NULL",
                      (dh,))
     if not curve(conn, dh):
-        if not starters:    # stored results are 5-card hands
+        if not starters and not vs:   # stored results: the 5-card pool's seeds
             bootstrap(conn, dh, name, deck_path, say)
         _record_gen(conn, dh, name, 0, _now(), 0, 0, solve_ms or TRAIN_MS)
         say("generation 0 = the starting point (stored results only)")

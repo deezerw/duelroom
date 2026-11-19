@@ -76,6 +76,7 @@ ROOTED_BIN = (engine.VENDOR / "build" / "combo-solver-rooted" / "bin"
               / "combosolver")
 RUNS = 10            # games per (hand, board, enemy hand): the solver is randomized
 ENEMY_HANDS = 3      # fixed enemy hands, shared by every one of your hands
+ENEMY_SEED0 = 1000   # enemy hand k is dealt by seed ENEMY_SEED0 + k
 WORKERS = 4         # games at once; 2 solver threads each = 8 cores
 OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -844,7 +845,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     # Your answers on their turn: your deck's hand traps and interrupters
     # plus the "counts as an interruption" cards you named for the trainer.
     ours_hand = respond_codes(deck_path, cards, extra=ours_extra)
-    seeds = [1000 + k for k in range(enemy_hands)]
+    seeds = [ENEMY_SEED0 + k for k in range(enemy_hands)]
     first = int(bool(first))
     root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "

@@ -6233,3 +6233,28 @@ def test_banlist_check_flags_a_new_list_once_with_changes_and_deck_hits(tmp_path
     assert banlist.check(conn, upstream=new) is None              # seen: once only
     banlist.ack(conn)
     assert banlist.notice(conn) is None
+
+
+def test_enemy_pool_holds_the_games_hands_and_gives_their_goal(tmp_path, monkeypatch):
+    """The enemy's turn 1 aimed at one target for every hand (Angelechy-Meta:
+    the Endgame Problem, then pass). Its pool must be exactly the hands the
+    games deal it (`game.enemy_hand`, seed ENEMY_SEED0 + k), keyed by both
+    decks, and `enemy_goal` must read a trained hand back by its seed."""
+    from skills import db, game, trainer
+    from skills.engine import DECKS
+
+    dealt = []
+    monkeypatch.setattr(game, "enemy_hand",
+                        lambda ours, enemy, seed, scratch: dealt.append(seed) or [seed, 1])
+    conn = db.connect(tmp_path / "t.db")
+    e, us = DECKS / "Angelechy-Meta.ydk", DECKS / "imported.ydk"
+    dh = trainer.ensure_enemy_pool(conn, e, "Angelechy-Meta", us, 3)
+    assert dh == trainer.enemy_key(trainer.deck_hash(e), trainer.deck_hash(us))
+    assert dealt == [game.ENEMY_SEED0 + k for k in range(3)]
+    trainer.ensure_enemy_pool(conn, e, "Angelechy-Meta", us, 3)
+    assert len(dealt) == 3, "an existing pool was dealt again"
+    assert trainer.enemy_goal(conn, e, us, game.ENEMY_SEED0 + 1) is None
+    with conn:
+        trainer._set_best(conn, dh, 1, [0, 3, 2, 1, 0, -9], ["123@mzone"], {}, 1, "trainer")
+    assert trainer.enemy_goal(conn, e, us, game.ENEMY_SEED0 + 1) == ["123@mzone"]
+    assert trainer.enemy_goal(conn, e, DECKS / "Angelechy-Meta.ydk", game.ENEMY_SEED0 + 1) is None

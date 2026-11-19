@@ -62,6 +62,7 @@ duelroom — Yu-Gi-Oh! deck laboratory
   draws [deck]              what each extra solver draw bought, no CPU
   floodgates <deck>         does the deck function under common floodgates
   train <deck> [hours] [n]  play n hands over and over, keep each best line
+  train <enemy> --vs <deck> [hours] [n]  train the n hands the enemy opens with vs <deck>
   games <deck> <enemy> [runs] [enemy hands] [--second] [--workers N] [--from-end]  finish the game: win rate by turn 3 (going 2nd: turn 2)
   impact <deck> [enemy] [--first|--second]  card impact scores from the games played
   stops <deck> [enemy] [--first|--second]  which of their cards you stopped, with what, and what it won
@@ -2195,11 +2196,21 @@ def cmd_decks(conn, args):
 def cmd_train(conn, args):
     """The deck trainer (skills/trainer.py): `train <deck> [hours] [hands]
     [enemy] [--seconds N] [--second]`, `train <deck> status`, `train <deck>
-    stop`. `--second`: the games at the plateau are played going second."""
+    stop`. `--second`: the games at the plateau are played going second.
+    `--vs <deck>`: train the hands <deck> is dealt as the enemy of that
+    deck in the games (`trainer.ensure_enemy_pool`); with status, read them."""
     args = list(args)
     solve_ms = None
     first = "--second" not in args
     args = [a for a in args if a != "--second"]
+    vs = None
+    if "--vs" in args:
+        at = args.index("--vs")
+        vs = _resolve_deck(args[at + 1] if at + 1 < len(args) else None, conn)
+        if not vs:
+            print("--vs needs the deck these are the enemy's hands against")
+            return
+        del args[at:at + 2]
     if "--seconds" in args:
         at = args.index("--seconds")
         try:
@@ -2225,6 +2236,8 @@ def cmd_train(conn, args):
         return
     if rest and rest[0] == "status":
         dh = trainer.deck_hash(path)
+        if vs:
+            dh = trainer.enemy_key(dh, trainer.deck_hash(vs))
         gens = trainer.curve(conn, dh)
         if not gens:
             print(f"{name}: never trained")
@@ -2238,8 +2251,18 @@ def cmd_train(conn, args):
         return
     _warn_if_busy("training")
     hours = float(rest[0]) if rest else 8.0
-    hands = int(rest[1]) if len(rest) > 1 else trainer.HANDS
+    hands = int(rest[1]) if len(rest) > 1 else (game.ENEMY_HANDS if vs else trainer.HANDS)
     enemy = rest[2] if len(rest) > 2 else None
+    if vs:
+        if enemy:
+            print("--vs trains the enemy's hands; it plays no games")
+            return
+        print(f"training {name}'s {hands} game hands against {vs.stem}, up to {hours:g} h "
+              f"(stop early: train {name} stop)")
+        n = trainer.train(conn, path, name, hours=hours, hands=hands, solve_ms=solve_ms,
+                          plateau=PLATEAU, vs=vs)
+        print(f"{n} generation(s) run")
+        return
     print(f"training {name}: {hands} hands, up to {hours:g} h "
           f"(stop early: train {name} stop)"
           + (f"; at a plateau, games against {enemy}" if enemy else ""))
