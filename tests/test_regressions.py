@@ -6488,3 +6488,39 @@ def test_mcts_finds_a_known_kill_near_its_end():
         assert s.done and s.tracker.engine_winner == 1
     finally:
         s.close()
+
+
+def test_use_timing_control_is_the_lines_own_reply_at_the_window(tmp_path):
+    """use_timing's control: the line's answers cut to the branch's length
+    (a branch differs from its line in its LAST answer only), under the
+    line's header -- refused when the two do not share the rest."""
+    import json
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "tools" / "experiments"))
+    import use_timing as ut
+    from ygorl.engine.replay import Replay
+
+    raw = json.loads((_P(__file__).parent / "fixtures" / "lines" / "kill_demo.json").read_text())
+    raw.pop("key", None)
+    from ygorl.solver.demo import Demonstration
+    line = Demonstration.from_json(raw).replay(0)
+    src = tmp_path / "line.yrpX"
+    line.to_yrpx(src, names=("a", "b"))
+    rs = list(line.responses)
+
+    def write(name, responses):
+        r = Replay(seed=line.seed, first=line.first, rule_flags=line.rule_flags, player=line.player,
+                   shuffle_decks=line.shuffle_decks, decks=line.decks, responses=responses,
+                   seed_words=line.seed_words)
+        r.to_yrpx(tmp_path / name, names=("a", "b"))
+        return tmp_path / name
+
+    k = 40
+    other = bytes([rs[k][0] ^ 1]) + rs[k][1:]          # a different last answer
+    branch = write("branch.yrpX", rs[:k] + [other])
+    ctrl = ut.control(src, branch, tmp_path / "c.yrpX")
+    assert ctrl is not None and list(Replay.from_yrp(ctrl).responses) == rs[:k + 1]
+    assert ut.control(src, write("same.yrpX", rs[:k + 1]), tmp_path / "c2.yrpX") is None
+    bad = write("bad.yrpX", [other] + rs[1:k + 1])
+    assert ut.control(src, bad, tmp_path / "c3.yrpX") is None
