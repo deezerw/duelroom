@@ -6456,3 +6456,35 @@ def test_relabel_games_moves_runs_and_keeps_turn1(tmp_path, monkeypatch):
     assert set(devs) == {"server", "old"} and _P(devs["old"]).exists()
     with pytest.raises(SystemExit):
         rl.relabel(conn, "deck", "E", True, "old", say=lambda *a: None)
+
+
+def test_mcts_finds_a_known_kill_near_its_end():
+    """skills/mcts.py: PUCT on the real engine (snapshots), uniform prior, no
+    value net. Four decisions before a stored kill (an enemy turn-2 lethal,
+    tools/ml/demos.py's first record), 400 simulations must play it out."""
+    import json
+    import os
+    from pathlib import Path as _P
+    from skills import engine, mcts
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import DuelSession, default_cards
+    from ygorl.solver.demo import Demonstration
+
+    raw = json.loads((_P(__file__).parent / "fixtures" / "lines" / "kill_demo.json").read_text())
+    raw.pop("key", None)
+    d = Demonstration.from_json(raw)
+    acts = d.lines[0].actions
+    s = DuelSession(d.replay(0).duel(None, cards=default_cards(), snapshots=True))
+    try:
+        for a in acts[:-4]:
+            s.act(a)
+        goal = lambda ss: (-1.0 if ss.tracker.engine_winner == 1 else 1.0) if ss.done else None
+        sr = mcts.Search(s, goal=goal).run(400)
+        assert sum(sr.root.n) == 399 and abs(sum(sr.policy()) - 1) < 1e-9
+        for a in sr.principal_line():
+            if s.point is None:
+                break
+            s.act(a)
+        assert s.done and s.tracker.engine_winner == 1
+    finally:
+        s.close()

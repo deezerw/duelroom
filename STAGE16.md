@@ -83,3 +83,8 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   same order. AlphaZero-style MCTS expands one node per simulation (value net, no rollout to
   the end): 800 simulations a decision ~0.15 s of engine per decision + batched net calls, so
   arm (a) is viable; arm (b) (net prior inside the C++ NRPA) stays the faster-to-adopt option.
+- **2026-11-19, step 3(a) search built:** `skills/mcts.py` -- PUCT over the real engine
+  (snapshots), prior/value as plug-in functions (uniform / outcome-only until the net exists).
+  With no net, 400 simulations find a stored kill from 4 and 8 decisions before its end, not
+  from 16 or 30 (the tree is too wide without a prior: the net's job). Test:
+  test_mcts_finds_a_known_kill_near_its_end.
