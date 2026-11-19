@@ -84,12 +84,18 @@ OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
 # 4 / 8 / 16x, 0 flips from 8x to 16x and seeds agreeing 100% from 8x. At
 # 1x the games undersold every going-second hand. User chose 8x 2026-11-19.
 BREAK_X = 8
+# Going first, their turn-2 kill check searches OTK_X x OTK_MS: the plateau
+# lost 38 / 54 / 66 / 76 / 93 / 93% at 1 / 2 / 4 / 8 / 16 / 32x, every flip
+# toward lost up to 16x, 0 flips from 16x to 32x over 71 runs, seeds agreeing
+# 100% from 16x (2026-11-19). The user's opponents are "extremely good": the
+# enemy gets the converged budget.
+OTK_X = 16
 # Going first, the enemy's non-kill turn 2 builds its trained board since this
 # moment (UTC). Older going-first games in a section aimed it at the one payoff
 # target: `run` refuses to add new games beside them until they are relabelled
 # (as endgame-t1 / brk1x were going second) -- pooled, the two would be one
 # number measuring two enemies.
-FIRST_METHOD_SINCE = "2026-11-19T15:45:00"
+FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -925,7 +931,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
-        f"{ms // 1000} s per search{'' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
+        f"{ms // 1000} s per search"
+        f"{f' ({OTK_MS * OTK_X // 1000} s a kill check)' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
         f"target {enemy_target}, on {device} "
         f"({workers} at once)")
 
@@ -1028,7 +1035,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             ours = set(json.loads(t1["pieces"])) | set(ours_hand)
             tg = trained.get(eseed)
             t2 = turn2(t1["start"], t1["prefix"], enemy_target, ours,
-                       scratch, ms, seed,
+                       scratch, ms, seed, otk_ms=OTK_MS * OTK_X,
                        targets=trainer.split_goal(tg[1])[0] if tg else None)
             if t2["lost"]:
                 out = {"outcome": "lost_t2", "line": t2.get("line")}

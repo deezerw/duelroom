@@ -138,3 +138,9 @@ on 97%/100% of positions, so the result is not search luck. No scripted defence 
 converged attacker: DEFENCES stays (1, 2). Either the boards really are breakable, or only a
 SEARCHED defender (one that plays its own best response instead of a fixed rule) would hold.
 Asked the user before building that (a big change to patch 0004 / the solver).
+
+**2026-11-19, kill plateau at 32x** (duelpc, 71 of 72 runs): lost 38 / 54 / 66 / 76 / 93 / 93% at
+1 / 2 / 4 / 8 / 16 / 32x, 0 flips 16x -> 32x, seeds agree 100% from 16x: CONVERGED at 16x.
+game.OTK_X = 16 (320 s a defence). With BREAK_X = 8 (brk converged), every search the games
+run is now at its plateau. Old going-first games relabelled `kill1x` (tools/relabel_games.py;
+backup duelroom.db.bak-20261119d).
