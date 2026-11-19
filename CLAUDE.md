@@ -412,6 +412,27 @@ stage is complete and verified.
 14. `STAGE14.md` — A searched defender: best replies on the attacker's line, then the attacker re-plans (scripts proved readable)
 15. `STAGE15.md` — Turn 1 that adapts to disruption: several goals asked, the board with the most live interruptions kept, free cards played
 
+**Direction (user, 2026-11-19):** make the AI as close to perfect as compute allows on BOTH
+sides -- the enemy must play like the user's real opponents ("extremely good and smart") --
+THEN search side cards / deck changes and produce "best time to use" ratings. Converged
+budgets and searched defences come before any side-card comparison.
+
+**Added 2026-11-19** (details in STAGE15.md):
+- `train <enemy> --vs <deck>`: the enemy's own game hands (`trainer.ensure_enemy_pool`);
+  going second each enemy hand plays its trained goal (`trainer.enemy_goal`, any pool
+  holding the same hand). Card value zone `szone` = a monster face-up as a Continuous Spell.
+- `game.BREAK_X = 8`: the going-second break searches 8x. Old going-second games live on as
+  devices `endgame-t1` (one-target enemy turn 1) and `brk1x` (trained enemy, 1x break).
+- Rich kill labels: `game.solve_stats(log)`; `tools/ml/board_data.py` (`kill`, `recheck`
+  at 16x) and `tools/ml/game_kills.py` (stored games, cron 05:40).
+- `/games`: "What you must stop, by their hand" (`stops.by_enemy_hand`) and "Best time to
+  use (measured)" (`timing.measured`, from `tools/experiments/use_timing.py`: fire vs hold
+  at the same window, both re-searched from the window). `skills/timing.scores` is the
+  confounded correlational read -- never shown.
+- `tools/experiments/searched_defender.py gbrk`: the enemy defends our break with a searched
+  defence on the games' positions.
+- duelpc: never at night (loud); Mon-Wed usually free; Linux keeps its monitors off (OLED).
+
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
 snapshot/branch, paired seeds, replay export and a wrapped combo solver. Stages 3-5 were
