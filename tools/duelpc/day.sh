@@ -10,6 +10,16 @@ echo "=== $(date) day starts, stop at $STOP ===" >> $LOG
 venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duelpc'))" >> $LOG 2>&1 \
   || { echo "duelpc did not come up (left on in Windows?): nothing run" >> $LOG; exit 0; }
 (
+  # Stage 16 step 2: imitation training on the PC's GPU (it runs there, in ~/duelroom-ml)
+  if [ -f results/ml/demos/demos.jsonl ] && [ ! -f results/ml/bc/policy.pt ]; then
+    rsync -a tools/ml/bc_train.py deezer@duelpc.local:duelroom/tools/ml/ \
+      && rsync -a results/ml/demos/demos.jsonl deezer@duelpc.local:duelroom/results/ml/demos/ \
+      && ssh deezer@duelpc.local 'cd ~/duelroom && YGORL_THIRD_PARTY=$HOME/duelroom/vendor/third_party_merged \
+           ~/duelroom-ml/bin/python tools/ml/bc_train.py results/ml/demos/demos.jsonl results/ml/bc \
+           --epochs 8 --max-samples 300000' >> results/ml/bc_train.log 2>&1 \
+      && mkdir -p results/ml/bc && rsync -a deezer@duelpc.local:duelroom/results/ml/bc/ results/ml/bc/
+    echo "=== $(date) imitation training: $( [ -f results/ml/bc/policy.pt ] && echo done || echo FAILED, see results/ml/bc_train.log) ===" >> $LOG
+  fi
   venv/bin/python tools/experiments/budget_plateau.py --stages kill --levels 32 >> results/experiments/plateau_32.log 2>&1
   echo "=== $(date) plateau 32x done ===" >> $LOG
   # the honest going-first baseline (16x kill check, trained enemy turn 2), run here and
@@ -25,7 +35,7 @@ venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duel
 work=$!
 while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60; done
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
-pkill -f "budget_plateau.py|use_timing.py|board_data.py" 2>/dev/null
+pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games" 2>/dev/null
 sleep 10
-ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -f combosolver; sudo -n systemctl poweroff' >> $LOG 2>&1
+ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -f combosolver; pkill -f bc_train.py; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
