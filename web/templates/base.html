@@ -91,6 +91,10 @@
   .flag.bad{border-color:var(--bad);color:var(--bad);background:#f7768e10}
   .muted{color:var(--dim)} .faint{color:var(--faint)}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  /* paths and log lines are one long word: let them break instead of
+     pushing the page sideways on a phone */
+  main code,main .mono,main pre{overflow-wrap:anywhere;word-break:break-word}
+  main pre{white-space:pre-wrap}
   table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:7px 10px}
   th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase;
      letter-spacing:.06em;border-bottom:1px solid var(--line)}

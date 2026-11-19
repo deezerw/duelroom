@@ -134,11 +134,12 @@ def progress():
     """For the Jobs page: positions done per stage."""
     f = OUT / "results.jsonl"
     keys = {(st, r["hand_index"], r["enemy_seed"], rep, LEVEL[st])
-            for st, r, rep in jobs(db.connect())}
+            for st, r, rep in jobs(db.connect(), ("kill", "brk", "gbrk"))}
     done = {_key(d) for d in map(json.loads, f.read_text().splitlines())} if f.exists() else set()
     parts = [(st, sum(k in done for k in keys if k[0] == st), sum(k[0] == st for k in keys))
-             for st in ("kill", "brk")]
-    return {"done": len(keys & done), "total": len(keys), "parts": parts}
+             for st in ("kill", "brk", "gbrk")]
+    parts = [x for x in parts if x[1]]          # a stage never started is not "left"
+    return {"done": sum(x[1] for x in parts), "total": sum(x[2] for x in parts), "parts": parts}
 
 
 def scripted():
