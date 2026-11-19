@@ -245,3 +245,66 @@ def scores(conn, dh, enemy, min_side=impact.MIN_SIDE, own=None, first=True, devi
     for rows, n in ((theirs, "stopped"), (yours, "stops")):
         rows.sort(key=lambda r: (order[r["status"]], -(r["impact"] or 0), -r[n]))
     return {"games": len(games), "theirs": theirs, "yours": yours}
+
+
+def by_enemy_hand(conn, dh, enemy, own=None, first=True, device="server", top=3):
+    """"What you must stop", one row per enemy hand: [{seed, hand, games,
+    lost, kill_cards, must}].
+
+    Their turn only (turn 2 going first, turn 1 going second), the deciding
+    line of each game as `_games` reads it. `lost` = games their turn won
+    outright (lost_t2) going first, or games you did not win going second.
+    `kill_cards`: [(code, share of the lost games it was played in)], top
+    `top`. `must`: their cards played on that turn, with how often you
+    stopped them in the games you got through vs the games you lost --
+    [(code, stopped_held, held, stopped_lost, lost, [(your code, times)])],
+    biggest gap first. A gap, not proof: a board that stops more is also a
+    better board in other ways (the impact score above compares fairly)."""
+    turn = 2 if first else 1
+    outcome = {}
+    for r in conn.execute(
+            "SELECT hand_index, enemy_seed, run, outcome FROM game_results "
+            "WHERE deck_hash=? AND enemy=? AND first=? AND device=? AND outcome != 'no_t1'",
+            (dh, enemy, int(bool(first)), device)):
+        outcome[(r["hand_index"], r["enemy_seed"], r["run"])] = r["outcome"]
+    rows = conn.execute(
+        "SELECT g.hand_index, g.enemy_seed, g.run, s.stops FROM game_results g "
+        "JOIN game_stops s USING (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run) "
+        "WHERE g.deck_hash=? AND g.enemy=? AND g.first=? AND g.device=? AND g.outcome != 'no_t1' "
+        "AND s.stops IS NOT NULL AND s.line = COALESCE(g.line, '')",
+        (dh, enemy, int(bool(first)), device)).fetchall()
+    hands = {r["enemy_seed"]: json.loads(r["enemy_hand"]) for r in conn.execute(
+        "SELECT enemy_seed, enemy_hand FROM game_turn1 WHERE deck_hash=? AND enemy=? "
+        "AND first=? AND device=? AND enemy_hand IS NOT NULL", (dh, enemy, int(bool(first)), device))}
+    per = defaultdict(list)
+    for r in rows:
+        o = outcome[(r["hand_index"], r["enemy_seed"], r["run"])]
+        lost = o == "lost_t2" if first else o != "win"
+        d = json.loads(r["stops"])
+        played = {int(k) for k, t in d["played"].items() if t == turn}
+        stops = [(by, code) for t, _k, by, code in d["stops"]
+                 if t == turn and (own is None or by == FIELD or by in own)]
+        per[r["enemy_seed"]].append((lost, played, stops))
+    out = []
+    for seed, games in sorted(per.items()):
+        lost = [g for g in games if g[0]]
+        held = [g for g in games if not g[0]]
+        kills = Counter(c for _l, played, _s in lost for c in played)
+        must = []
+        for c in {c for _l, played, _s in games for c in played}:
+            def rate(gs):
+                gs = [g for g in gs if c in g[1]]
+                return sum(1 for g in gs if any(code == c for _b, code in g[2])), len(gs)
+            sh, nh = rate(held)
+            sl, nl = rate(lost)
+            if not sh or not nh:
+                continue
+            by = Counter(b for g in held for b, code in g[2] if code == c)
+            must.append((c, sh, nh, sl, nl, by.most_common(2)))
+        must.sort(key=lambda m: -(m[1] / m[2] - (m[3] / m[4] if m[4] else 0)))
+        out.append({"seed": seed, "hand": hands.get(seed, []), "games": len(games),
+                    "lost": len(lost),
+                    "kill_cards": [(c, n / len(lost)) for c, n in kills.most_common(top)]
+                    if lost else [],
+                    "must": must[:top]})
+    return out

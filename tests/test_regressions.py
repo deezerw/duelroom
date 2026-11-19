@@ -6343,3 +6343,28 @@ def test_enemy_goal_serves_a_side_variant_with_the_same_hand(tmp_path, monkeypat
     assert trainer.enemy_goal(conn, e, other, seed) is None
     assert trainer.enemy_goal(conn, e, other, seed, hand=[7, seed]) == ["9@mzone"]
     assert trainer.enemy_goal(conn, e, other, seed, hand=[8, seed]) is None
+
+
+def test_must_stop_by_enemy_hand_compares_held_and_lost_games(tmp_path):
+    """Per enemy hand: their turn's cards in the games you lost, and how
+    often a card was stopped in games you got through vs games you lost."""
+    import json
+    from skills import db, stops
+
+    conn = db.connect(tmp_path / "t.db")
+    def game(run, outcome, played, st):
+        k = ("d", "E", 0, 0, 1000, 1, "server", run)
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, outcome, line, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     (*k, outcome, "", "now"))
+        conn.execute("INSERT INTO game_stops (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, line, stops) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (*k, "", json.dumps({"played": played, "stops": st})))
+    with conn:
+        game(0, "win", {"7": 2}, [[2, "removed", 5, 7]])
+        game(1, "lost_t2", {"7": 2, "8": 2}, [])
+        game(2, "lost_t2", {"7": 2, "8": 2}, [[3, "removed", 5, 7]])   # turn 3: not theirs
+    [h] = stops.by_enemy_hand(conn, "d", "E", own={5})
+    assert (h["games"], h["lost"]) == (3, 2)
+    assert dict(h["kill_cards"]) == {7: 1.0, 8: 1.0}
+    assert h["must"] == [(7, 1, 1, 0, 2, [(5, 1)])]

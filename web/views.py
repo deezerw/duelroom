@@ -592,6 +592,12 @@ def games_view(name=None):
                    "by": [(snm(b), n) for b, n in r["by"]]} for r in st["theirs"]]
         yours = [{**r, "name": snm(r["code"]),
                   "hit": [(snm(x), n) for x, n in r["hit"]]} for r in st["yours"]]
+        must = [{**h, "hand": [nm(x) for x in h["hand"]],
+                 "kill_cards": [(snm(x), share) for x, share in h["kill_cards"]],
+                 "must": [{"name": snm(m[0]), "held": m[1:3], "lost": m[3:5],
+                           "by": [(snm(b), n) for b, n in m[5]]} for m in h["must"]]}
+                for h in stops.by_enemy_hand(c, dh, enemy, own=own, first=first,
+                                             device=device)]
         enemies.append({"name": enemy, "first": first, "device": device,
                         "watch_args": {**({} if first else {"second": 1}),
                                        **({} if device == "server" else {"device": device})},
@@ -601,7 +607,7 @@ def games_view(name=None):
                         "overall": game.overall(c, dh, enemy, first=first, device=device),
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
-                        "theirs": theirs, "yours": yours,
+                        "theirs": theirs, "yours": yours, "must": must,
                         "unread_stops": unread_stops})
     active_jobs = [{**dict(j), "device": _job_device(j)} for j in _games_jobs(c, name)]
     busy = {j["device"] for j in active_jobs}

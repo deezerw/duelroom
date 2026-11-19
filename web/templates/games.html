@@ -230,6 +230,30 @@
     {% endfor %}
     </tbody>
   </table>
+  {% if e.must %}
+  <h3 style="margin:16px 0 4px">What you must stop, by their hand</h3>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their turn only
+    ({{ 'turn 2' if e.first else 'turn 1' }}). <b>They win with</b>: the cards their winning
+    turns played. <b>Stopped</b>: how often you stopped a card in the games you got through
+    against the games you lost, when they played it. A gap points at what to stop; it is not
+    proof (a board that stops more is also a better board).</div>
+  <table class="impact">
+    <thead><tr><th>their hand</th><th>{{ 'lost on their turn' if e.first else 'not won' }}</th>
+      <th class="extra">they win with</th><th>stopped: got through / lost</th></tr></thead>
+    <tbody>
+    {% for h in e.must %}
+      <tr>
+        <td>{{ h.hand|join(', ') }}</td>
+        <td>{{ h.lost }} of {{ h.games }}</td>
+        <td class="extra">{% for n, share in h.kill_cards %}{{ n }} <span class="muted">{{ (share * 100)|round|int }}%</span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        <td>{% for m in h.must %}<b>{{ m.name }}</b> {{ m.held[0] }}/{{ m.held[1] }}
+              <span class="muted">vs {{ m.lost[0] }}/{{ m.lost[1] }}{% if m.by %} · {{ m.by[0][0] }}{% endif %}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% if not h.must %}<span class="muted">nothing stopped in a game you got through</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   <details class="note"><summary>reading these numbers</summary>
     <b>Their cards:</b> +18 means that, among games where they played the card, you won 18
     points more often when it was stopped than when it resolved. {% if e.first %}Turn 2 is their
