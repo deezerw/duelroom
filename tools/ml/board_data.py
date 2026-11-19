@@ -307,7 +307,7 @@ def recheck(workers=None):
                 lost.append(int(bool(k["solution"]) and game._winner(k["solution"]) == 1))
                 x = kill_detail(k, d["prefix"], v, lost[-1], None)
                 if x.get("line"):
-                    x["line"] = shutil.copy(x["line"], keep / f"kill16-h{v}{Path(x['line']).suffix}")
+                    x["line"] = str(shutil.copy(x["line"], keep / f"kill16-h{v}{Path(x['line']).suffix}"))
                 detail.append(x)
                 if not lost[-1]:
                     break
