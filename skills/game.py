@@ -84,6 +84,12 @@ OTK_MS = 20_000      # the enemy's turn-2 "can they just kill you" search
 # 4 / 8 / 16x, 0 flips from 8x to 16x and seeds agreeing 100% from 8x. At
 # 1x the games undersold every going-second hand. User chose 8x 2026-11-19.
 BREAK_X = 8
+# Going first, the enemy's non-kill turn 2 builds its trained board since this
+# moment (UTC). Older going-first games in a section aimed it at the one payoff
+# target: `run` refuses to add new games beside them until they are relabelled
+# (as endgame-t1 / brk1x were going second) -- pooled, the two would be one
+# number measuring two enemies.
+FIRST_METHOD_SINCE = "2026-11-19T15:45:00"
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -557,12 +563,16 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
 
 
 def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
-          otk_ms=OTK_MS, defences=None):
+          otk_ms=OTK_MS, defences=None, targets=None):
     """The enemy's turn into your board. Returns {lost, start, prefix, board,
     reached, defence}; `lost` means they found lethal against EVERY defence
     in `defences` (default `DEFENCES`); otherwise the defence that kept the
     most LP plays the rest of their turn. If the duel ended on their turn
-    the result is only {lost, won, line}."""
+    the result is only {lost, won, line}.
+
+    `targets`: the board the enemy builds when it cannot kill (its trained
+    goal for this hand, `trainer.enemy_goal`); default `enemy_target`. The
+    kill checks are --goal-win and ignore it."""
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
@@ -586,7 +596,11 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
         if best is None:
             return {"lost": True, "line": first_kill, "defence": None}
         chosen = best[1]
-    r = _solve(prefix, base + defence_args(our_respond, chosen),
+    build = base
+    if targets:
+        at = base.index("--target")
+        build = base[:at] + base[at + 2:] + [a for t in targets for a in ("--target", t)]
+    r = _solve(prefix, build + defence_args(our_respond, chosen),
                scratch, "t2", ms, seed)
     # No line at all: the enemy passes its turn from the root.
     src = r["solution"] or r["approach"] or prefix
@@ -889,18 +903,25 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     ours_hand = respond_codes(deck_path, cards, extra=ours_extra)
     seeds = [ENEMY_SEED0 + k for k in range(enemy_hands)]
     first = int(bool(first))
-    # Going second: each enemy hand plays toward its own trained goal where
-    # the trainer has one (`train <enemy> --vs <deck>`), else enemy_target.
-    trained = {}
-    if not first:
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp:
-            trained = {e: g for e in seeds if (g := trainer.enemy_goal(
-                conn, enemy_deck, deck_path, e, with_hand=True,
-                hand=enemy_hand(Path(deck_path), enemy_deck, e, tmp)))}
-    if not first:
-        say(f"enemy turn 1: {len(trained)}/{len(seeds)} hand(s) on trained goals"
-            + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))
+    # Each enemy hand plays toward its own trained goal where the trainer has
+    # one (`train <enemy> --vs <deck>`), else enemy_target: its turn 1 going
+    # second, the board it builds on turn 2 when it cannot kill going first
+    # (the same 5 cards: check_shared_enemy_hands).
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        trained = {e: g for e in seeds if (g := trainer.enemy_goal(
+            conn, enemy_deck, deck_path, e, with_hand=True,
+            hand=enemy_hand(Path(deck_path), enemy_deck, e, tmp)))}
+    if first and trained:
+        old = conn.execute(
+            "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=1 "
+            "AND device=? AND created < ?", (dh, enemy_name, device, FIRST_METHOD_SINCE)).fetchone()[0]
+        if old:
+            raise RuntimeError(
+                f"{old} going-first game(s) vs {enemy_name} on {device} predate the trained "
+                f"enemy turn 2 (FIRST_METHOD_SINCE): relabel them first (STAGE15)")
+    say(f"enemy turn {2 if first else 1}: {len(trained)}/{len(seeds)} hand(s) on trained goals"
+        + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))
     root = games_dir(name, enemy_name, first, device)
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
@@ -1005,8 +1026,10 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             scratch.mkdir(parents=True, exist_ok=True)
             seed = eseed * 100 + k
             ours = set(json.loads(t1["pieces"])) | set(ours_hand)
+            tg = trained.get(eseed)
             t2 = turn2(t1["start"], t1["prefix"], enemy_target, ours,
-                       scratch, ms, seed)
+                       scratch, ms, seed,
+                       targets=trainer.split_goal(tg[1])[0] if tg else None)
             if t2["lost"]:
                 out = {"outcome": "lost_t2", "line": t2.get("line")}
             elif t2.get("won"):  # they lost on their own turn (costs, burn)

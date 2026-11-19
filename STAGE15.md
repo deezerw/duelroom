@@ -82,3 +82,8 @@ deck makes dies on turn 2 -- the games' going-first numbers (1x kill check: 690 
 turn 2) are far too kind. Board picking cannot fix that (nothing to pick); the levers are the
 deck (side/main) and the kill-check budget in the games (Monday: the 32x plateau).
 /games has "What you must stop, by their hand" (stops.by_enemy_hand).
+**2026-11-19:** going first, the enemy's non-kill turn 2 builds toward its trained goal
+(game.turn2 `targets`), not Endgame Problem alone. game.run refuses to add going-first games
+beside ones older than game.FIRST_METHOD_SINCE: relabel the old going-first games (with the
+kill-budget change, after Monday's 32x plateau -- use_timing and Monday's queue read their
+kill lines in place until then).

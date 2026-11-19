@@ -6392,3 +6392,28 @@ def test_measured_timing_pairs_fire_and_hold_at_the_same_window(tmp_path):
     assert (r["piece"], r["trigger"], r["n"]) == (5, 9, 2)
     assert (r["fired"], r["held"], r["gain"]) == (0.5, 1.0, 0.5)
     assert m["level"] == 8
+
+
+def test_turn2_builds_toward_the_trained_goal_when_it_cannot_kill(tmp_path, monkeypatch):
+    """Going first, the enemy's turn 2 when it does not kill used to aim at
+    the one payoff target (Endgame Problem) for every hand; with `targets`
+    it asks for its trained board instead."""
+    from skills import game
+
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def solve(root, args, scratch, label, ms, seed):
+        seen.append((label, [args[i + 1] for i, a in enumerate(args) if a == "--target"]))
+        raise Stop
+    monkeypatch.setattr(game, "_solve", solve)
+    with pytest.raises(Stop):
+        game.turn2("s.yrpX", "p.yrpX", "12845564@szone", [], tmp_path, 1000, 1,
+                   otk_ms=0, targets=["50284408@szone", "40366667@szone:fd"])
+    assert seen == [("t2", ["50284408@szone", "40366667@szone:fd"])]
+    seen.clear()
+    with pytest.raises(Stop):
+        game.turn2("s.yrpX", "p.yrpX", "12845564@szone", [], tmp_path, 1000, 1, otk_ms=0)
+    assert seen == [("t2", ["12845564@szone"])]
