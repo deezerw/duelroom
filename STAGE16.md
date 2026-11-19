@@ -77,3 +77,9 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
 - **2026-11-19, step 2 built:** `tools/ml/bc_train.py` (turn player only, repeats dropped,
   held out by deck+hand). Smoke test, 60 lines / 2 epochs: held-out 43% vs 32% uniform. The
   full run is first in duelpc's 3 AM queue (2026-11-20, tools/duelpc/day.sh) -> results/ml/bc/.
+- **2026-11-19, step 3 groundwork:** Python stepping speed on the server (one core, niced,
+  beside a games job): replaying a line 5,684 decisions/s; snapshot + restore + 30 random
+  steps 4,853 decisions/s (6.2 ms per rollout). The C++ solver logs ~11k states/s on 2 threads:
+  same order. AlphaZero-style MCTS expands one node per simulation (value net, no rollout to
+  the end): 800 simulations a decision ~0.15 s of engine per decision + batched net calls, so
+  arm (a) is viable; arm (b) (net prior inside the C++ NRPA) stays the faster-to-adopt option.
