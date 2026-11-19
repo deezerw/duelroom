@@ -411,6 +411,7 @@ stage is complete and verified.
 13. `STAGE13.md` — Side cards: paired in/out swaps on the games harness, going first and second, with intervals (replaces the broken `optimizer.side_plan`)
 14. `STAGE14.md` — A searched defender: best replies on the attacker's line, then the attacker re-plans (scripts proved readable)
 15. `STAGE15.md` — Turn 1 that adapts to disruption: several goals asked, the board with the most live interruptions kept, free cards played
+16. `STAGE16.md` — An AlphaZero-style player: imitation from our solver lines, the net as a search prior, a value net, then self-play (on ygorl's nets)
 
 **Direction (user, 2026-11-19):** make the AI as close to perfect as compute allows on BOTH
 sides -- the enemy must play like the user's real opponents ("extremely good and smart") --
