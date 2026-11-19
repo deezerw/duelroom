@@ -952,7 +952,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
         f"{ms // 1000} s per search"
         f"{f' ({OTK_MS * OTK_X // 1000} s a kill check)' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
-        f"target {enemy_target}, on {device} "
+        f"enemy target {f'trained per hand ({len(trained)}/{len(seeds)})' if trained else enemy_target}, "
+        f"on {device} "
         f"({workers} at once)")
 
     def t1_for(row, eseed):
