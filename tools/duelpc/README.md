@@ -77,3 +77,9 @@ stops at the disk question.
   plateau kill 32x, use_timing, board data -- each resumable) and at HHMM stops and
   powers it OFF (never on at night: it is loud). Scheduled with
   `sudo systemd-run --uid=deezer --on-calendar="<date> 08:30" tools/duelpc/day.sh 2100`.
+- **RGB off in Linux** (the lights bother the user most): OpenRGB 1.1 AppImage extracted in
+  `~/openrgb/squashfs-root` on the PC (Codeberg release; the .deb wants a forked hidapi);
+  `/usr/local/bin/rgb-off.sh` + `rgb-off.service` set every device black at boot (motherboard
+  RGB Fusion 2 = static, HyperX keyboard and Razer mouse = direct; none has an "off" mode).
+  Found: B650 AORUS ELITE AX V2, HyperX Alloy Origins Core, Razer DeathAdder V2 X. No RGB RAM
+  or GPU seen. Lights while the PC is OFF (standby glow) are a BIOS setting, not software.
