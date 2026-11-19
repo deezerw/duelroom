@@ -87,6 +87,21 @@ def _banlist_note(c):
                       for d, bad in note["decks"].items()}}
 
 
+@bp.route("/duelpc/boot")
+def duelpc_boot():
+    """No login: the PC asks this while it boots (tools/duelpc/boot-choice.sh).
+    Home network only; says only "linux" (the server woke it) or "windows"."""
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        abort(403)
+    if not (ip.is_private or ip.is_loopback):
+        abort(403)
+    return remote.boot_choice("duelpc"), 200, {"Content-Type": "text/plain"}
+
+
 @bp.route("/banlist/ack", methods=["POST"])
 @login_required
 def banlist_ack():

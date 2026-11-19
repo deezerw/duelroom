@@ -1294,3 +1294,14 @@ def test_new_banlist_banner_shows_and_dismisses(client, monkeypatch):
     assert b"New TCG banlist: 2026.10 TCG" in r.data and b"3x Ash Blossom (max 1)" in r.data
     client.post("/banlist/ack")
     assert acked
+
+
+def test_duelpc_boot_answers_the_home_network_only(client, monkeypatch):
+    """/duelpc/boot needs no login (the PC asks while booting) but answers
+    private addresses only, with nothing but linux/windows."""
+    from skills import remote
+    monkeypatch.setattr(remote, "boot_choice", lambda name: "linux")
+    r = client.get("/duelpc/boot", environ_base={"REMOTE_ADDR": "10.0.0.150"})
+    assert r.status_code == 200 and r.get_data(as_text=True) == "linux"
+    r = client.get("/duelpc/boot", environ_base={"REMOTE_ADDR": "8.8.8.8"})
+    assert r.status_code == 403

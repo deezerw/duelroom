@@ -155,8 +155,45 @@ def reachable(dev, timeout=2.0):
     return bool(ok)
 
 
+# Who turned the PC on? The firmware does not tell GRUB, so the server says:
+# every wake it sends is noted here, and the PC asks on boot (`boot_choice`,
+# served at /duelpc/boot). A boot nobody here asked for is the user's power
+# button: the PC goes straight on to Windows (tools/duelpc/boot-choice.sh).
+BOOT_WINDOW_S = 600
+
+
+def _wake_note(name):
+    return engine.ROOT / "data" / f"wake-{name}.json"
+
+
+def note_wake(name):
+    """Record that the server wants `name` up in Linux (a wake, or a request)."""
+    import json
+    f = _wake_note(name)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"at": time.time()}))
+
+
+def boot_choice(name, now=None, consume=True):
+    """"linux" if the server asked for `name` within BOOT_WINDOW_S, else
+    "windows". `consume`: the answer is given once (the next unrequested boot
+    -- the user's -- is Windows again)."""
+    import json
+    f = _wake_note(name)
+    try:
+        at = json.loads(f.read_text())["at"]
+    except (OSError, ValueError, KeyError):
+        return "windows"
+    if (now or time.time()) - at > BOOT_WINDOW_S:
+        return "windows"
+    if consume:
+        f.unlink(missing_ok=True)
+    return "linux"
+
+
 def wake(dev):
     """Send the Wake-on-LAN magic packet (broadcast, ports 9 and 7)."""
+    note_wake(dev.name)
     pkt = b"\xff" * 6 + bytes.fromhex(dev.mac.replace(":", "")) * 16
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

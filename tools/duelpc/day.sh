@@ -9,6 +9,13 @@ export DUELROOM_DEVICE=duelpc
 echo "=== $(date) day starts, stop at $STOP ===" >> $LOG
 venv/bin/python -c "from skills import remote; remote.ensure_up(remote.get('duelpc'))" >> $LOG 2>&1 \
   || { echo "duelpc did not come up (left on in Windows?): nothing run" >> $LOG; exit 0; }
+# Power button -> Windows, Wake-on-LAN -> Linux (tools/duelpc/boot-choice.sh): installed
+# (idempotent) on every day run; it acts from the NEXT boot on.
+rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@duelpc.local:/tmp/ \
+  && ssh deezer@duelpc.local 'sudo -n install -m 755 /tmp/boot-choice.sh /usr/local/bin/boot-choice.sh \
+       && sudo -n install -m 644 /tmp/boot-choice.service /etc/systemd/system/boot-choice.service \
+       && sudo -n systemctl daemon-reload && sudo -n systemctl enable boot-choice.service' >> $LOG 2>&1 \
+  && echo "=== $(date) boot-choice installed ===" >> $LOG
 (
   # Stage 16 step 2: imitation training on the PC's GPU (it runs there, in ~/duelroom-ml)
   if [ -f results/ml/demos/demos.jsonl ] && [ ! -f results/ml/bc/policy.pt ]; then

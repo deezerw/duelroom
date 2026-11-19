@@ -6549,3 +6549,19 @@ def test_a_segfaulted_solve_is_rerun_once(tmp_path, monkeypatch):
     codes[:] = [3]
     with pytest.raises(RuntimeError, match="exited 3"):
         game._solve(tmp_path / "x.yrpX", [], tmp_path, "t3", 1000, 1)
+
+
+def test_boot_choice_linux_only_right_after_the_server_woke_it(tmp_path, monkeypatch):
+    """The PC asks on boot: Linux only if the server woke it within the
+    window (once), otherwise it was the power button -> Windows."""
+    from skills import remote
+
+    monkeypatch.setattr(remote.engine, "ROOT", tmp_path)
+    assert remote.boot_choice("pc") == "windows"                  # never woken
+    remote.note_wake("pc")
+    assert remote.boot_choice("pc", consume=False) == "linux"
+    assert remote.boot_choice("pc") == "linux"                    # consumed
+    assert remote.boot_choice("pc") == "windows"
+    remote.note_wake("pc")
+    import time
+    assert remote.boot_choice("pc", now=time.time() + remote.BOOT_WINDOW_S + 1) == "windows"

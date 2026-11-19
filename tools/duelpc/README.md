@@ -83,3 +83,9 @@ stops at the disk question.
   RGB Fusion 2 = static, HyperX keyboard and Razer mouse = direct; none has an "off" mode).
   Found: B650 AORUS ELITE AX V2, HyperX Alloy Origins Core, Razer DeathAdder V2 X. No RGB RAM
   or GPU seen. Lights while the PC is OFF (standby glow) are a BIOS setting, not software.
+- **Power button -> Windows, network wake -> Linux** (user, 2026-11-19). GRUB still defaults
+  to Linux; `boot-choice.service` asks the server (`/duelpc/boot`, home network only) whether
+  it sent the wake (`remote.note_wake`, every `remote.wake`, 10-minute window, answered once).
+  "linux" -> stay; anything else -> `grub-reboot` Windows + reboot (~30-60 s detour, screens
+  off). To boot Linux on purpose: `venv/bin/python -c "from skills import remote;
+  remote.note_wake('duelpc')"` on the server first. Installed by day.sh on each run.
