@@ -432,7 +432,14 @@ budgets and searched defences come before any side-card comparison.
   confounded correlational read -- never shown.
 - `tools/experiments/searched_defender.py gbrk`: the enemy defends our break with a searched
   defence on the games' positions.
-- duelpc: never at night (loud); Mon-Wed usually free; Linux keeps its monitors off (OLED).
+- duelpc: never at night (loud) unless the user says so (trial night 2026-11-20 03:00-12:00);
+  Mon-Wed usually free; Linux keeps its monitors off (OLED) and its RGB off (OpenRGB).
+- Site (user: "a lot of useless pages", mobile + PC): the menu is decks / train / games / jobs;
+  report, handtraps, threats, drill are off it (code kept). /games folds its analysis blocks
+  and puts older-settings sections (OLD_SECTIONS in web/views.py) in labelled folds.
+- Tests run on a SNAPSHOT of the database (`DUELROOM_DB`, tests/conftest.py) as they run on
+  pinned deck copies: the web tests press job buttons.
+- `game._solve` re-runs a SIGSEGV'd search once (CRASH_RETRIES): 1.3% of NRPA-level-3 searches.
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
