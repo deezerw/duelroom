@@ -6324,3 +6324,22 @@ def test_solve_stats_reads_the_effort_of_a_kill_check(tmp_path):
     log.write_text("  stop-on-win 4: no win in the rollouts\n")
     assert game.solve_stats(log) == {"first_win_s": None, "wins": 0, "states": 0,
                                      "rollout_s": None, "lines": 0}
+
+
+def test_enemy_goal_serves_a_side_variant_with_the_same_hand(tmp_path, monkeypatch):
+    """A side variant is dealt the same enemy hands as its deck; the goal
+    the enemy trained against the deck serves it -- but only for the same
+    hand, and without `hand` only the variant's own pool counts."""
+    from skills import db, game, trainer
+    from skills.engine import DECKS
+
+    monkeypatch.setattr(game, "enemy_hand", lambda ours, enemy, seed, scratch: [seed, 7])
+    conn = db.connect(tmp_path / "t.db")
+    e, us, other = DECKS / "Angelechy-Meta.ydk", DECKS / "imported.ydk", DECKS / "branded.ydk"
+    dh = trainer.ensure_enemy_pool(conn, e, "Angelechy-Meta", us, 2)
+    with conn:
+        trainer._set_best(conn, dh, 1, [0, 3, 2, 1, 0, -9], ["9@mzone"], {}, 1, "trainer")
+    seed = game.ENEMY_SEED0 + 1
+    assert trainer.enemy_goal(conn, e, other, seed) is None
+    assert trainer.enemy_goal(conn, e, other, seed, hand=[7, seed]) == ["9@mzone"]
+    assert trainer.enemy_goal(conn, e, other, seed, hand=[8, seed]) is None

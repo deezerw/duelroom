@@ -886,9 +886,13 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     first = int(bool(first))
     # Going second: each enemy hand plays toward its own trained goal where
     # the trainer has one (`train <enemy> --vs <deck>`), else enemy_target.
-    trained = {} if first else {
-        e: g for e in seeds
-        if (g := trainer.enemy_goal(conn, enemy_deck, deck_path, e, with_hand=True))}
+    trained = {}
+    if not first:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            trained = {e: g for e in seeds if (g := trainer.enemy_goal(
+                conn, enemy_deck, deck_path, e, with_hand=True,
+                hand=enemy_hand(Path(deck_path), enemy_deck, e, tmp)))}
     if not first:
         say(f"enemy turn 1: {len(trained)}/{len(seeds)} hand(s) on trained goals"
             + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))

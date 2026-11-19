@@ -623,19 +623,32 @@ def ensure_enemy_pool(conn, deck_path, name, vs_path, hands):
     return dh
 
 
-def enemy_goal(conn, enemy_path, vs_path, enemy_seed, with_hand=False):
+def enemy_goal(conn, enemy_path, vs_path, enemy_seed, with_hand=False, hand=None):
     """The trained goal of the enemy's hand for `enemy_seed`, or None;
-    `with_hand`: (hand, goal)."""
+    `with_hand`: (hand, goal).
+
+    `hand`: the hand the games deal it. Then a pool trained against ANOTHER
+    deck serves too when it holds that same hand: the enemy's training never
+    sees the deck it will face (a side variant of the deck is dealt the same
+    10 enemy hands, checked 2026-11-19), only its hand. The pool of
+    `vs_path` itself is preferred."""
     from . import game
 
-    r = conn.execute(
-        "SELECT hand, best_goal FROM trainer_hands WHERE deck_hash=? AND hand_index=?",
-        (enemy_key(deck_hash(enemy_path), deck_hash(vs_path)),
-         enemy_seed - game.ENEMY_SEED0)).fetchone()
-    if not r or not r["best_goal"]:
+    dh = deck_hash(enemy_path)
+    own = enemy_key(dh, deck_hash(vs_path))
+    rows = conn.execute(
+        "SELECT deck_hash, hand, best_goal FROM trainer_hands WHERE deck_hash LIKE ? "
+        "AND hand_index=? AND best_goal IS NOT NULL",
+        (f"{dh}:vs:%", enemy_seed - game.ENEMY_SEED0)).fetchall()
+    rows = sorted(rows, key=lambda r: r["deck_hash"] != own)
+    if hand is None:
+        rows = [r for r in rows if r["deck_hash"] == own]
+    else:
+        rows = [r for r in rows if sorted(json.loads(r["hand"])) == sorted(hand)]
+    if not rows:
         return None
-    goal = json.loads(r["best_goal"])
-    return (json.loads(r["hand"]), goal) if with_hand else goal
+    goal = json.loads(rows[0]["best_goal"])
+    return (json.loads(rows[0]["hand"]), goal) if with_hand else goal
 
 
 def starter_estimate(deck_path, k, skip=(), solve_ms=STARTER_MS, workers=None):

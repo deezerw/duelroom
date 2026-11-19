@@ -66,3 +66,7 @@ check (`kill`): first win's clock, wins, states searched, LP taken when not kill
 played, ours that fired, our stops, and the line (kept). Boards from 1203 on have it; earlier
 ones are lost/not only (their scratch is gone). The model step reads it once there is enough:
 the user's PC runs Mon-Wed and short daytime windows only (loud), the server nights.
+**2026-11-19:** side variants are dealt the same 10 enemy hands (checked), so
+trainer.enemy_goal(hand=...) serves them the goals trained against imported; their old
+going-second games are relabelled `endgame-t1` too (backup duelroom.db.bak-20261119b).
+Stored games get the rich kill label nightly (cron 05:40, tools/ml/game_kills.py).
