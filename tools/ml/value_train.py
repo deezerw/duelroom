@@ -82,6 +82,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--heldout", type=float, default=0.2)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--features", default="context+globals+history",
+                    help="trunk outputs fed to the head: context, or context+globals+history")
     args = ap.parse_args()
 
     import numpy as np
@@ -114,7 +116,8 @@ def main():
             continue
         with torch.no_grad():
             f = prior.net.features(collate([o], prior.device), None)
-        feats.append(f.context[0].float().cpu())
+        feats.append(torch.cat([getattr(f, k)[0].float().cpu()
+                                for k in args.features.split("+")]))
         keep.append(r)
         if (i + 1) % 200 == 0:
             print(f"  encoded {i + 1}/{len(rows)} ({time.time() - t0:.0f} s)", flush=True)
@@ -147,7 +150,8 @@ def main():
     yn = y.numpy()
     tem = te.numpy()
     lost = np.array([r["lost"] for r in keep])
-    report = {"otk_ms": otk, "positions": len(keep), "train": int(tr.sum()), "heldout": int(tem.sum())}
+    report = {"otk_ms": otk, "features": args.features, "positions": len(keep),
+              "train": int(tr.sum()), "heldout": int(tem.sum())}
     for name, m in (("train", ~tem), ("heldout", tem)):
         rep = {"pearson": float(pearsonr(pred[m], yn[m]).statistic) if m.sum() > 2 else None,
                "spearman": spearman(pred[m], yn[m])}
@@ -166,7 +170,8 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     torch.save({"head": head.state_dict(), "ctx_dim": X.shape[1], "otk_ms": otk,
-                "heldout_groups": sorted(held)}, out / "value_head.pt")
+                "features": args.features, "heldout_groups": sorted(held)}, out / "value_head.pt")
+    torch.save({"X": X, "y": y, "heldout": te, "lost": torch.tensor(lost)}, out / "features.pt")
     (out / "report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1), flush=True)
 

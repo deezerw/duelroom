@@ -124,3 +124,6 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   positions 0.18 / 0.62. A small edge, from outcomes alone. Games hold one board per
   situation, so the within-situation ranking needs board_data-style sets (200 at 80 s: 3
   held-out situations, too few). Next: train on Monday's 16x going-first games.
+  Same split, more trunk outputs (context+globals+history, now the default): head 0.42 / 0.65;
+  a ridge probe on those features (alpha 1) 0.43 / 0.69 -- the signal is in the trunk, the head
+  adds nothing at 1660 training positions.
