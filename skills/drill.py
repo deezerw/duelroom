@@ -155,6 +155,31 @@ def short_of_materials(board, cards, player=0):
     return out
 
 
+# Hand pieces that need an empty field: Mulcharmy Fuwalos / Purulia ("If you
+# control no cards (Quick Effect)"). Held by a player with a board they never
+# fire: 0 of 10 of our going-first boards, 0 of 100 of Angelechy's going second
+# (2026-11-20 audit: pieces counted vs fired on the opponent's turn).
+_NEEDS_EMPTY = re.compile(r"\bif you control no cards\b", re.I)
+_empty_cache = {}
+
+
+def needs_empty_field(code):
+    if code not in _empty_cache:
+        from . import card_db, db
+        row = card_db.resolve(db.connect(), code)
+        _empty_cache[code] = bool(row and _NEEDS_EMPTY.search(row["text"] or ""))
+    return _empty_cache[code]
+
+
+def dead_in_hand(board, cards, player=0):
+    """Hand pieces that cannot fire on this board: the ones needing an empty
+    field while that player controls a card."""
+    me = _me(board, player)
+    if not ((me.get("mzone") or []) or (me.get("szone") or [])):
+        return set()
+    return {cards.canonical(c) for c in me.get("hand") or [] if needs_empty_field(cards.canonical(c))}
+
+
 def _me(board, player=0):
     players = board.get("players") or []
     return players[player] if len(players) > player else {}

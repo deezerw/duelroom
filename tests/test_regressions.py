@@ -6763,3 +6763,21 @@ def test_interruption_traps_left_in_hand_are_set_before_passing(tmp_path):
     assert "free_sets(our_deck) if sets is None else sets" in inspect.getsource(game.turn1)
     assert "free_set=(1, set(free_sets(enemy_deck)))" in inspect.getsource(game.turn2)
     assert "free_set=(0, set(free_sets(enemy_deck)))" in inspect.getsource(game.enemy_turn1)
+
+
+def test_a_mulcharmy_held_with_a_board_is_not_a_piece():
+    """2026-11-20 audit: Mulcharmy Fuwalos / Purulia ("If you control no
+    cards") were counted on 10 of our going-first boards and ~100 of
+    Angelechy's, and fired 0 times: their holder had a board."""
+    from ygorl.engine.duel import default_cards
+    from skills import drill, game
+
+    cards = default_cards()
+    with_board = {"players": [{"hand": [42141493, 14558127],
+                               "mzone": [{"code": 29301450, "position": 1, "sequence": 0,
+                                          "overlay": []}]}, {}]}
+    empty = {"players": [{"hand": [42141493, 14558127]}, {}]}
+    assert drill.dead_in_hand(with_board, cards) == {42141493}
+    assert drill.dead_in_hand(empty, cards) == set()
+    assert 42141493 not in game._pieces(with_board, 0, cards)
+    assert 14558127 in game._pieces(with_board, 0, cards)
