@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     line          TEXT,                 -- replay of the deciding turn
     seconds       REAL,
     created       TEXT NOT NULL,
+    method        TEXT,                 -- game.METHOD of the code that played it (NULL: before 2026-11-20)
     PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
 );
 
@@ -351,7 +352,15 @@ def connect(path=None):
     _migrate_game_first(conn)
     _migrate_game_device(conn)
     conn.executescript(SCHEMA)
+    _add_column(conn, "game_results", "method", "TEXT")
     return conn
+
+
+def _add_column(conn, table, column, decl):
+    """Add a nullable column to a table created before it existed."""
+    if column not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+        with conn:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def _migrate_card_values(conn):

@@ -9,6 +9,7 @@ materialless Lars, Mulcharmies held with a board) -- or a real condition
     venv/bin/python tools/experiments/piece_audit.py [device-first] [device-second]
 """
 
+import sys
 from collections import Counter
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))

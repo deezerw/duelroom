@@ -6781,3 +6781,27 @@ def test_a_mulcharmy_held_with_a_board_is_not_a_piece():
     assert drill.dead_in_hand(empty, cards) == set()
     assert 42141493 not in game._pieces(with_board, 0, cards)
     assert 14558127 in game._pieces(with_board, 0, cards)
+
+
+def test_games_of_another_method_are_never_pooled(tmp_path):
+    """2026-11-20: an experiment started on old code kept writing games after
+    the cutoff. Every game now carries game.METHOD; another method, or an
+    unstamped row from before METHOD_SINCE, blocks the section."""
+    from skills import db, game
+
+    conn = db.connect(tmp_path / "t.db")
+    def add(run, created, method):
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, outcome, created, method) VALUES "
+                     "('d','E',0,0,1000,1,'pc',?,'win',?,?)", (run, created, method))
+    with conn:
+        add(0, "2099-01-01T00:00:00", None)               # unstamped, after the cutoff
+        add(1, "2099-01-01T00:00:01", game.METHOD)
+    assert game.other_method_games(conn, "d", "E", True, "pc") == 0
+    with conn:
+        add(2, "2099-01-01T00:00:02", "older")             # a stale process
+    assert game.other_method_games(conn, "d", "E", True, "pc") == 1
+    with conn:
+        add(3, "2000-01-01T00:00:00", None)                # unstamped, before the cutoff
+    assert game.other_method_games(conn, "d", "E", True, "pc") == 2
+    assert game.other_method_games(conn, "d", "E", False, "pc") == 0

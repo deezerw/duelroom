@@ -108,6 +108,12 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # use (`fewest_gifts`). Both sides: `run` refuses to add
 # games beside older ones -- relabel those first (tools/relabel_games.py,
 # label "gift"), so no section pools the two methods.
+# The version of how games are PLAYED, stamped on every stored game
+# (game_results.method). Bump it whenever a change alters play; `run` refuses
+# to add games beside any of another method (or, for rows from before the
+# stamp, created before METHOD_SINCE) -- so a process that started on older
+# code and is still writing can never pass as the new method.
+METHOD = "2026-11-20d"
 METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -954,6 +960,15 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
             "log": str(r["log"])}
 
 
+def other_method_games(conn, dh, enemy, first, device):
+    """Games of that section played by another method than METHOD (rows from
+    before the stamp: created before METHOD_SINCE)."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+        "AND device=? AND ((method IS NULL AND created < ?) OR method != ?)",
+        (dh, enemy, int(bool(first)), device, METHOD_SINCE[bool(first)], METHOD)).fetchone()[0]
+
+
 def free_sets(deck, cards=None, extra=()):
     """`deck`'s Traps whose scripts read as an interruption (Tearlaments
     Sulliek): a turn's line that ends with one in hand sets it before
@@ -1138,14 +1153,11 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             raise RuntimeError(
                 f"{old} going-first game(s) vs {enemy_name} on {device} predate the trained "
                 f"enemy turn 2 (FIRST_METHOD_SINCE): relabel them first (STAGE15)")
-    old = conn.execute(
-        "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
-        "AND device=? AND created < ?",
-        (dh, enemy_name, int(bool(first)), device, METHOD_SINCE[bool(first)])).fetchone()[0]
+    old = other_method_games(conn, dh, enemy_name, first, device)
     if old:
         raise RuntimeError(
             f"{old} going-{'first' if first else 'second'} game(s) vs {enemy_name} on {device} "
-            f"predate METHOD_SINCE (own-turn hand traps, gifts): relabel them first "
+            f"were played by another method than {METHOD} (game.METHOD): relabel them first "
             f"(tools/relabel_games.py ... gift)")
     say(f"enemy turn {2 if first else 1}: {len(trained)}/{len(seeds)} hand(s) on trained goals"
         + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))
@@ -1279,11 +1291,11 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             conn.execute(
                 "INSERT OR REPLACE INTO game_results (deck_hash, enemy, "
                 "hand_index, board, enemy_seed, first, device, run, outcome, damage, "
-                "enemy_reached, line, seconds, created) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "enemy_reached, line, seconds, created, method) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dh, enemy_name, row["hand_index"], 0, eseed, first, device, k,
                  out["outcome"], out.get("damage"), out.get("enemy_reached"),
-                 out.get("line"), round(time.time() - t0, 1), _now()))
+                 out.get("line"), round(time.time() - t0, 1), _now(), METHOD))
         if out["outcome"] != "no_t1":
             from . import impact, stops
             g = conn.execute(
