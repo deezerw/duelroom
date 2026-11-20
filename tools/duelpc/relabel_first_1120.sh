@@ -8,4 +8,7 @@ fi
 cp data/duelroom.db data/duelroom.db.bak-20261120b
 venv/bin/python tools/relabel_games.py imported Angelechy-Meta first gift --from duelpc --move-turn1 \
   >> results/ml/duelpc_day.log 2>&1
+# the side gate's blank variant (-3 Ash +3 vanilla), going first: its 480 games are old-method too
+venv/bin/python tools/relabel_games.py "imported~-3x14558127+3x43096270" Angelechy-Meta first gift --from duelpc \
+  --move-turn1 >> results/ml/duelpc_day.log 2>&1
 echo "=== $(date) going-first duelpc games relabelled 'gift' ===" >> results/ml/duelpc_day.log
