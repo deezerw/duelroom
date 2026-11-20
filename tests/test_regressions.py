@@ -6805,3 +6805,19 @@ def test_games_of_another_method_are_never_pooled(tmp_path):
         add(3, "2000-01-01T00:00:00", None)                # unstamped, before the cutoff
     assert game.other_method_games(conn, "d", "E", True, "pc") == 2
     assert game.other_method_games(conn, "d", "E", False, "pc") == 0
+
+
+def test_goals_drop_cards_the_deck_can_never_make_work(tmp_path):
+    """2026-11-20: hands 0/1/5/6 kept '7436169@szone:fd' (Trivikarma, no Visas
+    in the deck) as their goal's FIRST board piece, so turn 1 set a dead card
+    and `steer` aimed the lethal turn 3 / going-second break at setting it."""
+    from skills import game
+    from skills.deck import Deck
+
+    ydk = tmp_path / "d.ydk"
+    Deck(name="d", main=[7436169, 14558127, 35103106] * 10, extra=[], side=[]).write_ydk(ydk)
+    g = game.live_goal(["7436169@szone:fd", "35103106", "14558127@hand"], ydk)
+    assert g == ["35103106", "14558127@hand"] and game.steer(g, "x") == "35103106"
+    with_visas = tmp_path / "v.ydk"
+    Deck(name="v", main=[7436169, 56099748] * 10, extra=[], side=[]).write_ydk(with_visas)
+    assert game.live_goal(["7436169@szone:fd"], with_visas) == ["7436169@szone:fd"]

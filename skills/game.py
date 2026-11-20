@@ -113,7 +113,7 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-20d"
+METHOD = "2026-11-20e"
 METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -969,6 +969,22 @@ def other_method_games(conn, dh, enemy, first, device):
         (dh, enemy, int(bool(first)), device, METHOD_SINCE[bool(first)], METHOD)).fetchone()[0]
 
 
+def live_goal(goal, deck):
+    """The board targets of a trained goal (`trainer.split_goal`), less the
+    cards `deck` can never make work (`drill.never_live`: Trivikarma without
+    Visas). Hands 0, 1, 5, 6 of imported kept "7436169@szone:fd" in their
+    stored goals after the 2026-11-18 re-score, so our turn 1 still set a dead
+    Trivikarma (40 of 226 turn 1s) and -- worse -- it was the FIRST board
+    piece, so `steer` aimed their lethal turn 3 and going-second break at
+    setting it (traced 2026-11-20)."""
+    from .deck import Deck
+    from .drill import never_live
+
+    d = Deck.from_ydk(Path(deck))
+    dead = {str(c) for c in never_live([*d.main, *d.extra])}
+    return [t for t in trainer.split_goal(goal)[0] if str(t).split("@")[0] not in dead]
+
+
 def free_sets(deck, cards=None, extra=()):
     """`deck`'s Traps whose scripts read as an interruption (Tearlaments
     Sulliek): a turn's line that ends with one in hand sets it before
@@ -1186,7 +1202,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         start = trainer.hand_start(row.get("best_record"))
         if first:
             t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
-                       trainer.split_goal(json.loads(row["best_goal"]))[0],
+                       live_goal(json.loads(row["best_goal"]), deck_path),
                        eseed, scratch, ms, eseed,
                        theirs, start=start, sets=free_sets(deck_path, cards, ours_extra))
         else:
@@ -1255,7 +1271,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         if t1.get("ok") and not first:
             scratch = root / f"h{row['hand_index']}" / f"e{eseed}" / f"run{k}"
             scratch.mkdir(parents=True, exist_ok=True)
-            goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
+            goal = live_goal(json.loads(row["best_goal"]), deck_path)
             t2 = turn3(t1["start"], t1["prefix"], steer(goal, enemy_target),
                        set(theirs) | set(json.loads(t1["pieces"])),
                        scratch, ms * BREAK_X, eseed * 100 + k, player=1, turn=2,
@@ -1279,7 +1295,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                 out = {"outcome": "win", "damage": None, "line": t2["line"],
                        "enemy_reached": 0}
             else:
-                goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
+                goal = live_goal(json.loads(row["best_goal"]), deck_path)
                 enemy_pieces = _pieces(t2["board"], 1, cards)
                 t3 = turn3(t2["start"], t2["prefix"], steer(goal, enemy_target),
                            set(theirs) | set(enemy_pieces),
