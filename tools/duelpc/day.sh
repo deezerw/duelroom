@@ -37,6 +37,9 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
   # why is going first weak? does a bigger turn-1 search survive the converged kill check?
   venv/bin/python tools/experiments/t1_budget.py 48 --levels 1,4 >> results/experiments/t1_budget.log 2>&1
   echo "=== $(date) t1 budget test done ===" >> $LOG
+  # on OUR turn 1 the enemy has only hand traps: should they wait for a better target?
+  venv/bin/python tools/experiments/t1_enemy_script.py 40 >> results/experiments/t1_enemy_script.log 2>&1
+  echo "=== $(date) enemy turn-1 script test done ===" >> $LOG
   # the honest going-first baseline (16x kill check, trained enemy turn 2), run here and
   # not through the jobs queue: a queued duelpc job is retried with Wake-on-LAN, at night too
   venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
@@ -70,7 +73,7 @@ raise SystemExit(0 if n >= 10 else 1)" && ! ps -eo cmd | grep -q "[d]aemon.py tr
 work=$!
 while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60; done
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
-pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games .*--device duelpc|side_gate.py|t1_budget.py" 2>/dev/null
+pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games .*--device duelpc|side_gate.py|t1_budget.py|t1_enemy_script.py" 2>/dev/null
 sleep 10
 ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
