@@ -156,6 +156,7 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
     enemy_target = game.scenarios.target_for(ENEMY)
     theirs = game.enemy_respond_codes(enemy_deck, cards)
     ours_hand = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
+    our_sets = game.free_sets(deck, cards, trainer.prefs(conn, DECK)["interrupters"])
     hands = [dict(r) for r in conn.execute(
         "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands "
         "WHERE deck_hash=? AND best_goal IS NOT NULL ORDER BY hand_index", (dh,))]
@@ -184,10 +185,13 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
         scratch = OUT / "scratch" / tag
         seed = e * 100 + 60 + rep
         rec = {"hand": h["hand_index"], "eseed": e, "variant": name, "rep": rep,
-               "goal": goal, "device": dev.name, "t1_ms": T1_MS, "otk_ms": OTK_MS}
+               "goal": goal, "device": dev.name, "t1_ms": T1_MS, "otk_ms": OTK_MS,
+               "method": game.METHOD}
         try:
+            # as the games play turn 1: marked quick-plays / traps set before passing
             t1 = game.turn1(deck, enemy_deck, json.loads(h["hand"]), goal, e, scratch,
-                            T1_MS, seed, theirs, start=trainer.hand_start(h["best_record"]))
+                            T1_MS, seed, theirs, start=trainer.hand_start(h["best_record"]),
+                            sets=our_sets)
             if t1 is None:
                 rec["ok"] = 0
                 write(rec)
@@ -212,6 +216,7 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
                     k = game._solve(prefix, ["--start", start, "--root", prefix, "--no-ref",
                                              "--target", enemy_target, "--player", "1",
                                              "--turns", "2"]
+                                    + game.own_turn_args(enemy_deck)
                                     + game.defence_args(ours | set(ours_hand), v)
                                     + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
                                     scratch, f"otk-h{v}", OTK_MS, seed)
@@ -242,9 +247,9 @@ def main(enemy_hands=ENEMY_HANDS, limit=None):
     # position with one board says nothing within-hand).
     jobs = [(h, e, name, goal, rep)
             for e in seeds for h in hands
-            for name, goal in variants(trainer.split_goal(json.loads(h["best_goal"]))[0], pieces,
+            for name, goal in variants(game.live_goal(json.loads(h["best_goal"]), deck), pieces,
                                        free_targets(conn, json.loads(h["hand"]),
-                                                    trainer.split_goal(json.loads(h["best_goal"]))[0]))
+                                                    game.live_goal(json.loads(h["best_goal"]), deck)))
             for rep in range(REPS)]
     if limit:
         order = list(dict.fromkeys((h["hand_index"], e) for h, e, *_ in jobs))
@@ -278,6 +283,7 @@ def recheck(workers=None):
     conn = db.connect()
     cards = default_cards()
     deck = ROOT / "assets" / "decks" / f"{DECK}.ydk"
+    enemy_deck = ROOT / "assets" / "decks" / f"{ENEMY}.ydk"
     ours_hand = game.respond_codes(deck, cards, extra=trainer.prefs(conn, DECK)["interrupters"])
     enemy_target = game.scenarios.target_for(ENEMY)
     out_file = OUT / "rechecks.jsonl"
@@ -301,6 +307,7 @@ def recheck(workers=None):
                 k = game._solve(d["prefix"], ["--start", d["start"], "--root", d["prefix"],
                                               "--no-ref", "--target", enemy_target,
                                               "--player", "1", "--turns", "2"]
+                                + game.own_turn_args(enemy_deck)
                                 + game.defence_args(ours | set(ours_hand), v)
                                 + ["--goal-win", "--stop-on-win", str(game.STOP_ON_WIN)],
                                 scratch, f"otk16-h{v}", RECHECK_MS, seed)
