@@ -6754,6 +6754,12 @@ def test_interruption_traps_left_in_hand_are_set_before_passing(tmp_path):
          extra=[], side=[]).write_ydk(ydk)
     assert game.free_sets(ydk) == (10045474, 74920585)
     assert game.free_sets(None) == ()
-    assert "free_set=(0, set(free_sets(our_deck)))" in inspect.getsource(game.turn1)
+    # a Quick-Play the player counts as an interruption is set too (it works on
+    # their turn only from the field); a marked hand trap is not
+    ydk2 = tmp_path / "d2.ydk"
+    Deck(name="d2", main=[74920585, 48130397, 14558127] * 10, extra=[], side=[]).write_ydk(ydk2)
+    assert game.free_sets(ydk2) == (74920585,)
+    assert game.free_sets(ydk2, extra=[48130397, 14558127]) == (48130397, 74920585)
+    assert "free_sets(our_deck) if sets is None else sets" in inspect.getsource(game.turn1)
     assert "free_set=(1, set(free_sets(enemy_deck)))" in inspect.getsource(game.turn2)
     assert "free_set=(0, set(free_sets(enemy_deck)))" in inspect.getsource(game.enemy_turn1)

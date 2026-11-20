@@ -630,7 +630,7 @@ def ordered_deck(deck_path, order, hand, out_path, hand_first=True):
 # --- the three turns -----------------------------------------------------------
 
 def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
-          enemy_respond, start=None, extra=()):
+          enemy_respond, start=None, extra=(), sets=None):
     """Your turn 1 against the real enemy deck, closed at turn 2.
 
     `start`: the trainer's duel for the hand (`trainer.hand_start`: the
@@ -661,7 +661,8 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
     src = r["solution"] or r["approach"]
     if src is None:
         return None
-    pos = replay(src, until_turn=2, free_set=(0, set(free_sets(our_deck))))
+    pos = replay(src, until_turn=2,
+                 free_set=(0, set(free_sets(our_deck) if sets is None else sets)))
     start, prefix = breaking.split_position(Replay.from_yrp(src), pos.responses,
                                             scratch / "t1")
     return {"start": start, "prefix": prefix, "board": pos.board,
@@ -950,12 +951,15 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
             "log": str(r["log"])}
 
 
-def free_sets(deck, cards=None):
+def free_sets(deck, cards=None, extra=()):
     """`deck`'s Traps whose scripts read as an interruption (Tearlaments
     Sulliek): a turn's line that ends with one in hand sets it before
     passing (`replay(free_set=...)`). The search places only what its goal
     asks for, so our turn 1 kept Sulliek in hand in 8 of 240 going-first
-    games with free zones (2026-11-20); in hand a trap answers nothing."""
+    games with free zones (2026-11-20); in hand a trap answers nothing.
+    `extra`: cards the player counts as interruptions (trainer prefs) that
+    are Traps or Quick-Play Spells -- a Quick-Play works on the opponent's
+    turn only if set (Super Polymerization)."""
     from .deck import Deck
     if not deck:
         return ()
@@ -970,7 +974,12 @@ def free_sets(deck, cards=None):
         card = cards.get(c)
         if card and card.type & 0x4 and _interrupts(c, cards):     # TYPE_TRAP
             out.append(c)
-    return tuple(out)
+    for c in extra:
+        card = cards.get(int(c))
+        if (int(c) in main and int(c) not in out and card
+                and (card.type & 0x4 or card.type & 0x10000)):       # TRAP | QUICKPLAY
+            out.append(int(c))
+    return tuple(sorted(out))
 
 
 def gifts(board, player, deck_path):
@@ -1164,7 +1173,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                        trainer.split_goal(json.loads(row["best_goal"]))[0],
                        eseed, scratch, ms, eseed,
-                       theirs, start=start)
+                       theirs, start=start, sets=free_sets(deck_path, cards, ours_extra))
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,
