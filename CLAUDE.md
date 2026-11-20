@@ -465,7 +465,9 @@ budgets and searched defences come before any side-card comparison.
   first, often one handing us a monster (Angelechy Opposition onto our field; Bastion and Castellan
   then banish ITS cards): 37 of 138 multi-line turn 1s gave one when a line giving nothing was
   there; going second we won 75% with a gift vs 56% without. Turn 1 going second and their
-  turn-2 build going first now play the line giving the fewest, ties in solver order.
+  turn-2 build going first now play, of those lines, the one whose gifts the receiver can USE
+  least (`game.usable_gifts`: the engine's own main-phase activation list -- Seneschal's spent
+  trigger offers nothing, Bastion a banish), then the fewest gifts, then solver order.
 - `game.METHOD_SINCE`: `run` refuses to add games (either side) beside games from before both
   fixes. Those were relabelled device **`gift`** (Angelechy and Blue-Eyes going second; Angelechy
   going first at 21:10 by `tools/duelpc/relabel_first_1120.sh`).
