@@ -19,6 +19,8 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
 (
   # Stage 16 step 2: imitation training on the PC's GPU (it runs there, in ~/duelroom-ml)
   if [ -f results/ml/demos/demos.jsonl ] && [ ! -f results/ml/bc/policy.pt ]; then
+    # it uses one core then the GPU: board data fills the other 15 until it ends
+    (sleep 60; tools/duelpc/fill_while_bc.sh) &
     rsync -a tools/ml/bc_train.py deezer@duelpc.local:duelroom/tools/ml/ \
       && rsync -a results/ml/demos/demos.jsonl deezer@duelpc.local:duelroom/results/ml/demos/ \
       && ssh deezer@duelpc.local 'cd ~/duelroom && YGORL_THIRD_PARTY=$HOME/duelroom/vendor/third_party_merged \
