@@ -12,6 +12,7 @@ produced is slower than reading six lines of text.
 """
 
 import json
+import re
 from pathlib import Path
 
 from . import card_db, engine
@@ -115,6 +116,45 @@ TYPE_LINK = 0x4000000
 NEEDS_ON_FIELD = {7436169: 56099748}      # Trivikarma -> Visas Starfrost
 
 
+# Xyz interrupters whose Quick Effect costs detaching N materials: dead with
+# fewer on the board. Evolzar Lars ("detach 2 materials ... or just 1 if all
+# are Reptile and/or Dinosaur") ended 6 of the 20 going-first turn 1s that made
+# it with NO material -- spent on our own turn -- and was still counted as a
+# piece (2026-11-20, two traced losses where it never fired). Read from the
+# card text, smallest count named; Lars's Reptile case is not checked, so a
+# Lars on 1 material counts live.
+_DETACH = re.compile(r"\bdetach (\d+|one|two|three) materials?\b", re.I)
+_WORDS = {"one": 1, "two": 2, "three": 3}
+_detach_cache = {}
+
+
+def detach_need(code):
+    """Materials `code`'s detach cost needs (smallest named in its text), or 0."""
+    if code not in _detach_cache:
+        from . import card_db, db
+        row = card_db.resolve(db.connect(), code)
+        text = (row["text"] if row else "") or ""
+        ns = [int(_WORDS.get(m.lower(), m)) for m in _DETACH.findall(text)]
+        if ns and re.search(r"or just (\d+|one) material", text, re.I):
+            ns.append(1)
+        _detach_cache[code] = min(ns) if ns else 0
+    return _detach_cache[code]
+
+
+def short_of_materials(board, cards, player=0):
+    """Monsters on that player's field with fewer materials than their detach
+    cost needs (`detach_need`)."""
+    out = set()
+    for m in _me(board, player).get("mzone") or []:
+        if not isinstance(m, dict) or "overlay" not in m:
+            continue
+        code = cards.canonical(m["code"])
+        need = detach_need(code)
+        if need and len(m.get("overlay") or []) < need:
+            out.add(code)
+    return out
+
+
 def _me(board, player=0):
     players = board.get("players") or []
     return players[player] if len(players) > player else {}
@@ -135,10 +175,12 @@ def link_equips(board, cards, player=0):
 
 def dead_on_field(board, cards, player=0):
     """Codes whose interruption cannot fire from that player's field (face-up
-    or set) on this board: a bare Desirae, a Trivikarma without Visas."""
+    or set) on this board: a bare Desirae, a Trivikarma without Visas, an Xyz
+    short of the materials its detach cost needs."""
     dead = set() if link_equips(board, cards, player) else set(NEEDS_LINK_EQUIP)
     mzone = {cards.canonical(c["code"]) for c in _me(board, player).get("mzone") or []}
-    return dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
+    return (dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
+            | short_of_materials(board, cards, player))
 
 
 def never_live(deck_codes):

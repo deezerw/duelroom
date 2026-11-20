@@ -6719,3 +6719,21 @@ def test_every_searched_turn_runs_at_its_converged_budget():
     assert (game.OTK_X, game.BREAK_X, game.T3_X) == (16, 8, 4)
     run = inspect.getsource(game.run)
     assert "ms * T3_X" in run and "ms * BREAK_X" in run and "OTK_MS * OTK_X" in run
+
+
+def test_an_xyz_without_the_materials_for_its_detach_cost_is_not_a_piece():
+    """2026-11-20: Evolzar Lars ended 6 of 20 turn 1s with no material (spent
+    on our own turn) and was still counted as an interruption; two traced
+    losses had it on board, never firing."""
+    from ygorl.engine.duel import default_cards
+    from skills import drill
+
+    cards = default_cards()
+    assert drill.detach_need(35103106) == 1          # "2 ... or just 1 if Reptile"
+    assert drill.detach_need(14558127) == 0          # Ash: no detach cost
+    bare = {"players": [{"mzone": [{"code": 35103106, "overlay": []}]}, {}]}
+    fed = {"players": [{"mzone": [{"code": 35103106, "overlay": [1, 2]}]}, {}]}
+    assert 35103106 in drill.dead_on_field(bare, cards)
+    assert 35103106 not in drill.dead_on_field(fed, cards)
+    # a board summary without overlay info is not judged
+    assert drill.short_of_materials({"players": [{"mzone": [{"code": 35103106}]}]}, cards) == set()
