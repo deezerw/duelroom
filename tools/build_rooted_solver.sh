@@ -25,7 +25,10 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0008: the card reader's unknown-card note off the arena (a shared set's node
 # wiped by one worker's restore: SIGSEGV in 1.3% of NRPA-level-3 searches).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0008-card-reader-off-arena.patch" >&2)
-grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "$(nproc)" -I{} sh -c '{}'
+# 0009: --no-own-chain, the searcher never chains listed cards (its own-turn
+# Mulcharmy draws); the defender's copies of the same code are untouched.
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0009-no-own-chain.patch" >&2)
+grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
 "$dst/bin/combosolver" --help 2>&1 | grep -q -- "--root" || { echo "built binary lacks --root" >&2; exit 1; }

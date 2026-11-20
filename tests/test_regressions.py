@@ -6664,3 +6664,39 @@ def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch
     assert game.fewest_gifts(["a", "c"], "deck") == "a"
     assert game.fewest_gifts(["c"], "deck") == "c" and game.fewest_gifts([], "deck") is None
     assert game.fewest_gifts(["a", "b"], "deck", player=0, until_turn=3) == "b"
+
+
+def test_own_turn_dead_hand_traps_are_kept_for_the_opponents_turn(tmp_path):
+    """Patch 0009 (2026-11-20): a search may not spend a hand trap that only
+    punishes the opponent's plays THAT turn (Maxx "C"-style draws, Nibiru,
+    Droll) on its own turn: we fired Mulcharmy Fuwalos on our own turn 1 in
+    94 of 480 games. Ash, Veiler, Ghost Ogre and Bystial stay legal."""
+    from skills import game
+    from skills.deck import Deck
+
+    ydk = tmp_path / "d.ydk"
+    # Fuwalos, Purulia, Maxx "C", Droll | Ash, Ghost Ogre, Veiler, Bystial Magnamhut
+    Deck(name="d", main=[42141493, 84192580, 23434538, 94145021,
+                         14558127, 59438930, 97268402, 33854624] * 5,
+         extra=[], side=[]).write_ydk(ydk)
+    assert game.own_turn_dead(ydk) == [23434538, 42141493, 84192580, 94145021]
+    args = game.own_turn_args(ydk)
+    assert args[:2] == ["--no-own-chain", "23434538|42141493|84192580|94145021"]
+    assert args.count("--no-activate") == 4 and "42141493@hand" in args
+    assert game.own_turn_args(None) == []
+
+
+def test_every_turn_search_passes_its_own_deck_for_the_own_turn_rule():
+    """Each searching side carries its own list: ours on turn 1 / 3 and the
+    going-second break, theirs on their turn 1 / 2."""
+    import inspect
+    from skills import game
+
+    src = inspect.getsource(game)
+    assert "own_turn_args(our_deck)" in inspect.getsource(game.turn1)
+    assert "own_turn_args(our_deck)" in inspect.getsource(game.turn3)
+    assert "own_turn_args(enemy_deck)" in inspect.getsource(game.turn2)
+    assert "own_turn_args(enemy_deck)" in inspect.getsource(game.enemy_turn1)
+    run = inspect.getsource(game.run)
+    assert run.count("our_deck=deck_path") == 3 and "enemy_deck=enemy_deck" in run
+    assert "--no-own-chain" in src

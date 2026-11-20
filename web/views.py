@@ -549,7 +549,8 @@ OLD_SECTIONS = {
     "endgame-t1": "older settings: the enemy's turn 1 aimed at one card (Endgame Problem)",
     "brk1x": "older settings: your going-second break searched 1x (now 8x)",
     "kill1x": "older settings: their kill check searched 1x (now 16x), one-target turn 2",
-    "gift": "older settings: the enemy's turn 1 could hand you its monsters (Opposition onto "
+    "gift": "older settings (before 2026-11-20): searches could spend hand traps on their own "
+            "turn (Mulcharmy draws) and the enemy could hand you its monsters (Opposition onto "
             "your field) when a line giving nothing reached the same goal",
 }
 

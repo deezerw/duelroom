@@ -62,6 +62,7 @@ Fairness rules (STAGE8/9):
 """
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -96,6 +97,12 @@ OTK_X = 16
 # (as endgame-t1 / brk1x were going second) -- pooled, the two would be one
 # number measuring two enemies.
 FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
+# Games before this (UTC) were played before 2026-11-20's two fixes: hand
+# traps spent on their own turn (patch 0009, `own_turn_args`) and the enemy
+# handing us its monsters (`fewest_gifts`). Both sides: `run` refuses to add
+# games beside older ones -- relabel those first (tools/relabel_games.py,
+# label "gift"), so no section pools the two methods.
+METHOD_SINCE = "2026-11-20T21:15:00"
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -126,6 +133,54 @@ def self_target_args():
             if NO_SELF_TARGET else [])
 
 
+# Patch 0009: hand traps a search may not use on its OWN turn -- the ones
+# whose only effect punishes the opponent's plays THAT turn: "each time your
+# opponent Special Summons ... draw" (Maxx "C", every Mulcharmy), Nibiru
+# (their 5th summon), Droll (their search). A turn search scores its own
+# board, so spending one cost it nothing: we fired Mulcharmy Fuwalos on our
+# own turn 1 in 94 of 480 going-first games vs Angelechy, and Angelechy its
+# Fuwalos / Purulia on its turn 1 in 74 / 74 of 480 (traced 2026-11-20) --
+# each one a hand trap gone before the turn it was for. Ghost Ogre, Bystial,
+# Ash, Veiler and Imperm stay legal: each can matter on your own turn.
+OWN_TURN_DEAD = (23434538, 27204311, 94145021)   # Maxx "C", Nibiru, Droll
+_DRAW_ON_THEIR_SUMMON = re.compile(r"each time your opponent [^.]*summons[^.]*draw",
+                                   re.I)
+_own_turn_dead_cache = {}
+
+
+def own_turn_dead(deck):
+    """`deck`'s main-deck cards in the OWN_TURN_DEAD family (by code, or by a
+    card text that draws on the opponent's summons), sorted."""
+    from .deck import Deck
+
+    key = str(Path(deck).resolve())
+    if key not in _own_turn_dead_cache:
+        from . import card_db, db
+        conn = db.connect()
+        out = set()
+        for code in set(Deck.from_ydk(Path(deck)).main):
+            row = card_db.resolve(conn, code)
+            if code in OWN_TURN_DEAD or (row and _DRAW_ON_THEIR_SUMMON.search(
+                    row["text"] or "")):
+                out.add(code)
+        _own_turn_dead_cache[key] = sorted(out)
+    return _own_turn_dead_cache[key]
+
+
+def own_turn_args(deck):
+    """Flags for the side SEARCHING its own turn with `deck`: its
+    `own_turn_dead` cards are never chained (patch 0009, the searcher only:
+    the defender's copies of the same code still fire) nor activated from
+    the hand in an open state. [] without a deck."""
+    codes = own_turn_dead(deck) if deck else []
+    if not codes:
+        return []
+    args = ["--no-own-chain", "|".join(map(str, codes))]
+    for c in codes:
+        args += ["--no-activate", f"{c}@hand"]
+    return args
+
+
 def require():
     if not ROOTED_BIN.exists():
         raise RuntimeError(
@@ -141,6 +196,10 @@ def require():
         raise RuntimeError(
             f"the rooted solver at {ROOTED_BIN} predates patch 0007 (no "
             "--no-self-target); rebuild it with tools/build_rooted_solver.sh")
+    if OWN_TURN_DEAD and "--no-own-chain" not in helptext:
+        raise RuntimeError(
+            f"the rooted solver at {ROOTED_BIN} predates patch 0009 (no "
+            "--no-own-chain); rebuild it with tools/build_rooted_solver.sh")
 
 
 def _now():
@@ -575,7 +634,8 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
             "--hand", "|".join(map(str, hand))]
     for t in goal:
         args += ["--target", t]
-    args += defender_args(enemy_respond) + self_target_args() + list(extra)
+    args += (defender_args(enemy_respond) + self_target_args() + own_turn_args(our_deck)
+             + list(extra))
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -588,7 +648,7 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
 
 
 def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
-          otk_ms=OTK_MS, defences=None, targets=None, our_deck=None):
+          otk_ms=OTK_MS, defences=None, targets=None, our_deck=None, enemy_deck=None):
     """The enemy's turn into your board. Returns {lost, start, prefix, board,
     reached, defence}; `lost` means they found lethal against EVERY defence
     in `defences` (default `DEFENCES`); otherwise the defence that kept the
@@ -599,13 +659,14 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
     goal for this hand, `trainer.enemy_goal`); default `enemy_target`. The
     kill checks are --goal-win and ignore it. `our_deck`: your list, so that
     of the lines reaching that board the one giving you the fewest monsters
-    is played (`fewest_gifts`)."""
+    is played (`fewest_gifts`). `enemy_deck`: theirs, for `own_turn_args`."""
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
     defences = tuple(defences or DEFENCES) or (1,)
     base = ["--start", start, "--root", prefix, "--no-ref",
-            "--target", enemy_target, "--player", "1", "--turns", "2"]
+            "--target", enemy_target, "--player", "1", "--turns", "2"] \
+        + own_turn_args(enemy_deck)
     chosen, first_kill = defences[0], None
     if otk_ms:
         best = None
@@ -656,13 +717,14 @@ def steer(goal, fallback):
 
 def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
           player=0, turn=3, extra=(), binary=None, env_extra=None,
-          defences=None):
+          defences=None, our_deck=None):
     """Your lethal turn: turn 3 as player 0 going first, turn 2 as player 1
     going second. A win must beat EVERY defence in `defences` (default
     `DEFENCES`): the enemy picks the one that stops you. Returns {won,
     damage, line, defence} -- the line and damage of the first defence that
     held, or the winning line against the last one. `extra` / `binary`: more
-    solver flags / another build (A/B arms)."""
+    solver flags / another build (A/B arms). `our_deck`: yours, for
+    `own_turn_args`."""
     scratch = Path(scratch)
     defences = tuple(defences or DEFENCES) or (1,)
     out = None
@@ -671,7 +733,8 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
         args = ["--start", start, "--root", prefix, "--no-ref",
                 "--target", our_target, "--player", str(player), "--turns", str(turn),
                 "--goal-win", "--stop-on-win", str(STOP_ON_WIN)] \
-            + defence_args(enemy_respond, v) + self_target_args() + list(extra)
+            + defence_args(enemy_respond, v) + self_target_args() + own_turn_args(our_deck) \
+            + list(extra)
         r = _solve(prefix, args, scratch, label, ms, seed, binary=binary,
                    env_extra=env_extra)
         if r["solution"] and _winner(r["solution"]) == player:
@@ -846,7 +909,8 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
                                core_seed=start.get("core_seed"))
     args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
             "--hand", "|".join(map(str, ehand))] \
-        + [a for t in targets for a in ("--target", t)] + defender_args(our_respond)
+        + [a for t in targets for a in ("--target", t)] + defender_args(our_respond) \
+        + own_turn_args(enemy_deck)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = fewest_gifts(r.get("solutions") or [], our_deck) or r["approach"]
     if src is None:
@@ -976,6 +1040,15 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             raise RuntimeError(
                 f"{old} going-first game(s) vs {enemy_name} on {device} predate the trained "
                 f"enemy turn 2 (FIRST_METHOD_SINCE): relabel them first (STAGE15)")
+    old = conn.execute(
+        "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+        "AND device=? AND created < ?",
+        (dh, enemy_name, int(bool(first)), device, METHOD_SINCE)).fetchone()[0]
+    if old:
+        raise RuntimeError(
+            f"{old} going-{'first' if first else 'second'} game(s) vs {enemy_name} on {device} "
+            f"predate METHOD_SINCE (own-turn hand traps, gifts): relabel them first "
+            f"(tools/relabel_games.py ... gift)")
     say(f"enemy turn {2 if first else 1}: {len(trained)}/{len(seeds)} hand(s) on trained goals"
         + ("" if len(trained) == len(seeds) else f", the rest on {enemy_target}"))
     root = games_dir(name, enemy_name, first, device)
@@ -1075,7 +1148,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             goal = trainer.split_goal(json.loads(row["best_goal"]))[0]
             t2 = turn3(t1["start"], t1["prefix"], steer(goal, enemy_target),
                        set(theirs) | set(json.loads(t1["pieces"])),
-                       scratch, ms * BREAK_X, eseed * 100 + k, player=1, turn=2)
+                       scratch, ms * BREAK_X, eseed * 100 + k, player=1, turn=2,
+                       our_deck=deck_path)
             out = {"outcome": "win" if t2["won"] else "no_win",
                    "damage": t2["damage"], "line": t2["line"],
                    "enemy_reached": int(t1["reached"])}
@@ -1088,7 +1162,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             t2 = turn2(t1["start"], t1["prefix"], enemy_target, ours,
                        scratch, ms, seed, otk_ms=OTK_MS * OTK_X,
                        targets=trainer.split_goal(tg[1])[0] if tg else None,
-                       our_deck=deck_path)
+                       our_deck=deck_path, enemy_deck=enemy_deck)
             if t2["lost"]:
                 out = {"outcome": "lost_t2", "line": t2.get("line")}
             elif t2.get("won"):  # they lost on their own turn (costs, burn)
@@ -1099,7 +1173,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                 enemy_pieces = _pieces(t2["board"], 1, cards)
                 t3 = turn3(t2["start"], t2["prefix"], steer(goal, enemy_target),
                            set(theirs) | set(enemy_pieces),
-                           scratch, ms, seed)
+                           scratch, ms, seed, our_deck=deck_path)
                 out = {"outcome": "win" if t3["won"] else "no_win",
                        "damage": t3["damage"], "line": t3["line"],
                        "enemy_reached": int(t2["reached"])}
