@@ -91,6 +91,11 @@ BREAK_X = 8
 # 100% from 16x (2026-11-19). The user's opponents are "extremely good": the
 # enemy gets the converged budget.
 OTK_X = 16
+# Going first, your lethal turn 3 searches T3_X x the solve budget: the plateau
+# won 87 / 89 / 94% at 1 / 2 / 4x, 4 flips toward won and none back, seeds
+# agreeing 100% at 4x (2026-11-19, 62 runs). Our own turn was the one stage
+# left at 1x (2026-11-20). A won search stops early; only misses pay in full.
+T3_X = 4
 # Going first, the enemy's non-kill turn 2 builds its trained board since this
 # moment (UTC). Older going-first games in a section aimed it at the one payoff
 # target: `run` refuses to add new games beside them until they are relabelled
@@ -103,7 +108,8 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # use (`fewest_gifts`). Both sides: `run` refuses to add
 # games beside older ones -- relabel those first (tools/relabel_games.py,
 # label "gift"), so no section pools the two methods.
-METHOD_SINCE = "2026-11-20T21:49:00"
+METHOD_SINCE = {False: "2026-11-20T21:49:00",    # going second
+                True: "2026-11-20T21:53:00"}     # going first: + T3_X
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -1093,7 +1099,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     old = conn.execute(
         "SELECT COUNT(*) FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
         "AND device=? AND created < ?",
-        (dh, enemy_name, int(bool(first)), device, METHOD_SINCE)).fetchone()[0]
+        (dh, enemy_name, int(bool(first)), device, METHOD_SINCE[bool(first)])).fetchone()[0]
     if old:
         raise RuntimeError(
             f"{old} going-{'first' if first else 'second'} game(s) vs {enemy_name} on {device} "
@@ -1105,7 +1111,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
     say(f"{name} vs {enemy_name} going {'first' if first else 'second'}: "
         f"{len(rows)} hand(s) x {enemy_hands} enemy hand(s) x {runs} run(s), "
         f"{ms // 1000} s per search"
-        f"{f' ({OTK_MS * OTK_X // 1000} s a kill check)' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
+        f"{f' ({OTK_MS * OTK_X // 1000} s a kill check, {ms * T3_X // 1000} s your turn 3)' if first else f' ({ms * BREAK_X // 1000} s for the break)'}, "
         f"enemy target {f'trained per hand ({len(trained)}/{len(seeds)})' if trained else enemy_target}, "
         f"on {device} "
         f"({workers} at once)")
@@ -1223,7 +1229,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                 enemy_pieces = _pieces(t2["board"], 1, cards)
                 t3 = turn3(t2["start"], t2["prefix"], steer(goal, enemy_target),
                            set(theirs) | set(enemy_pieces),
-                           scratch, ms, seed, our_deck=deck_path)
+                           scratch, ms * T3_X, seed, our_deck=deck_path)
                 out = {"outcome": "win" if t3["won"] else "no_win",
                        "damage": t3["damage"], "line": t3["line"],
                        "enemy_reached": int(t2["reached"])}

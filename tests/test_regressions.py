@@ -6708,3 +6708,14 @@ def test_every_turn_search_passes_its_own_deck_for_the_own_turn_rule():
     run = inspect.getsource(game.run)
     assert run.count("our_deck=deck_path") == 3 and "enemy_deck=enemy_deck" in run
     assert "--no-own-chain" in src
+
+
+def test_every_searched_turn_runs_at_its_converged_budget():
+    """The plateau (STAGE11) converged their kill check at 16x, our break at
+    8x and our turn 3 at 4x (87/89/94% at 1/2/4x, seeds agreeing 100%)."""
+    import inspect
+    from skills import game
+
+    assert (game.OTK_X, game.BREAK_X, game.T3_X) == (16, 8, 4)
+    run = inspect.getsource(game.run)
+    assert "ms * T3_X" in run and "ms * BREAK_X" in run and "OTK_MS * OTK_X" in run
