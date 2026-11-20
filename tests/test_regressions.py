@@ -6659,11 +6659,18 @@ def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch
     monkeypatch.setattr(game, "replay", lambda s, until_turn=None: NS(board={"players": [
         {"mzone": fields[s] if until_turn == 3 else []},
         {"mzone": fields[s] if until_turn == 2 else []}]}))
+    usable = {}
+    monkeypatch.setattr(game, "usable_gifts", lambda s, p, d, t: usable.get(s, 0))
     assert game.fewest_gifts(["a", "b", "c"], "deck") == "b"       # our own card: no gift
     assert game.fewest_gifts(["a", "c", "d", "b"], "deck") == "d"
-    assert game.fewest_gifts(["a", "c"], "deck") == "a"
     assert game.fewest_gifts(["c"], "deck") == "c" and game.fewest_gifts([], "deck") is None
     assert game.fewest_gifts(["a", "b"], "deck", player=0, until_turn=3) == "b"
+    # a gift we cannot use (Seneschal: its trigger is spent) beats one we can
+    # (Bastion's banish), even beats fewer gifts
+    usable.update(a=1, c=0)
+    assert game.fewest_gifts(["a", "c"], "deck") == "c"
+    usable.update(a=0, c=0)
+    assert game.fewest_gifts(["c", "a"], "deck") == "a"          # then fewest gifts
 
 
 def test_own_turn_dead_hand_traps_are_kept_for_the_opponents_turn(tmp_path):

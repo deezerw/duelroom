@@ -102,7 +102,7 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # handing us its monsters (`fewest_gifts`). Both sides: `run` refuses to add
 # games beside older ones -- relabel those first (tools/relabel_games.py,
 # label "gift"), so no section pools the two methods.
-METHOD_SINCE = "2026-11-20T21:15:00"
+METHOD_SINCE = "2026-11-20T21:34:00"
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -940,21 +940,63 @@ def gifts(board, player, deck_path):
     return [c for c in codes if c and c not in mine]
 
 
+def usable_gifts(source, player, receiver_deck, until_turn):
+    """Of the `gifts` on `player`'s field when `until_turn` begins, the
+    activations they offer that player at its first main-phase prompt (the
+    engine's own list: monster-zone `activate` actions of gifted codes).
+    Angelechy Seneschal's effect is a summon trigger already spent; Bastion,
+    Castellan, Destrier, Shatranga, Enlisted each hand the receiver a banish."""
+    from ygorl.engine.branch import actions_for_response
+    from ygorl.engine.duel import DuelSession
+    from ygorl.engine.replay import Replay
+    from ygorl.solver.demo import MAX_CLOSING_STEPS, PASSIVE_KINDS, canonical_response
+
+    pos = replay(source, until_turn=until_turn)
+    given = set(gifts(pos.board, player, receiver_deck))
+    if not given or pos.winner is not None:
+        return 0
+    rep = Replay.from_yrp(Path(source))
+    session = DuelSession(rep.duel())
+    try:
+        for raw in pos.responses:
+            point = session.point
+            for idx in actions_for_response(point.state,
+                                            canonical_response(point.decision, raw)) or ():
+                session.act(idx)
+        for _ in range(MAX_CLOSING_STEPS):
+            point = session.point
+            if point is None or session.done:
+                return 0
+            kinds = [a.kind for a in point.actions]
+            if point.player == player and point.decision.name == "MSG_SELECT_IDLECMD":
+                return sum(1 for a in point.actions if a.kind == "activate" and a.card
+                           and a.card.code in given and a.card.loc.location & 0x4)
+            session.act(next((kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0))
+        return 0
+    finally:
+        session.close()
+
+
 def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
-    """The solution line that leaves the fewest monsters on the RECEIVER's
-    field at the end of the turn, ties in the solver's order (so a deck that
-    never gives monsters away plays exactly its first line). None if no lines.
+    """The solution line whose gifts the RECEIVER can use least (`usable_gifts`),
+    then the one leaving the fewest monsters on its field at the end of the
+    turn, ties in the solver's order (so a deck that never gives monsters away
+    plays exactly its first line). None if no lines.
 
     Every line reaches the same goal, but the search only scores its own
     board, so it gave the opponent whatever it liked: in 37 of 138 stored
     Angelechy turn 1s it handed us a monster (Bastion, Castellan: they banish
     ITS cards) when a line giving nothing was there (traced 2026-11-20; with
-    a monster given, we won 75% of games going second, without one 56%)."""
+    a monster given, we won 75% of games going second, without one 56%).
+    Where every line gives one (Opposition's cost), Bastion was still the
+    most given (8 of 19): a banish for us, where Seneschal gives nothing."""
     if len(solutions) < 2:
         return solutions[0] if solutions else None
     n = [len(gifts(replay(s, until_turn=until_turn).board, player, receiver_deck))
          for s in solutions]
-    return solutions[min(range(len(solutions)), key=lambda i: (n[i], i))]
+    use = [usable_gifts(s, player, receiver_deck, until_turn) if n[i] else 0
+           for i, s in enumerate(solutions)]
+    return solutions[min(range(len(solutions)), key=lambda i: (use[i], n[i], i))]
 
 
 # --- one matchup run -----------------------------------------------------------
