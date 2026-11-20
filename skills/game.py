@@ -218,7 +218,7 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
         raise RuntimeError(f"{label}: solver exited {r.returncode} (log {log})")
     sols = sorted(out.glob("solution_*.yrp"))
     appr = sorted(out.glob("best_approach*.yrp"))
-    return {"solution": sols[0] if sols else None,
+    return {"solution": sols[0] if sols else None, "solutions": sols,
             "approach": appr[0] if appr else None,
             "log": log, "rc": r.returncode}
 
@@ -588,7 +588,7 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
 
 
 def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
-          otk_ms=OTK_MS, defences=None, targets=None):
+          otk_ms=OTK_MS, defences=None, targets=None, our_deck=None):
     """The enemy's turn into your board. Returns {lost, start, prefix, board,
     reached, defence}; `lost` means they found lethal against EVERY defence
     in `defences` (default `DEFENCES`); otherwise the defence that kept the
@@ -597,7 +597,9 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
 
     `targets`: the board the enemy builds when it cannot kill (its trained
     goal for this hand, `trainer.enemy_goal`); default `enemy_target`. The
-    kill checks are --goal-win and ignore it."""
+    kill checks are --goal-win and ignore it. `our_deck`: your list, so that
+    of the lines reaching that board the one giving you the fewest monsters
+    is played (`fewest_gifts`)."""
     from ygorl.engine.replay import Replay
 
     scratch = Path(scratch)
@@ -628,7 +630,8 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
     r = _solve(prefix, build + defence_args(our_respond, chosen),
                scratch, "t2", ms, seed)
     # No line at all: the enemy passes its turn from the root.
-    src = r["solution"] or r["approach"] or prefix
+    src = (fewest_gifts(r.get("solutions") or [], our_deck, player=0, until_turn=3)
+           if our_deck else r["solution"]) or r["approach"] or prefix
     pos = replay(src, until_turn=3)
     if pos.winner is not None:   # e.g. their closing turn ended the duel
         return {"lost": pos.winner == 1, "won": pos.winner == 0,
@@ -845,7 +848,7 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
             "--hand", "|".join(map(str, ehand))] \
         + [a for t in targets for a in ("--target", t)] + defender_args(our_respond)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
-    src = r["solution"] or r["approach"]
+    src = fewest_gifts(r.get("solutions") or [], our_deck) or r["approach"]
     if src is None:
         return None
     dealt = replay(src, []).board
@@ -860,6 +863,34 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     return {"start": start, "prefix": prefix, "board": pos.board,
             "reached": r["solution"] is not None, "enemy_hand": ehand,
             "log": str(r["log"])}
+
+
+def gifts(board, player, deck_path):
+    """Monsters on `player`'s field that their deck does not run: given to
+    them by the other side (Angelechy Opposition summons one to YOUR zone)."""
+    from .impact import deck_codes
+
+    mine = deck_codes(deck_path)
+    mz = board["players"][player].get("mzone") or []
+    codes = (m.get("code") if isinstance(m, dict) else m for m in mz if m)
+    return [c for c in codes if c and c not in mine]
+
+
+def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
+    """The solution line that leaves the fewest monsters on the RECEIVER's
+    field at the end of the turn, ties in the solver's order (so a deck that
+    never gives monsters away plays exactly its first line). None if no lines.
+
+    Every line reaches the same goal, but the search only scores its own
+    board, so it gave the opponent whatever it liked: in 37 of 138 stored
+    Angelechy turn 1s it handed us a monster (Bastion, Castellan: they banish
+    ITS cards) when a line giving nothing was there (traced 2026-11-20; with
+    a monster given, we won 75% of games going second, without one 56%)."""
+    if len(solutions) < 2:
+        return solutions[0] if solutions else None
+    n = [len(gifts(replay(s, until_turn=until_turn).board, player, receiver_deck))
+         for s in solutions]
+    return solutions[min(range(len(solutions)), key=lambda i: (n[i], i))]
 
 
 # --- one matchup run -----------------------------------------------------------
@@ -1056,7 +1087,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             tg = trained.get(eseed)
             t2 = turn2(t1["start"], t1["prefix"], enemy_target, ours,
                        scratch, ms, seed, otk_ms=OTK_MS * OTK_X,
-                       targets=trainer.split_goal(tg[1])[0] if tg else None)
+                       targets=trainer.split_goal(tg[1])[0] if tg else None,
+                       our_deck=deck_path)
             if t2["lost"]:
                 out = {"outcome": "lost_t2", "line": t2.get("line")}
             elif t2.get("won"):  # they lost on their own turn (costs, burn)

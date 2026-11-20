@@ -6644,3 +6644,23 @@ def test_boot_choice_linux_only_right_after_the_server_woke_it(tmp_path, monkeyp
     remote.note_wake("pc")
     import time
     assert remote.boot_choice("pc", now=time.time() + remote.BOOT_WINDOW_S + 1) == "windows"
+
+
+def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch, tmp_path):
+    """User, 2026-11-20: Angelechy "is summoning Bastion to my field". Of
+    the lines reaching its goal the enemy now plays the one that leaves the
+    fewest of ITS monsters on our field; ties keep the solver's order."""
+    from types import SimpleNamespace as NS
+    from skills import game, impact
+
+    ours = {1, 2}
+    monkeypatch.setattr(impact, "deck_codes", lambda p: ours)
+    fields = {"a": [{"code": 9}], "b": [{"code": 1}], "c": [{"code": 9}, {"code": 8}], "d": []}
+    monkeypatch.setattr(game, "replay", lambda s, until_turn=None: NS(board={"players": [
+        {"mzone": fields[s] if until_turn == 3 else []},
+        {"mzone": fields[s] if until_turn == 2 else []}]}))
+    assert game.fewest_gifts(["a", "b", "c"], "deck") == "b"       # our own card: no gift
+    assert game.fewest_gifts(["a", "c", "d", "b"], "deck") == "d"
+    assert game.fewest_gifts(["a", "c"], "deck") == "a"
+    assert game.fewest_gifts(["c"], "deck") == "c" and game.fewest_gifts([], "deck") is None
+    assert game.fewest_gifts(["a", "b"], "deck", player=0, until_turn=3) == "b"
