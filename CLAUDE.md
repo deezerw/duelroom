@@ -153,6 +153,7 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/images.py       Local card-art cache (data/cardimg)
   │  skills/db.py           SQLite schema + connections
   │  skills/config.py       locals.toml -- the weights every ranking inherits
+  │  skills/banlist.py      Daily check of the upstream TCG list vs the engine's
   │
   ├─ the deck ──────────────────────────────────────────────────────────────
   │  skills/deck.py         .ydk parse/write, deck model, `Deck.validate`
@@ -174,12 +175,17 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/trainer.py      The deck trainer: replay a hand pool, keep best lines
   │  skills/game.py         Finish the game: turns 1-3 vs a meta deck, win rate
   │  skills/impact.py       Card impact: win rate when a card was used vs not
-  │  skills/stops.py        What you stopped of theirs, with what, and its worth
+  │  skills/stops.py        What you stopped of theirs, with what, how, and its worth
+  │  skills/timing.py       Best time to use: measured fire-vs-hold (`measured`)
+  │  skills/side.py         Side cards: paired in/out swaps on the games harness
+  │  skills/mcts.py         PUCT tree search on the engine (Stage 16)
+  │  skills/net_prior.py    A ygorl policy checkpoint as mcts.py's prior (duelpc, torch)
   │  skills/stats.py        Hypergeometric, Wilson CIs, seed pairing
   │
   └─ output ────────────────────────────────────────────────────────────────
      skills/report.py       One view of everything known about a deck
      skills/drill.py        Best lines out as EDOPro .yrpX replays
+     skills/watch.py        What is running now (the Jobs page's live panel)
 ```
 
 **There is no `skills/solver.py` and no `skills/scoring.py`.** Both were in this
