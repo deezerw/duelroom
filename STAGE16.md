@@ -107,3 +107,12 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   budgets. Now: 200 board_data positions at 80 s (99% lost, median +0.78) and 2000 old games at
   20 s (46% lost, median -0.44). The honest 16x going-first games (duelpc, running) become the
   main set; a value head is trained on it once there are enough.
+- **2026-11-20, step 2 done:** full BC run on duelpc (5 min GPU, 22 min building samples on one
+  core): 204k training / 37k held-out decisions (73 / 18 deck+hand groups). Held-out accuracy
+  57% vs 31% uniform (break 61% vs 32%, kill 54% vs 30%); still rising at epoch 8.
+- **2026-11-20, step 3(a) A/B built:** `tools/ml/prior_ab.py` -- the held-out split rebuilt
+  exactly (asserted), 403 kill lines from those groups, MCTS with uniform vs net prior from k
+  decisions out at equal simulations. First look (duelpc, 6 kills x 8/16 out, 800 sims):
+  uniform 9/12, net 8/12, the net 3-6x slower per search -- no help yet. The full run (40 kills,
+  4/8/16/30 out) is in the day run after training. If the net still does not help, the next
+  lever is the value head (step 4), or arm (b) (the prior inside the C++ NRPA).
