@@ -221,7 +221,7 @@ Checked against the source by `tools/check_docs.py`; every name below exists.
 | `gauntlet.py` | `DRAWS` (4), `DEFENCE_DRAWS` (3), `MEASURABLE` |
 | `config.py` | `LOCALS` — the path to `locals.toml` |
 | `trainer.py` | `HANDS` (24, the pool), `PER_HAND` (3 solves per hand per generation), `BIG_STACK` (3), `BIG_STACK_X` (2), `TRAIN_MS` (180 s per attempt; the page's "seconds per try"), `PLATEAU` (6) |
-| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV`, `DEFENDER` ("smart"), `DEFENCES` ((1, 2)), `OTK_X` (16), `BREAK_X` (8), `T3_X` (4), `METHOD_SINCE` |
+| `game.py` | `ROOTED_BIN`, `RUNS` (10), `ENEMY_HANDS` (3), `OTK_MS` (20 s), `NEAR_DUD_RATE` (0.10), `GAMES`, `STOP_ON_WIN` (4), `ARENA_ENV`, `DEFENDER` ("smart"), `DEFENCES` ((1, 2)), `OTK_X` (16), `BREAK_X` (8), `T3_X` (4), `METHOD` (bump on any change to play), `METHOD_SINCE` |
 
 Three of the old table's rows named constants that do not exist, and two named
 **files** that do not exist (see the architecture note above). In particular the card
