@@ -97,12 +97,13 @@ OTK_X = 16
 # (as endgame-t1 / brk1x were going second) -- pooled, the two would be one
 # number measuring two enemies.
 FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
-# Games before this (UTC) were played before 2026-11-20's two fixes: hand
-# traps spent on their own turn (patch 0009, `own_turn_args`) and the enemy
-# handing us its monsters (`fewest_gifts`). Both sides: `run` refuses to add
+# Games before this (UTC) were played before 2026-11-20's fixes: hand traps
+# spent on their own turn (patch 0009, `own_turn_args`), negates chained onto
+# their own link (--no-self-negate) and the enemy handing us monsters we can
+# use (`fewest_gifts`). Both sides: `run` refuses to add
 # games beside older ones -- relabel those first (tools/relabel_games.py,
 # label "gift"), so no section pools the two methods.
-METHOD_SINCE = "2026-11-20T21:34:00"
+METHOD_SINCE = "2026-11-20T21:49:00"
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -171,11 +172,18 @@ def own_turn_args(deck):
     """Flags for the side SEARCHING its own turn with `deck`: its
     `own_turn_dead` cards are never chained (patch 0009, the searcher only:
     the defender's copies of the same code still fire) nor activated from
-    the hand in an open state. [] without a deck."""
-    codes = own_turn_dead(deck) if deck else []
-    if not codes:
+    the hand in an open state; and none of its negates goes on its own chain
+    link (--no-self-negate). [] without a deck."""
+    if not deck:
         return []
-    args = ["--no-own-chain", "|".join(map(str, codes))]
+    # --no-self-negate (upstream discipline, never passed before 2026-11-20): no
+    # NEGATION effect of the searcher's deck on a chain link of its own. Going
+    # second our break chained Ash onto our OWN link in 15 of 480 games.
+    args = ["--no-self-negate"]
+    codes = own_turn_dead(deck)
+    if not codes:
+        return args
+    args += ["--no-own-chain", "|".join(map(str, codes))]
     for c in codes:
         args += ["--no-activate", f"{c}@hand"]
     return args
