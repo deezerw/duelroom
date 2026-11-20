@@ -304,9 +304,11 @@ _ANSWERS = {
     "hand": "negate it: from the hand nothing else reaches it",
     "GY": "negate it, or banish it from the GY before they use it",
     "monster on field": "negate it, or destroy / banish / bounce it before it activates",
-    # a spell/trap already on the chain resolves even if destroyed: only a negate
-    # stops that activation (removing a SET card first is the other way)
-    "spell/trap": "negate the activation: destroying it on the chain does not stop it",
+    # a card already on the chain resolves even if destroyed; one that STAYS in the
+    # zone (a continuous card, Angelechy's monsters played as Continuous Spells) can
+    # be removed before it is used
+    "spell/trap": ("negate it (destroying it once it is on the chain does not stop it); "
+                   "if it stays face-up there, destroy / banish / bounce it before it is used"),
     "summoned": "negate the summon, or destroy / banish / bounce it once it lands",
     "banished": "negate it",
     "deck": "negate it",
