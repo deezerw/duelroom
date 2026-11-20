@@ -432,7 +432,8 @@ budgets and searched defences come before any side-card comparison.
   confounded correlational read -- never shown.
 - `tools/experiments/searched_defender.py gbrk`: the enemy defends our break with a searched
   defence on the games' positions.
-- duelpc: never at night (loud) unless the user says so (trial night 2026-11-20 03:00-12:00);
+- duelpc: never at night (loud); the 2026-11-20 night trial was cancelled (case-fan RGB is on a
+  hub software cannot reach) -- no nights while the user is home;
   Mon-Wed usually free; Linux keeps its monitors off (OLED) and its RGB off (OpenRGB).
 - Site (user: "a lot of useless pages", mobile + PC): the menu is decks / train / games / jobs;
   report, handtraps, threats, drill are off it (code kept). /games folds its analysis blocks
@@ -444,6 +445,32 @@ budgets and searched defences come before any side-card comparison.
   wiped by that worker's next restore -> SIGSEGV in the other worker (8 of 631 NRPA-level-3
   searches, deterministic per position; found with an ASan build, 2026-11-19). Fixed with
   ArenaPause. `game._solve` still re-runs a SIGSEGV'd search once (CRASH_RETRIES) as a guard.
+
+**Added 2026-11-20** (user: "more effort into the ai smartness on not using cards"; Angelechy
+"is summoning bastion to my field"):
+- **Own-turn hand traps, patch 0009 `--no-own-chain`** (`game.own_turn_args`, every turn search
+  passes its own deck): a turn search scores only its board, so spending a hand trap cost it
+  nothing -- we fired Mulcharmy Fuwalos on our OWN turn 1 in 94/480 going-first games, Angelechy
+  its Fuwalos / Purulia on its turn 1 in 74 / 74 of 480 (and our Ash then went on those in 56 of
+  74 uses). The searcher may not use the Maxx "C"-style "draw on their summon" cards, Nibiru or
+  Droll on its own turn; unlike `--no-chain` the DEFENDER's copies of the same code still fire.
+  Ash / Veiler / Ghost Ogre / Bystial stay legal. Old binary: `combo-solver-rooted-pre0009`.
+- **Gifts** (`game.fewest_gifts`): of the up-to-16 lines reaching its goal the enemy played the
+  first, often one handing us a monster (Angelechy Opposition onto our field; Bastion and Castellan
+  then banish ITS cards): 37 of 138 multi-line turn 1s gave one when a line giving nothing was
+  there; going second we won 75% with a gift vs 56% without. Turn 1 going second and their
+  turn-2 build going first now play the line giving the fewest, ties in solver order.
+- `game.METHOD_SINCE`: `run` refuses to add games (either side) beside games from before both
+  fixes. Those were relabelled device **`gift`** (Angelechy and Blue-Eyes going second; Angelechy
+  going first at 21:10 by `tools/duelpc/relabel_first_1120.sh`).
+- **Stops say HOW** (`stops.STOP_KINDS`: negated / effect negated / destroyed / sent to GY /
+  discarded / banished / bounced / shuffled into deck / taken) and where their card acts from
+  (`played_from`, `stops.answers`: what can reach it there). Rows of v1 are re-read by `fill`.
+- Measured, not adopted: turn 1 at 4x the budget (`t1_budget.py`, 48 positions, converged kill
+  check) built more (0.83 -> 1.06 pieces, full goal 6 -> 12%) and saved NO board (81% -> 85%
+  killed). Hand traps leaving our hand on turn 1 unused (Ash summoned as a body, 29/240) happen
+  only on turns that miss the full goal, whose every hand-trap goal already keeps them `@hand`:
+  the approach trades one target for others.
 
 Stage 2 was expected to be the whole risk and instead resolved in an afternoon: ygorl
 builds clean on Python 3.12 and already provides the engine, determinism patches,
