@@ -6821,3 +6821,16 @@ def test_goals_drop_cards_the_deck_can_never_make_work(tmp_path):
     with_visas = tmp_path / "v.ydk"
     Deck(name="v", main=[7436169, 56099748] * 10, extra=[], side=[]).write_ydk(with_visas)
     assert game.live_goal(["7436169@szone:fd"], with_visas) == ["7436169@szone:fd"]
+
+
+def test_trainer_asks_for_a_marked_spell_set_and_never_for_a_dead_card(tmp_path):
+    """2026-11-20: the trainer asked for Super Polymerization (marked as an
+    interruption) as a bare code -- a monster on the field, unsolvable -- and
+    re-asked stored best goals holding Trivikarma (no Visas in the deck)."""
+    import inspect
+    from skills import trainer
+
+    src = inspect.getsource(trainer.breadth_goals)
+    assert '@szone:fd' in src and "0x2 | 0x4" in src
+    gen = inspect.getsource(trainer.run_generation)
+    assert "never_live" in gen and "not in dead" in gen

@@ -862,7 +862,15 @@ def breadth_goals(deck_path, hand, p):
     dead = never_live([*deck.main, *deck.extra])     # Trivikarma in a deck without Visas
     codes = [int(x.password) for x in bp.pieces if int(x.password) not in dead]
     codes += sorted(c for c in p["interrupters"] if c not in codes)
-    goals = [([*bp.base, str(c)], f"piece:{c}") for c in codes]
+    cards = default_cards()
+
+    def target(c):
+        # a Spell / Trap the player counts is asked for SET (Super Polymerization
+        # works on their turn only from there); a bare code means a monster on the
+        # field -- Super Poly asked that way was unsolvable (2026-11-20, 6 attempts)
+        card = cards.get(c)
+        return f"{c}@szone:fd" if card and card.type & (0x2 | 0x4) else str(c)
+    goals = [([*bp.base, target(c)], f"piece:{c}") for c in codes]
     goals += [([*bp.base, f"{c}@szone"], f"piece:{c}@szone")
               for c in sorted({c for (c, z), v in p["values"].items() if z == "szone" and v})]
     if bp.base:
@@ -907,7 +915,13 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
         (dh,)).fetchall()
     p = prefs(conn, name)
     extra = tuple(solver_args(p))
-    banned = _banned_targets(p)
+    from .drill import never_live
+    from .deck import Deck as _Deck
+    _d = _Deck.from_ydk(Path(deck_path))
+    dead = {str(c) for c in never_live([*_d.main, *_d.extra])}
+    # never ask for a card the deck can never make work: a stored best goal
+    # kept Trivikarma (hands 0/1/5/6) and was re-asked 7 times (2026-11-20)
+    banned = set(_banned_targets(p)) | dead
     cards = default_cards()
     batch, goals = [], []
     for h in hands:
@@ -915,6 +929,8 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
         hist = _attempts(conn, dh, h["hand_index"])
         base, breadth = breadth_goals(deck_path, hand, p)
         best_goal = json.loads(h["best_goal"]) if h["best_goal"] else None
+        if best_goal:
+            best_goal = [t for t in best_goal if str(t).replace("ext:", "").split("@")[0] not in dead]
         for targets, label, draw in plan(hist, breadth, best_goal, per_hand,
                                          banned, sorted(p["extenders"])):
             board, need = split_goal(targets)
