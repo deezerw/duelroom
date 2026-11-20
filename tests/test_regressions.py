@@ -6737,3 +6737,23 @@ def test_an_xyz_without_the_materials_for_its_detach_cost_is_not_a_piece():
     assert 35103106 not in drill.dead_on_field(fed, cards)
     # a board summary without overlay info is not judged
     assert drill.short_of_materials({"players": [{"mzone": [{"code": 35103106}]}]}, cards) == set()
+
+
+def test_interruption_traps_left_in_hand_are_set_before_passing(tmp_path):
+    """2026-11-20: our turn 1 kept Tearlaments Sulliek in hand in 8 of 240
+    games with free zones -- the search places only what its goal asks for.
+    Turns now close by setting the deck's interruption Traps; a Trap the deck
+    can never make work (Trivikarma without Visas) is not among them."""
+    import inspect
+    from skills import game
+    from skills.deck import Deck
+
+    ydk = tmp_path / "d.ydk"
+    # Sulliek, Trivikarma (no Visas), Ash, Infinite Impermanence
+    Deck(name="d", main=[74920585, 7436169, 14558127, 10045474] * 10,
+         extra=[], side=[]).write_ydk(ydk)
+    assert game.free_sets(ydk) == (10045474, 74920585)
+    assert game.free_sets(None) == ()
+    assert "free_set=(0, set(free_sets(our_deck)))" in inspect.getsource(game.turn1)
+    assert "free_set=(1, set(free_sets(enemy_deck)))" in inspect.getsource(game.turn2)
+    assert "free_set=(0, set(free_sets(enemy_deck)))" in inspect.getsource(game.enemy_turn1)

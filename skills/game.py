@@ -108,8 +108,8 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # use (`fewest_gifts`). Both sides: `run` refuses to add
 # games beside older ones -- relabel those first (tools/relabel_games.py,
 # label "gift"), so no section pools the two methods.
-METHOD_SINCE = {False: "2026-11-20T21:49:00",    # going second
-                True: "2026-11-20T21:53:00"}     # going first: + T3_X
+METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
+                True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -484,12 +484,15 @@ class Position:
     min_lp: list = field(default_factory=lambda: [None, None])
 
 
-def replay(source, responses=None, until_turn=None):
+def replay(source, responses=None, until_turn=None, free_set=None):
     """Replay `responses` (default: the file's own) from `source`'s start.
 
     `until_turn`: then play PASSIVELY (end phase, pass, no) until that turn
     begins -- what closes a turn whose line stopped mid-way, for either
     player (ygorl's convert_line only closes turn 1). Returns a Position.
+
+    `free_set`: (player, codes) -- while closing, that player SETS each of
+    these cards still in its hand during its own turn (`free_sets`).
     """
     from ygorl.engine.branch import actions_for_response
     from ygorl.engine.duel import DuelSession
@@ -525,13 +528,17 @@ def replay(source, responses=None, until_turn=None):
             if tracker.result.retries:
                 raise RuntimeError(f"response {k}: MSG_RETRY")
         steps = 0
+        setter, to_set = free_set or (None, ())
         while until_turn and not session.done and tracker.turn < until_turn:
             point = session.point
             if point is None:
                 break
             kinds = [a.kind for a in point.actions]
-            session.act(next((kinds.index(k) for k in PASSIVE_KINDS
-                              if k in kinds), 0))
+            put = (next((i for i, a in enumerate(point.actions)
+                         if a.kind == "sset" and a.card and a.card.code in to_set), None)
+                   if point.player == setter and point.turn_player == setter else None)
+            session.act(put if put is not None else
+                        next((kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0))
             watch()
             steps += 1
             if steps > MAX_CLOSING_STEPS:
@@ -654,7 +661,7 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
     src = r["solution"] or r["approach"]
     if src is None:
         return None
-    pos = replay(src, until_turn=2)
+    pos = replay(src, until_turn=2, free_set=(0, set(free_sets(our_deck))))
     start, prefix = breaking.split_position(Replay.from_yrp(src), pos.responses,
                                             scratch / "t1")
     return {"start": start, "prefix": prefix, "board": pos.board,
@@ -707,7 +714,7 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
     # No line at all: the enemy passes its turn from the root.
     src = (fewest_gifts(r.get("solutions") or [], our_deck, player=0, until_turn=3)
            if our_deck else r["solution"]) or r["approach"] or prefix
-    pos = replay(src, until_turn=3)
+    pos = replay(src, until_turn=3, free_set=(1, set(free_sets(enemy_deck))))
     if pos.winner is not None:   # e.g. their closing turn ended the duel
         return {"lost": pos.winner == 1, "won": pos.winner == 0,
                 "line": str(src)}
@@ -935,12 +942,35 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
             raise RuntimeError(f"player {player}'s hand was not seated: wanted "
                                f"{sorted(want)}, the duel dealt "
                                f"{sorted(_hand(dealt, player))}")
-    pos = replay(src, until_turn=2)
+    pos = replay(src, until_turn=2, free_set=(0, set(free_sets(enemy_deck))))
     start, prefix = breaking.split_position(Replay.from_yrp(src), pos.responses,
                                             scratch / "t1")
     return {"start": start, "prefix": prefix, "board": pos.board,
             "reached": r["solution"] is not None, "enemy_hand": ehand,
             "log": str(r["log"])}
+
+
+def free_sets(deck, cards=None):
+    """`deck`'s Traps whose scripts read as an interruption (Tearlaments
+    Sulliek): a turn's line that ends with one in hand sets it before
+    passing (`replay(free_set=...)`). The search places only what its goal
+    asks for, so our turn 1 kept Sulliek in hand in 8 of 240 going-first
+    games with free zones (2026-11-20); in hand a trap answers nothing."""
+    from .deck import Deck
+    if not deck:
+        return ()
+    if cards is None:
+        from ygorl.engine.duel import default_cards
+        cards = default_cards()
+    from .drill import never_live
+    main = set(Deck.from_ydk(Path(deck)).main)
+    dead = never_live(main)               # Trivikarma without Visas: nothing to set up
+    out = []
+    for c in sorted(main - dead):
+        card = cards.get(c)
+        if card and card.type & 0x4 and _interrupts(c, cards):     # TYPE_TRAP
+            out.append(c)
+    return tuple(out)
 
 
 def gifts(board, player, deck_path):
