@@ -14,6 +14,8 @@ turn 1 solved against that script, then the games' converged kill check:
 
     DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/t1_enemy_script.py [positions]
     venv/bin/python tools/experiments/t1_enemy_script.py summary
+    (T1ES_WORKERS=1 T1ES_SUFFIX=_server: one game at a time in its own folder -- the
+     server's 2 cores the trainer leaves idle, 2026-11-20)
 Resumable: results.jsonl under OUT, one line per (hand, enemy hand, arm).
 """
 
@@ -31,7 +33,10 @@ sys.path.insert(0, str(ROOT))
 from skills import db, engine, game, remote, trainer  # noqa: E402
 
 DECK, ENEMY = "imported", "Angelechy-Meta"
-OUT = ROOT / "results" / "experiments" / "t1_enemy_script"
+import os
+# one results folder per machine: a paired experiment never pairs across devices
+OUT = ROOT / "results" / "experiments" / ("t1_enemy_script" + os.environ.get("T1ES_SUFFIX", ""))
+WORKERS = int(os.environ.get("T1ES_WORKERS", "0")) or None
 ARMS = ("first", "all1", "all2")      # "first" = the games' script (hand traps fire at once)
 POSITIONS = 40
 _lock = threading.Lock()
@@ -113,7 +118,7 @@ def main(limit=POSITIONS):
             print(f"{job[0]['hand_index']} e{job[1]} {job[2]}: failed: {type(exc).__name__}: {exc}",
                   flush=True)
 
-    with ThreadPoolExecutor(dev.workers) as ex:
+    with ThreadPoolExecutor(WORKERS or dev.workers) as ex:
         list(ex.map(guarded, jobs))
     summary()
 
