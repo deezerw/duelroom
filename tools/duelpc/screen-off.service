@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep the monitors off (OLED: no static console)
+After=systemd-user-sessions.service getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/screen-off.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

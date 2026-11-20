@@ -68,21 +68,24 @@ stops at the disk question.
 - Secure Boot can stay on (Ubuntu's boot chain is signed).
 - Leave Windows' **Fast Startup** off, or Wake-on-LAN after a Windows
   shutdown may not work.
-- **Monitors stay off in Linux** (OLED burn-in): `screen-off.service` powers the
-  console down (`echo 4 > /sys/class/graphics/fb0/blank`, DPMS off) once the
-  system is up, and `consoleblank=60` in GRUB re-blanks it within a minute if
-  anything lights it again. Only the 5 s boot menu and boot messages show.
-  Added on the PC by hand 2026-11-19 (not in autoinstall.yaml.in yet).
+- **Monitors stay off in Linux** (OLED burn-in): `screen-off.service` runs
+  `tools/duelpc/screen-off.sh`, which every 5 s powers down any connected output whose DPMS
+  reads On (fb0 blank 4 + `setterm --powerdown` on tty1). A one-shot blank at boot did not
+  hold (2026-11-20: both screens were on). `consoleblank=60` stays as a backstop. Only the
+  5 s boot menu and boot messages show. Install: copy both to /usr/local/bin, /etc/systemd/system.
 - **A day of jobs:** `tools/duelpc/day.sh [HHMM]` wakes the PC, runs its queue (budget
   plateau kill 32x, use_timing, board data -- each resumable) and at HHMM stops and
   powers it OFF (never on at night: it is loud). Scheduled with
   `sudo systemd-run --uid=deezer --on-calendar="<date> 08:30" tools/duelpc/day.sh 2100`.
 - **RGB off in Linux** (the lights bother the user most): OpenRGB 1.1 AppImage extracted in
   `~/openrgb/squashfs-root` on the PC (Codeberg release; the .deb wants a forked hidapi);
-  `/usr/local/bin/rgb-off.sh` + `rgb-off.service` set every device black at boot (motherboard
-  RGB Fusion 2 = static, HyperX keyboard and Razer mouse = direct; none has an "off" mode).
-  Found: B650 AORUS ELITE AX V2, HyperX Alloy Origins Core, Razer DeathAdder V2 X. No RGB RAM
-  or GPU seen. Lights while the PC is OFF (standby glow) are a BIOS setting, not software.
+  `tools/duelpc/rgb-off.sh` (installed as /usr/local/bin/rgb-off.sh) + `rgb-off.service` set
+  every device black at boot. OpenRGB exits 0 when a mode is missing, so each device gets
+  both static and direct. Devices: B650 AORUS ELITE AX V2, HyperX Alloy Origins Core, Razer
+  DeathAdder V2 X, 2x ENE DRAM. The RAM needs the SMBus, which ACPI blocks:
+  `acpi_enforce_resources=lax` on the GRUB kernel line (2026-11-20). ARGB headers were sized
+  to 120 LEDs (root's OpenRGB config). **Case fans stay lit**: green on every motherboard
+  zone did not reach them, so they are on a separate hub (case button/remote, not software).
 - **Power button -> Windows, network wake -> Linux** (user, 2026-11-19). GRUB still defaults
   to Linux; `boot-choice.service` asks the server (`/duelpc/boot`, home network only) whether
   it sent the wake (`remote.note_wake`, every `remote.wake`, 10-minute window, answered once).
