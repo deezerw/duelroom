@@ -39,12 +39,12 @@ class Node:
         self.w = [0.0] * k
 
 
-def uniform(point, session):
+def uniform(point, session, observer=None):
     k = len(point.actions)
     return [1.0 / k] * k
 
 
-def outcome_only(point, session):
+def outcome_only(point, session, observer=None):
     return 0.0
 
 

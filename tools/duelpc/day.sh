@@ -29,6 +29,18 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
       && mkdir -p results/ml/bc && rsync -a deezer@duelpc.local:duelroom/results/ml/bc/ results/ml/bc/
     echo "=== $(date) imitation training: $( [ -f results/ml/bc/policy.pt ] && echo done || echo FAILED, see results/ml/bc_train.log) ===" >> $LOG
   fi
+  # Stage 16 step 3(a): the net as the search's prior vs uniform, on held-out kills (GPU, ~1 h)
+  if [ -f results/ml/bc/policy.pt ] && [ ! -f results/ml/prior_ab/done ]; then
+    rsync -a skills/__init__.py skills/mcts.py skills/net_prior.py deezer@duelpc.local:duelroom/skills/ \
+      && rsync -a tools/ml/prior_ab.py deezer@duelpc.local:duelroom/tools/ml/ \
+      && rsync -a results/ml/demos/demos.jsonl deezer@duelpc.local:duelroom/results/ml/demos/ \
+      && ssh deezer@duelpc.local 'cd ~/duelroom && YGORL_THIRD_PARTY=$HOME/duelroom/vendor/third_party_merged \
+           ~/duelroom-ml/bin/python tools/ml/prior_ab.py results/ml/demos/demos.jsonl results/ml/bc \
+           --positions 40 --depths 4,8,16,30 --sims 800' >> results/ml/prior_ab.log 2>&1 \
+      && mkdir -p results/ml/prior_ab && rsync -a deezer@duelpc.local:duelroom/results/ml/prior_ab/ results/ml/prior_ab/ \
+      && touch results/ml/prior_ab/done
+    echo "=== $(date) net-prior A/B: $( [ -f results/ml/prior_ab/done ] && echo done || echo FAILED, see results/ml/prior_ab.log) ===" >> $LOG
+  fi
   venv/bin/python tools/experiments/budget_plateau.py --stages kill --levels 32 >> results/experiments/plateau_32.log 2>&1
   echo "=== $(date) plateau 32x done ===" >> $LOG
   # is our turn 3 converged at 4x (game.T3_X)? 87/89/94% at 1/2/4x, 2x->4x still flipped 3
@@ -75,5 +87,5 @@ while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60;
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
 pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games .*--device duelpc|side_gate.py|t1_budget.py|t1_enemy_script.py" 2>/dev/null
 sleep 10
-ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
+ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py|[p]rior_ab.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
