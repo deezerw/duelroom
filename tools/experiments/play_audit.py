@@ -20,7 +20,8 @@ data as good as possible before doing long long runs"): each line should read
                    and how many of those fired there (piece_audit.py's table)
   hand discards    End Phase discards for hand size
 
-    venv/bin/python tools/experiments/play_audit.py <enemy> first|second [device] [--since ISO]
+    venv/bin/python tools/experiments/play_audit.py <enemy> first|second [device] [--since ISO] [--gate]
+    --gate: exit 1 if a must-be-zero line is over GATE_SHARE of the games (day.sh uses it)
 """
 
 import json
@@ -34,7 +35,10 @@ sys.path.insert(0, str(ROOT))
 DECK = "imported"
 
 
-def main(enemy, side, device="server", since=None):
+GATE_SHARE = 0.02     # --gate: a must-be-zero line over this share of the games fails
+
+
+def main(enemy, side, device="server", since=None, gate=False):
     import ygorl.engine.constants as C
     import ygorl.engine.messages as M
     from ygorl.engine.duel import default_cards
@@ -160,10 +164,22 @@ def main(enemy, side, device="server", since=None):
     line("free left", c_free)
     line("hand discards", c_disc)
     print(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
+    bad = {"own-turn waste": sum(c_waste.values()), "self-negate": sum(c_selfneg.values()),
+           "free left": sum(c_free.values()), "hand discards": sum(c_disc.values())}
+    if not first:
+        bad["usable gifts"] = usable
     print(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
     for code, k in counted.most_common(8):
         flag = "   <-- never fires" if k >= 5 and fired[code] == 0 else ""
         print(f"    {nm(code)[:34]:34} {k:4} -> {fired[code]:4} ({fired[code] / k:.0%}){flag}")
+    if gate:
+        over = {k: v for k, v in bad.items() if n and v > GATE_SHARE * n}
+        if not n:
+            print("GATE: no games to audit")
+            raise SystemExit(2)
+        print(f"GATE: {'FAILED ' + str(over) if over else 'passed'} (limit {GATE_SHARE:.0%} of {n} games)")
+        if over:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":
@@ -174,4 +190,4 @@ if __name__ == "__main__":
     if len(args) < 2:
         print(__doc__)
         raise SystemExit(1)
-    main(*args, since=since)
+    main(*args, since=since, gate="--gate" in sys.argv)

@@ -54,9 +54,19 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
   echo "=== $(date) enemy turn-1 script test done ===" >> $LOG
   # the honest going-first baseline (16x kill check, trained enemy turn 2), run here and
   # not through the jobs queue: a queued duelpc job is retried with Wake-on-LAN, at night too
-  venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
-      >> results/ml/duelpc_games_first.log 2>&1      # every trained hand (resumable)
-  echo "=== $(date) going-first games done ===" >> $LOG
+  # smoke first (the full run's first slice: 2 enemy hands, 1 run), audited; the long run
+  # only if it is clean (user: make the data good before long runs)
+  venv/bin/python daemon.py games imported Angelechy-Meta 1 2 --device duelpc \
+      >> results/ml/duelpc_games_first.log 2>&1
+  if venv/bin/python tools/experiments/play_audit.py Angelechy-Meta first duelpc --gate \
+       >> results/ml/duelpc_audit.log 2>&1; then
+    echo "=== $(date) going-first smoke audit passed ===" >> $LOG
+    venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
+        >> results/ml/duelpc_games_first.log 2>&1      # every trained hand (resumable)
+    echo "=== $(date) going-first games done ===" >> $LOG
+  else
+    echo "=== $(date) going-first smoke audit FAILED: long run skipped, see results/ml/duelpc_audit.log ===" >> $LOG
+  fi
   # Stage 13's gate under the honest settings (blank -3 Ash +3 vanilla going first must
   # not gain; -3 Engraver +3 vanilla going second must lose) before any side card is read
   venv/bin/python tools/experiments/side_gate.py >> results/experiments/side_gate_honest.log 2>&1
