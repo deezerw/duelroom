@@ -5319,6 +5319,7 @@ def _chain_msgs():
         "solving": lambda n: kind("ChainSolving", chain_count=n),
         "solved": lambda n: kind("ChainSolved", chain_count=n),
         "disabled": lambda n: kind("ChainDisabled", chain_count=n),
+        "negated": lambda n: kind("ChainNegated", chain_count=n),
         "end": lambda: kind("ChainEnd"),
         "move": lambda code, frm, to, reason: kind(
             "Move", code=code, previous=frm, current=to, reason=reason),
@@ -5349,8 +5350,8 @@ def test_stops_credit_the_negation_to_the_right_link():
               # nothing above it: a continuous negate on the field
               m["chain"](104, 1, 1), m["solving"](1), m["disabled"](1), m["end"]()]:
         rd.feed(x)
-    assert rd.stops == [[2, "negated", 500, 100], [2, "negated", 600, 101],
-                        [2, "negated", stops.FIELD, 104]]
+    assert rd.stops == [[2, "effect negated", 500, 100], [2, "effect negated", 600, 101],
+                        [2, "effect negated", stops.FIELD, 104]]
     assert set(rd.played) == {100, 101, 102, 103, 104}
 
 
@@ -5370,7 +5371,41 @@ def test_stops_count_removal_only_by_your_resolving_effect():
               m["move"](202, field, m["loc"](1, 0x20), C.REASON_EFFECT),       # moves itself
               m["solved"](1), m["end"]()]:
         rd.feed(x)
-    assert rd.stops == [[1, "removed", 800, 200]]
+    assert rd.stops == [[1, "destroyed", 800, 200]]
+
+
+def test_stops_say_how_the_card_was_stopped():
+    """User, 2026-11-20: "more specific than just stop, like negate destroy
+    banish". Each kind from the message that reports it, and where their
+    card acted from."""
+    import ygorl.engine.constants as C
+    from skills import stops
+
+    m = _chain_msgs()
+    field, hand = m["loc"](1, 0x4), m["loc"](1, 0x2)
+    to = lambda where, ctl=1: m["loc"](ctl, where)
+    E = C.REASON_EFFECT
+    rd = stops.Reader(me=0)
+    feed = [m["turn"](),
+            m["chain"](100, 1, 1), m["chain"](500, 0, 2), m["solving"](2), m["negated"](1),
+            m["solved"](2), m["end"](),
+            m["chain"](800, 0, 1), m["solving"](1),
+            m["move"](201, field, to(0x10), E),                       # sent to GY
+            m["move"](202, field, to(0x20), E),                       # banished
+            m["move"](203, field, to(0x2), E),                        # bounced
+            m["move"](204, field, to(0x40), E),                       # bounced (Extra)
+            m["move"](205, field, to(0x1), E),                        # shuffled into deck
+            m["move"](206, field, to(0x4, ctl=0), E),                 # taken
+            m["move"](207, hand, to(0x10), E | C.REASON_DISCARD),     # discarded
+            m["solved"](1), m["end"]()]
+    feed[1].loc = m["loc"](1, 0x2)            # 100 activated from the hand
+    for x in feed:
+        rd.feed(x)
+    assert [s[1] for s in rd.stops] == ["negated", "sent to GY", "banished", "bounced",
+                                         "bounced", "shuffled into deck", "taken", "discarded"]
+    assert set(k for _t, k, _b, _c in rd.stops) <= set(stops.STOP_KINDS)
+    assert rd.played_from == {100: "hand"}
+    assert stops.answers("hand").startswith("negate")
 
 
 def _stops_game(conn, hand, eseed, run, won, played, stops_):
@@ -5469,7 +5504,7 @@ def test_stops_read_from_the_second_seat():
     for x in [m["turn"](), m["chain"](100, 0, 1), m["chain"](500, 1, 2),
               m["solving"](2), m["disabled"](1), m["solved"](2), m["end"]()]:
         rd.feed(x)
-    assert rd.stops == [[1, "negated", 500, 100]] and set(rd.played) == {100}
+    assert rd.stops == [[1, "effect negated", 500, 100]] and set(rd.played) == {100}
 
 
 def test_playmat_seats_you_at_the_bottom_going_second():
@@ -6367,7 +6402,51 @@ def test_must_stop_by_enemy_hand_compares_held_and_lost_games(tmp_path):
     [h] = stops.by_enemy_hand(conn, "d", "E", own={5})
     assert (h["games"], h["lost"]) == (3, 2)
     assert dict(h["kill_cards"]) == {7: 1.0, 8: 1.0}
-    assert h["must"] == [(7, 1, 1, 0, 2, [(5, 1)])]
+    assert h["must"] == [(7, 1, 1, 0, 2, [(5, 1)], [("removed", 1)], None)]
+
+
+def test_must_stop_says_how_and_from_where(tmp_path):
+    import json
+    from skills import db, stops
+
+    conn = db.connect(tmp_path / "t.db")
+    def game(run, outcome, st):
+        k = ("d", "E", 0, 0, 1000, 1, "server", run)
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, outcome, line, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     (*k, outcome, "", "now"))
+        conn.execute("INSERT INTO game_stops (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, line, stops) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (*k, "", json.dumps({"v": stops.VERSION, "played": {"7": 2},
+                                          "played_from": {"7": "GY"}, "stops": st})))
+    with conn:
+        game(0, "win", [[2, "banished", 5, 7]])
+        game(1, "win", [[2, "banished", 5, 7]])
+        game(2, "win", [[2, "effect negated", 6, 7]])
+        game(3, "lost_t2", [])
+    [h] = stops.by_enemy_hand(conn, "d", "E", own={5, 6})
+    [(c, sh, nh, sl, nl, by, how, where)] = h["must"]
+    assert (c, sh, nh) == (7, 3, 3) and how == [("banished", 2), ("effect negated", 1)]
+    assert where == "GY" and "banish" in stops.answers(where)
+
+
+def test_old_stop_rows_are_read_again(tmp_path, monkeypatch):
+    """A row read before the detailed kinds (no "v") is re-read by fill."""
+    import json
+    from skills import db, stops
+
+    conn = db.connect(tmp_path / "t.db")
+    k = ("d", "E", 0, 0, 1000, 1, "server", 0)
+    with conn:
+        conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, outcome, line, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     (*k, "win", "/x.yrp", "now"))
+        conn.execute("INSERT INTO game_stops (deck_hash, enemy, hand_index, board, enemy_seed, "
+                     "first, device, run, line, stops) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (*k, "/x.yrp", json.dumps({"played": {}, "stops": []})))
+    seen = []
+    monkeypatch.setattr(stops, "record", lambda conn, dh, name, enemy, g: seen.append(g["run"]))
+    assert stops.fill(conn, "d", "deck", "E") == 0 and seen == [0]
 
 
 def test_measured_timing_pairs_fire_and_hold_at_the_same_window(tmp_path):

@@ -300,7 +300,7 @@ CREATE TABLE IF NOT EXISTS game_used (
 
 -- What you stopped of the enemy's in each game (skills/stops.py), read once
 -- from its replay like game_used: JSON {played: {code: turn},
--- stops: [[turn, "negated"|"removed", your code or 0 = field, their code]]}.
+-- stops: [[turn, kind (stops.STOP_KINDS; "removed" before v2), your code or 0 = field, their code]]}.
 CREATE TABLE IF NOT EXISTS game_stops (
     deck_hash   TEXT NOT NULL,
     enemy       TEXT NOT NULL,

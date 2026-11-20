@@ -624,7 +624,9 @@ def games_view(name=None):
         must = [{**h, "hand": [nm(x) for x in h["hand"]],
                  "kill_cards": [(snm(x), share) for x, share in h["kill_cards"]],
                  "must": [{"name": snm(m[0]), "held": m[1:3], "lost": m[3:5],
-                           "by": [(snm(b), n) for b, n in m[5]]} for m in h["must"]]}
+                           "by": [(snm(b), n) for b, n in m[5]], "how": m[6],
+                           "where": m[7], "answers": stops.answers(m[7])}
+                          for m in h["must"]]}
                 for h in stops.by_enemy_hand(c, dh, enemy, own=own, first=first,
                                              device=device)]
         enemies.append({"name": enemy, "first": first, "device": device,
