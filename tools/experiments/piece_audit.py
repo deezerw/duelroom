@@ -1,7 +1,8 @@
 """Which counted interruption pieces actually fire? (a reading-gap audit)
 
 For every stored game: the pieces `game._pieces` counts on the board at the
-start of the opponent's turn 2, and whether each was activated on that turn.
+start of the opponent's turn 2 (the stored turn 1's position), and whether
+each was activated on that turn.
 A piece counted often and fired ~never is a reading gap (2026-11-20: a
 materialless Lars, Mulcharmies held with a board) -- or a real condition
 (Exciton Knight vs a deck that kills with fewer cards), so read before fixing.
@@ -30,7 +31,14 @@ for first, dev, enemy, label in ((1, DEV1, "Angelechy-Meta", "OUR board on their
     for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=? AND outcome!='no_t1'", (dh, enemy, first, dev)).fetchall():
         src = impact.source("imported", enemy, g)
         if not src: continue
-        b = game.replay(src, until_turn=2).board
+        # the board at the START of the opponent's turn: the stored turn 1's
+        # position (replaying the game line would give the board at its END --
+        # the survivors, wrongly read as 'counted, never fired' before 2026-11-20 18:10)
+        t1 = c.execute("SELECT prefix FROM game_turn1 WHERE deck_hash=? AND enemy=? AND hand_index=? "
+                       "AND board=? AND enemy_seed=? AND first=? AND device=?",
+                       (g["deck_hash"], enemy, g["hand_index"], g["board"], g["enemy_seed"], first, dev)).fetchone()
+        if not (t1 and t1["prefix"] and Path(t1["prefix"]).exists()): continue
+        b = game.replay(t1["prefix"], until_turn=2).board
         pieces = set(game._pieces(b, owner, cards))
         if not pieces: continue
         rep = Replay.from_yrp(Path(src)); t = [0]; got = set()
