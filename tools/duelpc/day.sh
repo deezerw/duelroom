@@ -31,6 +31,9 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
   fi
   venv/bin/python tools/experiments/budget_plateau.py --stages kill --levels 32 >> results/experiments/plateau_32.log 2>&1
   echo "=== $(date) plateau 32x done ===" >> $LOG
+  # is our turn 3 converged at 4x (game.T3_X)? 87/89/94% at 1/2/4x, 2x->4x still flipped 3
+  venv/bin/python tools/experiments/budget_plateau.py --stages t3 --levels 8 >> results/experiments/plateau_t3_8.log 2>&1
+  echo "=== $(date) plateau t3 8x done ===" >> $LOG
   # why is going first weak? does a bigger turn-1 search survive the converged kill check?
   venv/bin/python tools/experiments/t1_budget.py 48 --levels 1,4 >> results/experiments/t1_budget.log 2>&1
   echo "=== $(date) t1 budget test done ===" >> $LOG
