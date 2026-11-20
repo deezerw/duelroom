@@ -474,6 +474,14 @@ budgets and searched defences come before any side-card comparison.
 - **Stops say HOW** (`stops.STOP_KINDS`: negated / effect negated / destroyed / sent to GY /
   discarded / banished / bounced / shuffled into deck / taken) and where their card acts from
   (`played_from`, `stops.answers`: what can reach it there). Rows of v1 are re-read by `fill`.
+- **Before any long games run: a smoke batch + `tools/experiments/play_audit.py`** (user:
+  "make the data as good as possible before doing long long runs"). Smoke = the same job with
+  `enemy_hands=2 runs=1` (48 games, ~1 h on the server): the same seeds, so it is the FIRST
+  SLICE of the full run, never thrown away. play_audit counts every misplay pattern found
+  2026-11-20 for both sides -- own-turn waste, a link negated by its own side, gifts (usable),
+  interruption traps left in hand, dead goal targets, pieces counted vs fired, hand discards --
+  and every line should read ~0 (the old games read 148 / 20 / 282 / 18; the first new
+  Blue-Eyes batch 0 / 0 / 0 / 0). Non-zero = fix it, bump `game.METHOD`, then the long run.
 - Measured, not adopted: turn 1 at 4x the budget (`t1_budget.py`, 48 positions, converged kill
   check) built more (0.83 -> 1.06 pieces, full goal 6 -> 12%) and saved NO board (81% -> 85%
   killed). Hand traps leaving our hand on turn 1 unused (Ash summoned as a body, 29/240) happen

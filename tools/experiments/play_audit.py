@@ -1,0 +1,177 @@
+"""Is a batch of games clean? Every misplay pattern found 2026-11-20, counted.
+
+Run it on a SMOKE batch before any long run (user, 2026-11-20: "make the
+data as good as possible before doing long long runs"): each line should read
+0 or near it, and a non-zero one is a bug to fix before the hours are spent.
+
+  own-turn waste   a Maxx "C"-style draw card / Nibiru / Droll used on its
+                   owner's own turn, when an opponent's turn still follows
+                   (patch 0009 should make this 0; the game's last turn is free)
+  self-negate      a chain link negated by its OWN controller's card (Ash onto
+                   our own search; Sulliek/Trivikarma chained onto our link to
+                   negate THEIR monster are not this)
+  gifts            the enemy's monsters on our field when our turn begins;
+                   `usable` = ones offering us an activation there
+  free left        an interruption Trap / marked Quick-Play still in hand at
+                   the end of its owner's turn (free sets should make this 0)
+  dead targets     trained goals still asking for a card the deck can never
+                   make work (drill.never_live)
+  pieces           counted on the board at the start of the opponent's turn,
+                   and how many of those fired there (piece_audit.py's table)
+  hand discards    End Phase discards for hand size
+
+    venv/bin/python tools/experiments/play_audit.py <enemy> first|second [device] [--since ISO]
+"""
+
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+DECK = "imported"
+
+
+def main(enemy, side, device="server", since=None):
+    import ygorl.engine.constants as C
+    import ygorl.engine.messages as M
+    from ygorl.engine.duel import default_cards
+    from ygorl.engine.replay import Replay
+
+    from skills import card_db, db, drill, engine, game, impact, trainer
+
+    first = side == "first"
+    cards = default_cards()
+    conn = db.connect()
+    nm = lambda x: (card_db.resolve(conn, x) or {"name": str(x)})["name"]  # noqa: E731
+    deck = engine.DECKS / f"{DECK}.ydk"
+    enemy_deck = engine.DECKS / f"{enemy}.ydk"
+    dh = trainer.deck_hash(deck)
+    me = 0 if first else 1            # our engine seat in this layout
+    dead_codes = {0: set(game.own_turn_dead(deck if me == 0 else enemy_deck)),
+                  1: set(game.own_turn_dead(enemy_deck if me == 0 else deck))}
+    prefs = trainer.prefs(conn, DECK)["interrupters"]
+    free = {me: set(game.free_sets(deck, cards, prefs)), 1 - me: set(game.free_sets(enemy_deck, cards))}
+    q = ("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=? "
+         "AND outcome != 'no_t1'" + (" AND created >= ?" if since else ""))
+    games = conn.execute(q, (dh, enemy, int(first), device, *([since] if since else []))).fetchall()
+    who = lambda p: "us" if p == me else "them"  # noqa: E731
+    c_waste, c_selfneg, c_free, c_disc = Counter(), Counter(), Counter(), Counter()
+    gifts = usable = 0
+    counted, fired = Counter(), Counter()
+    outcomes = Counter(g["outcome"] for g in games)
+    for g in games:
+        src = impact.source(DECK, enemy, g)
+        t1 = conn.execute("SELECT prefix FROM game_turn1 WHERE deck_hash=? AND enemy=? AND hand_index=? "
+                          "AND board=? AND enemy_seed=? AND first=? AND device=?",
+                          (dh, enemy, g["hand_index"], g["board"], g["enemy_seed"], int(first),
+                           device)).fetchone()
+        if not src or not (t1 and t1["prefix"] and Path(t1["prefix"]).exists()):
+            continue
+        start = game.replay(t1["prefix"], until_turn=2).board
+        opp = 0 if first else 0     # the board facing turn 2's attacker: player 0's in both layouts
+        pieces = set(game._pieces(start, opp, cards))
+        counted.update(pieces)
+        if not first:
+            n = game.gifts(start, 1, deck)
+            gifts += bool(n)
+            usable += bool(n) and game.usable_gifts(t1["prefix"], 1, deck, 2) > 0
+        rep = Replay.from_yrp(Path(src))
+        state = {"turn": 0, "tp": None, "chain": [], "fired": set(), "solving": None}
+        last_turn = 3 if first else 2        # the game's final searched turn
+        hands = {}
+
+        class O:
+            def on_start(self, core):
+                pass
+
+            def on_buffer(self, core, buf):
+                for raw in M.split_messages(buf):
+                    m = M.decode_message(raw)
+                    k = type(m).__name__
+                    if k == "NewTurn":
+                        state["turn"] += 1
+                        state["tp"] = m.player
+                    elif k == "ChainEnd":
+                        state["chain"].clear()
+                        state["solving"] = None
+                    elif k == "ChainSolving":
+                        state["solving"] = m.chain_count
+                    elif k == "ChainSolved":
+                        state["solving"] = None
+                    elif k in ("ChainNegated", "ChainDisabled"):
+                        ch, sv = state["chain"], state["solving"]
+                        n = m.chain_count
+                        # the negator: the link resolving above the victim (Ash), or
+                        # the nearest link above it (Lars style, reported at the victim)
+                        if n <= len(ch):
+                            above = [ch[sv - 1]] if sv and n < sv <= len(ch) else ch[n:]
+                            if above and above[0][1] == ch[n - 1][1]:
+                                c_selfneg[(who(ch[n - 1][1]), f"{nm(above[0][0])} onto {nm(ch[n - 1][0])}")] += 1
+                    elif k == "Chaining":
+                        ch = state["chain"]
+                        del ch[m.chain_count - 1:]
+                        p = m.loc.controller
+                        if (p == state["tp"] and m.loc.location & C.LOCATION_HAND
+                                and m.code in dead_codes[p] and state["turn"] < last_turn):
+                            c_waste[(who(p), nm(m.code))] += 1
+                        if state["turn"] == 2 and p == opp and m.code in pieces:
+                            state["fired"].add(m.code)
+                        ch.append((m.code, p))
+                    elif k == "Move" and m.previous.location & C.LOCATION_HAND \
+                            and m.reason & C.REASON_RULE and m.reason & C.REASON_DISCARD:
+                        c_disc[(who(m.previous.controller), nm(m.code))] += 1
+
+        rep.duel().replay(rep.responses, observer=O())
+        fired.update(state["fired"])
+        # free cards left in hand at the end of a turn an opponent's turn follows
+        for p, turn in (((0, 1), (1, 2)) if first else ((0, 1),)):
+            pos = start if turn == 1 else None
+            if turn == 2:
+                try:
+                    pos = game.replay(src, until_turn=3).board
+                except Exception:  # noqa: BLE001 -- a game that ended on turn 2
+                    continue
+            hand = (pos["players"][p].get("hand") or []) if pos else []
+            for c in hand:
+                if c in free[p]:
+                    c_free[(who(p), nm(c))] += 1
+
+    goals = [r for r in conn.execute("SELECT hand_index, best_goal FROM trainer_hands WHERE deck_hash=? "
+                                     "AND best_goal IS NOT NULL", (dh,))]
+    from skills.deck import Deck
+    d = Deck.from_ydk(deck)
+    never = {str(c) for c in drill.never_live([*d.main, *d.extra])}
+    dead_t = [(r["hand_index"], t) for r in goals for t in trainer.split_goal(json.loads(r["best_goal"]))[0]
+              if t.split("@")[0] in never]
+
+    n = len(games)
+    print(f"== {DECK} vs {enemy} going {side} [{device}]{' since ' + since if since else ''}: {n} games "
+          f"{dict(outcomes)}")
+    def line(label, cnt, extra=""):
+        tot = sum(cnt.values())
+        print(f"  {label:15} {tot:4}{extra}  " + ", ".join(f"{w} {c} {k}" for (w, c), k in cnt.most_common(4)))
+    line("own-turn waste", c_waste)
+    line("self-negate", c_selfneg)
+    if not first:
+        print(f"  {'gifts':15} {gifts:4} games with a monster given (usable by us: {usable})")
+    line("free left", c_free)
+    line("hand discards", c_disc)
+    print(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
+    print(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
+    for code, k in counted.most_common(8):
+        flag = "   <-- never fires" if k >= 5 and fired[code] == 0 else ""
+        print(f"    {nm(code)[:34]:34} {k:4} -> {fired[code]:4} ({fired[code] / k:.0%}){flag}")
+
+
+if __name__ == "__main__":
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
+    if since:
+        args.remove(since)
+    if len(args) < 2:
+        print(__doc__)
+        raise SystemExit(1)
+    main(*args, since=since)
