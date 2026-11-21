@@ -150,7 +150,9 @@ def main(enemy, side, device="server", since=None, gate=False):
         rep.duel().replay(rep.responses, observer=O())
         fired.update(state["fired"])
         # free cards left in hand at the end of a turn an opponent's turn follows
-        for p, turn in (((0, 1), (1, 2)) if first else ((0, 1),)):
+        # (going first, their turn-2 leftovers matter only if the game reached turn 3)
+        for p, turn in (((0, 1),) + (((1, 2),) if g["outcome"] != "lost_t2" else ())
+                        if first else ((0, 1),)):
             pos = start if turn == 1 else None
             if turn == 2:
                 try:
