@@ -1,0 +1,91 @@
+--- combo-solver-rooted/solver-patched/replay.h	2026-11-19 15:43:53.324427389 -0500
++++ combo-solver-next/solver-patched/replay.h	2026-11-20 19:20:32.793015674 -0500
+@@ -73,6 +73,12 @@
+ 	// `root_turns`: MSG_NEW_TURN count of the prefix (the search's initial_turns).
+ 	std::vector<std::vector<uint8_t>> root_prefix;
+ 	uint32_t root_turns{};
++	// --opp-hand-root (duelroom patch 0010): cards Duel::Setup puts in
++	// `root_hand_team`'s hand once the prefix has replayed -- a hand the
++	// searcher ASSUMES (duel mode: every hand trap of your decklist, never
++	// your real hand). Every duel set up from this replay gets them.
++	std::vector<uint32_t> root_hand;
++	uint8_t root_hand_team{1};
+ 
+ private:
+ 	std::unique_ptr<Replay> yrp;
+--- combo-solver-rooted/solver-patched/duel.cpp	2026-11-19 15:43:53.364428329 -0500
++++ combo-solver-next/solver-patched/duel.cpp	2026-11-20 19:20:32.794015698 -0500
+@@ -198,6 +198,19 @@
+ 			return false;
+ 		}
+ 	}
++	// --opp-hand-root (patch 0010): the assumed hand, added at the root (its last
++	// answer is still pending; the cards land before the search's first Process).
++	if(!yrp.root_hand.empty()) {
++		ArenaScope scope(arena);
++		for(uint32_t code : yrp.root_hand) {
++			const std::string t = std::to_string(yrp.root_hand_team);
++			if(!ExecLua("Debug.AddCard(" + std::to_string(code) + "," + t + "," + t +
++						",LOCATION_HAND,0,POS_FACEDOWN_DEFENSE)", "opp_hand_root")) {
++				error = "--opp-hand-root: Debug.AddCard(" + std::to_string(code) + ") failed";
++				return false;
++			}
++		}
++	}
+ 	return true;
+ }
+ 
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-20 16:12:31.628264430 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-20 19:20:32.798015798 -0500
+@@ -1493,6 +1493,8 @@
+ 	std::vector<uint32_t> no_self_target;
+ 	// --no-own-chain <code|code...> (duelroom patch 0009).
+ 	std::vector<uint32_t> no_own_chain;
++	// --opp-hand-root <code|code...> (duelroom patch 0010).
++	std::vector<uint32_t> opp_hand_root;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2030,6 +2032,8 @@
+ 				"  --opp-skip <r>     ... never fire it there (both repeatable, patch 0006)\n"
+ 				"  --no-self-target <c> codes (a|b|...): the searcher's single-pick target of\n"
+ 				"                     these cards' effects must be an opponent's card (0007)\n"
++				"  --opp-hand-root <c> codes (a|b|...): once --root has replayed, add these to\n"
++				"                     the OPPONENT's hand: a hand the search assumes (0010)\n"
+ 				"  --no-own-chain <c> codes (a|b|...): the searcher never chains these at its\n"
+ 				"                     declinable chain windows; the defender's copies are\n"
+ 				"                     untouched (0009)\n"
+@@ -2551,12 +2555,13 @@
+ 			const char* v = next("--opp-hold-until"); if(!v) return false;
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+-				  a == "--no-own-chain") {
++				  a == "--no-own-chain" || a == "--opp-hand-root") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+ 				: (a == "--no-self-target") ? o.no_self_target
+-				: (a == "--no-own-chain") ? o.no_own_chain : o.opp_respond;
++				: (a == "--no-own-chain") ? o.no_own_chain
++				: (a == "--opp-hand-root") ? o.opp_hand_root : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+@@ -11358,6 +11363,17 @@
+ 			std::printf("  root              : %zu answer(s) replayed before "
+ 						"every search (--root)\n", ry->responses.size());
+ 		}
++		if(!opt.opp_hand_root.empty()) {
++			if(opt.root_file.empty()) {
++				std::printf("!! --opp-hand-root needs --root\n");
++				return 1;
++			}
++			Replay* sy = const_cast<Replay*>(start_yrp);
++			sy->root_hand = opt.opp_hand_root;
++			sy->root_hand_team = static_cast<uint8_t>(1 - opt.target_player);
++			std::printf("  opp hand at root  : %zu card(s) added to player %d's hand "
++						"(--opp-hand-root)\n", sy->root_hand.size(), 1 - opt.target_player);
++		}
+ 		if(start_yrp->decks.size() <= static_cast<size_t>(opt.target_player)) {
+ 			std::printf("!! the starting replay carries no deck "
+ 									"for player %d.\n", opt.target_player);

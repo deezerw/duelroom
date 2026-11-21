@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+  .duel{display:grid;gap:10px}
+  .side{border:1px solid #ffffff14;border-radius:10px;padding:10px}
+  .side h3{margin:0 0 6px;font-size:15px;display:flex;justify-content:space-between}
+  .zone{display:flex;gap:6px;flex-wrap:wrap;min-height:64px;align-items:center;margin:4px 0}
+  .zone .lab{font-size:11px;color:var(--dim);width:58px}
+  .cardx{width:46px;height:66px;border-radius:4px;background:#2a2f45 center/cover no-repeat;position:relative}
+  .cardx.def{transform:rotate(90deg);margin:0 10px}
+  .cardx.back{background:repeating-linear-gradient(45deg,#3b2f5a,#3b2f5a 6px,#2c2346 6px,#2c2346 12px)}
+  .cardx span{position:absolute;bottom:-14px;left:-6px;width:58px;font-size:9px;color:var(--dim);
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+  .acts{display:flex;flex-wrap:wrap;gap:6px}
+  .acts button{font-size:13px}
+  #status{font-weight:600}
+</style>
+<div class="page-head">
+  <h1>Duel #{{ state.id }}</h1>
+  <div class="sub">{{ state.user_deck }} (you) vs {{ state.ai_deck }} (AI) ·
+    <a href="{{ url_for('views.duel_list') }}">all duels</a></div>
+</div>
+<div class="block"><span id="status"></span> <span id="note" class="muted"></span>
+  <div id="chain" class="muted" style="margin-top:4px"></div></div>
+<div class="duel">
+  <div class="side" id="ai"></div>
+  <div class="block"><div class="acts" id="acts"></div></div>
+  <div class="side" id="you"></div>
+</div>
+<script>
+let S = {{ state|tojson }};
+const img = c => `{{ url_for('views.index') }}img/small/${c}.jpg`;
+const name = c => (S.names[String(c)] || c);
+function card(c, pos) {
+  const back = c === null || c === undefined;
+  const def = pos && (pos & 0xC);
+  return `<div class="cardx ${back ? 'back' : ''} ${def ? 'def' : ''}" title="${back ? 'face-down' : name(c)}"
+    style="${back ? '' : `background-image:url(${img(c)})`}">${back ? '' : `<span>${name(c)}</span>`}</div>`;
+}
+function side(p, who) {
+  const P = S.board.players[p];
+  const zone = (lab, list) => `<div class="zone"><div class="lab">${lab}</div>${list || '<span class="muted">—</span>'}</div>`;
+  const field = (P.mzone || []).map(m => card(m.code, m.position)).join('');
+  const st = (P.szone || []).map(m => card(m.code, m.position)).join('');
+  const hand = (P.hand || []).map(c => card(c)).join('');
+  const gy = (P.grave || []).map(name).join(', ');
+  return `<h3><span>${who}</span><span>LP ${P.lp}</span></h3>
+    ${zone('monsters', field)}${zone('spell/trap', st)}${zone('hand', hand)}
+    <div class="muted" style="font-size:12px">GY (${(P.grave || []).length}): ${gy || '—'} ·
+      banished ${(P.banished || []).length} · deck ${P.deck_count} · extra ${P.extra_count}</div>`;
+}
+function render() {
+  document.getElementById('ai').innerHTML = side(S.ai, 'AI · ' + S.ai_deck);
+  document.getElementById('you').innerHTML = side(S.you, 'you · ' + S.user_deck);
+  const st = {"your move": "Your move", "thinking": "The AI is thinking…", "over": "Duel over"}[S.status] || S.status;
+  document.getElementById('status').textContent = `${st} · turn ${S.turn} (${S.turn_player === S.you ? 'yours' : "the AI's"})`;
+  document.getElementById('note').textContent = S.note ? '· ' + S.note : '';
+  document.getElementById('chain').textContent = S.chain.length ? 'chain: ' + S.chain.map(([c, p]) => `${p === S.you ? 'you' : 'AI'}: ${name(c)}`).join(' → ') : '';
+  document.getElementById('acts').innerHTML = (S.actions || []).map(a =>
+    `<button onclick="act(${a.i})">${a.label}</button>`).join('') || (S.status === 'your move' ? '' : '<span class="muted">waiting…</span>');
+}
+async function act(i) {
+  document.getElementById('acts').innerHTML = '<span class="muted">…</span>';
+  const r = await fetch(`{{ url_for('views.duel_act', did=state.id) }}`, {method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'i=' + i});
+  const j = await r.json();
+  if (j.error) { alert(j.error); }
+  else S = j;
+  render();
+}
+setInterval(async () => {
+  if (S.status !== 'thinking') return;
+  const r = await fetch(`{{ url_for('views.duel_state', did=state.id) }}`, {credentials: 'same-origin'});
+  if (r.ok) { S = await r.json(); render(); }
+}, 2000);
+render();
+</script>
+{% endblock %}

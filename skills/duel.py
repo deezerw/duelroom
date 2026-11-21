@@ -14,7 +14,7 @@ Who decides what:
   and the chain, never your hand.
 - The AI on ITS turn: a plan from the rooted solver (`plan`, run in its own
   process: it takes the think time), searched on a copy of the position in
-  which you hold ONE OF EVERY HAND TRAP IN YOUR DECKLIST (`--opp-hand`) and
+  which you hold ONE OF EVERY HAND TRAP IN YOUR DECKLIST (`--opp-hand-root`, patch 0010) and
   answer with them (the smart defender) -- so it plays around all of them,
   as a player who knows your list but not your hand. Followed while the duel
   matches it; anything else (you did not fire where it assumed) -> re-plan.
@@ -37,12 +37,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DUELS = ROOT / "results" / "duels"
 THINK_MS = 30_000            # the AI's search per plan (a lethal check, then its turn)
-# Play around your decklist's hand traps (--opp-hand + the smart defender). OFF until
-# the solver can swap your hand at the ROOT: --opp-hand adds the cards at the DUEL'S
-# start, which changes your hand from turn 1 and the core rejects the moves already
-# played (MSG_RETRY, 2026-11-20). Off, the AI plans as if you never respond -- still
-# without reading your hand -- and re-plans whenever you do.
-PLAY_AROUND = False
+# Play around your decklist's hand traps: patch 0010's --opp-hand-root puts one of
+# each in your hand once the moves so far have replayed (--opp-hand, which adds them
+# at the DUEL'S start, made the core reject those moves: MSG_RETRY), and the smart
+# defender answers with them. Off: the AI plans as if you never respond.
+PLAY_AROUND = True
 
 
 def _now():
@@ -219,15 +218,34 @@ def _plan_step(live, plan):
     from ygorl.engine.branch import actions_for_response
     from ygorl.solver.demo import canonical_response
 
-    if not plan:
-        return None
     p = live.point
-    raw = bytes.fromhex(plan[0])
-    try:
-        steps = actions_for_response(p.state, canonical_response(p.decision, raw))
-    except Exception:  # noqa: BLE001 -- a response this prompt cannot take
+    # The plan was searched with your deck's hand traps in your hand, so it holds
+    # YOUR answers at windows you only get with them -- passes, at prompts the real
+    # duel never asks. A planned pass that does not fit here is stepped over.
+    while plan:
+        raw = bytes.fromhex(plan[0])
+        try:
+            steps = actions_for_response(p.state, canonical_response(p.decision, raw))
+        except Exception:  # noqa: BLE001 -- a response this prompt cannot take
+            steps = None
+        if steps:
+            return list(steps)
+        if raw == _PASS:
+            del plan[0]
+            continue
+        if p.decision.name == "MSG_SELECT_CHAIN":
+            # an answer to a window of the planning copy's own: adding your assumed
+            # hand traps opens AI chain options the real duel does not have (seen
+            # 2026-11-20 at its first draw-phase window). One window, one answer:
+            # pass here and keep the rest of the plan in step.
+            del plan[0]
+            return [next((i for i, a in enumerate(p.actions) if a.kind == "pass"),
+                         len(p.actions) - 1)]
         return None
-    return list(steps) if steps else None
+    return None
+
+
+_PASS = b"\xff\xff\xff\xff"      # a declined chain window
 
 
 def advance(conn, did, spawn=True):
@@ -339,9 +357,9 @@ def plan_args(row, cards, turn):
     args = ["--player", str(ai), "--turns", str(turn), "--no-ref"]
     if PLAY_AROUND:
         traps = opp_hand(row["user_deck"], cards)
-        for c in traps:
-            args += ["--opp-hand", str(c)]
-        args += game.defender_args(traps, cards)
+        if traps:
+            args += ["--opp-hand-root", "|".join(map(str, traps))]
+            args += game.defender_args(traps, cards)
     args += game.own_turn_args(engine.DECKS / f"{row['ai_deck']}.ydk")
     return args
 
@@ -376,7 +394,9 @@ def plan(conn, did):
             r = game._solve(prefix, base + ["--target", target, "--goal-win",
                                             "--stop-on-win", str(game.STOP_ON_WIN)],
                             root, "lethal", row["think_ms"] // 2, int(t0))
-            if not (r["solution"] and game._winner(r["solution"]) == 1 - row["user_seat"]):
+            # under --goal-win a solution IS a win the solver verified -- on its copy
+            # with the assumed hand, which replaying the file here would lack
+            if not r["solution"]:
                 r = None
         if r is None:
             r = game._solve(prefix, base + ["--target", target], root, "build",
@@ -406,6 +426,12 @@ def view(conn, did):
         p = live.point
         mine = (p is not None and p.player == you and row["status"] == "your move")
         b["players"][ai]["hand"] = [None] * len(b["players"][ai].get("hand") or [])
+        # its SET cards too (POS_FACEDOWN_ATTACK 0x2 / _DEFENSE 0x8): you see a back
+        for z in ("mzone", "szone"):
+            for m in b["players"][ai].get(z) or []:
+                if m and m.get("position", 0) & 0xA:
+                    m["code"] = None
+                    m["overlay"] = [None] * len(m.get("overlay") or [])
         return {"id": row["id"], "status": row["status"], "note": row["note"],
                 "you": you, "ai": ai, "user_deck": row["user_deck"], "ai_deck": row["ai_deck"],
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,

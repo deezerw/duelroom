@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import (Blueprint, Response, abort, flash, redirect,
-                   render_template, request, send_from_directory, url_for)
+                   jsonify, render_template, request, send_from_directory, url_for)
 from werkzeug.utils import secure_filename
 
 import json
@@ -1443,3 +1443,84 @@ def pilot(name):
         traps=sorted(scenarios.HANDTRAPS.items(), key=lambda kv: kv[1]),
         blind=scenarios.BLIND_SPOTS,
         recent=recent)
+
+
+# --- duel the AI (skills/duel.py) ----------------------------------------------
+
+def _deck_names():
+    return sorted(p.stem for p in engine.DECKS.glob("*.ydk"))
+
+
+@bp.route("/duel")
+@login_required
+def duel_list():
+    from skills import duel
+    c = conn()
+    duel.schema(c)
+    rows = [dict(r) for r in c.execute("SELECT id, user_deck, ai_deck, user_seat, status, note, "
+                                       "updated FROM duels ORDER BY id DESC LIMIT 30")]
+    return render_template("duel_list.html", duels=rows, decks=_deck_names(),
+                           mine=db.get_meta(c, "active_deck"))
+
+
+@bp.route("/duel/new", methods=["POST"])
+@login_required
+def duel_new():
+    from skills import duel
+    decks = set(_deck_names())
+    you, ai = request.form.get("you"), request.form.get("ai")
+    if you not in decks or ai not in decks:
+        flash("Pick both decks.")
+        return redirect(url_for("views.duel_list"))
+    think = min(max(request.form.get("think", type=int) or 30, 10), 180)
+    did = duel.create(conn(), you, ai, user_first=request.form.get("first") == "1",
+                      think_ms=think * 1000)
+    return redirect(url_for("views.duel_page", did=did))
+
+
+def _duel_state(did):
+    from skills import duel
+    c = conn()
+    v = duel.view(c, did)
+    codes = set()
+    for p in v["board"]["players"]:
+        for z in ("mzone", "szone"):
+            codes |= {m["code"] for m in p.get(z) or [] if m}
+        for z in ("hand", "grave", "banished", "extra_faceup"):
+            codes |= {x for x in p.get(z) or [] if x}
+    codes |= {code for code, _p in v["chain"]}
+    names = {}
+    for code in codes:
+        r = card_db.resolve(c, code)
+        names[str(code)] = r["name"] if r else str(code)
+    return {**v, "names": names}
+
+
+@bp.route("/duel/<int:did>")
+@login_required
+def duel_page(did):
+    try:
+        state = _duel_state(did)
+    except KeyError:
+        abort(404)
+    return render_template("duel.html", state=state)
+
+
+@bp.route("/duel/<int:did>/state")
+@login_required
+def duel_state(did):
+    try:
+        return jsonify(_duel_state(did))
+    except KeyError:
+        abort(404)
+
+
+@bp.route("/duel/<int:did>/act", methods=["POST"])
+@login_required
+def duel_act(did):
+    from skills import duel
+    try:
+        duel.user_act(conn(), did, int(request.form.get("i", -1)))
+    except (ValueError, KeyError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_duel_state(did))

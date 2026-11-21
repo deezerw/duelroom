@@ -28,12 +28,20 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0009: --no-own-chain, the searcher never chains listed cards (its own-turn
 # Mulcharmy draws); the defender's copies of the same code are untouched.
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0009-no-own-chain.patch" >&2)
+# 0010: --opp-hand-root, cards put in the opponent's hand once --root has replayed
+# (duel mode: the AI assumes every hand trap of your list, never your real hand).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0010-opp-hand-root.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
-"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--root" || { echo "built binary lacks --root" >&2; exit 1; }
-"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--stop-on-win" || { echo "built binary lacks --stop-on-win" >&2; exit 1; }
-"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--opp-smart" || { echo "built binary lacks --opp-smart" >&2; exit 1; }
-"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--opp-branches" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
-"$dst/bin/combosolver" --help 2>&1 | grep -q -- "--no-self-target" || { echo "built binary lacks --no-self-target" >&2; exit 1; }
+# read the help ONCE: `--help | grep -q` under pipefail failed spuriously (grep -q exits
+# at its match, the solver dies of SIGPIPE) once the help text grew (2026-11-20)
+help="$("$dst/bin/combosolver" --help 2>&1)"
+grep -q -- "--root" <<<"$help" || { echo "built binary lacks --root" >&2; exit 1; }
+grep -q -- "--stop-on-win" <<<"$help" || { echo "built binary lacks --stop-on-win" >&2; exit 1; }
+grep -q -- "--opp-smart" <<<"$help" || { echo "built binary lacks --opp-smart" >&2; exit 1; }
+grep -q -- "--opp-branches" <<<"$help" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
+grep -q -- "--no-self-target" <<<"$help" || { echo "built binary lacks --no-self-target" >&2; exit 1; }
+grep -q -- "--no-own-chain" <<<"$help" || { echo "built binary lacks --no-own-chain" >&2; exit 1; }
+grep -q -- "--opp-hand-root" <<<"$help" || { echo "built binary lacks --opp-hand-root" >&2; exit 1; }
 echo "$dst/bin/combosolver"

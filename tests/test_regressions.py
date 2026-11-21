@@ -6858,7 +6858,7 @@ def test_duel_hides_the_ais_hand_and_never_plans_on_yours(tmp_path, monkeypatch)
     for around in (False, True):
         monkeypatch.setattr(duel, "PLAY_AROUND", around)
         args = duel.plan_args(row, cards, 2)
-        named = {a for i, a in enumerate(args) if i and args[i - 1] == "--opp-hand"}
+        named = {c for i, a in enumerate(args) if i and args[i - 1] == "--opp-hand-root" for c in a.split("|")}
         assert named <= {str(c) for c in duel.opp_hand("imported", cards)}
         assert not (named - {str(c) for c in duel.opp_hand("imported", cards)}) and (
             around or not named)

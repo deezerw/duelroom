@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="page-head">
+  <h1>Duel the AI</h1>
+  <div class="sub">You play every decision yourself. The AI knows your decklist, never your hand:
+    on its turn it plans with the solver (it takes its think time), on yours it answers with
+    its hand traps and board the way the games' defender does.</div>
+</div>
+<form method="post" action="{{ url_for('views.duel_new') }}" class="block" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+  <label>your deck<br><select name="you">{% for d in decks %}<option {{ 'selected' if d == mine }}>{{ d }}</option>{% endfor %}</select></label>
+  <label>AI's deck<br><select name="ai">{% for d in decks %}<option {{ 'selected' if d == 'Angelechy-Meta' }}>{{ d }}</option>{% endfor %}</select></label>
+  <label>you go<br><select name="first"><option value="1">first</option><option value="0">second</option></select></label>
+  <label>AI think time (s)<br><input type="number" name="think" value="30" min="10" max="180" style="width:80px"></label>
+  <button type="submit">Start a duel</button>
+</form>
+{% if duels %}
+<h2>Your duels</h2>
+<table class="impact">
+  <thead><tr><th>#</th><th>you</th><th>AI</th><th>status</th><th class="extra">updated</th></tr></thead>
+  <tbody>
+  {% for d in duels %}
+    <tr><td><a href="{{ url_for('views.duel_page', did=d.id) }}">{{ d.id }}</a></td>
+      <td>{{ d.user_deck }} <span class="muted">({{ 'first' if d.user_seat == 0 else 'second' }})</span></td>
+      <td>{{ d.ai_deck }}</td><td>{{ d.status }}{% if d.note %} <span class="muted">· {{ d.note }}</span>{% endif %}</td>
+      <td class="extra muted">{{ d.updated[:16] }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
