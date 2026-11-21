@@ -6965,6 +6965,12 @@ def test_duel_ai_negates_only_a_live_card(monkeypatch):
     pick = [NS(card=NS(code=purulia, loc=loc(0))), NS(card=NS(code=sp, loc=loc(0)))]
     live2 = NS(point=NS(actions=pick), board=lambda: board)
     assert duel._follow_up(live2, 1, cards, dead) == 1, "the live card, not the body"
+    engraver = 60764609
+    bls = 70405001        # Black Luster Soldier, 3000 ATK over Engraver's 1800
+    pick = [NS(card=NS(code=bls, loc=loc(0))), NS(card=NS(code=engraver, loc=loc(0)))]
+    live3 = NS(point=NS(actions=pick), board=lambda: board)
+    assert duel._follow_up(live3, 1, cards, dead) == 0, "by ATK without keys"
+    assert duel._follow_up(live3, 1, cards, dead, [engraver]) == 1, "your kill key over ATK"
 
 
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):

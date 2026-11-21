@@ -195,7 +195,7 @@ def _negate_live(board, player, kind, dead):
                for z in zones for c in board["players"][player].get(z) or [])
 
 
-def defend(live, ai, respond, cards, wasted=(), dead=()):
+def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
     """The AI's answer on YOUR turn (the games' smart defender in Python):
     the eligible piece ranked first in `respond` (hand traps, then negates,
     then the rest), board pieces held until you control a monster, never
@@ -205,7 +205,7 @@ def defend(live, ai, respond, cards, wasted=(), dead=()):
     kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
     if p.decision.name != "MSG_SELECT_CHAIN":
-        return _follow_up(live, ai, cards, dead)
+        return _follow_up(live, ai, cards, dead, keys)
     if live.chain and live.chain[-1][1] == ai:
         return passing
     # your own-turn-dead card on your own turn (Mulcharmy Fuwalos on your turn
@@ -235,7 +235,7 @@ def defend(live, ai, respond, cards, wasted=(), dead=()):
     return best if "chain" in kinds else passing
 
 
-def _follow_up(live, ai, cards, dead=()):
+def _follow_up(live, ai, cards, dead=(), keys=()):
     """Targets / costs of the AI's own effect. Where one of YOUR cards can be
     chosen: your most valuable -- an interruption piece first, then the
     highest ATK. Where only its own cards can: the one it loses least -- not a
@@ -253,6 +253,9 @@ def _follow_up(live, ai, cards, dead=()):
         owner = c.loc.controller
         if owner != ai and c.code in dead:
             return (-1, 0)          # your hand-trap body: the least worth taking
+        if owner != ai and c.code in keys:
+            # your deck's kill keys first, most important first (patch 0012 in Python)
+            return (2 + len(keys) - list(keys).index(c.code), 0)
         return (1 if c.code in pieces[owner] else 0, (card.attack if card is not None else 0) or 0)
 
     opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
@@ -314,6 +317,7 @@ def advance(conn, did, spawn=True):
                                      cards)
         wasted = set(game.own_turn_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
         dead = set(game.field_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
+        keys = game.kill_keys(engine.DECKS / f"{row['user_deck']}.ydk")
         plan = json.loads(row["plan"]) if row["plan"] else None
         acts = json.loads(row["actions"])
         for _ in range(2000):
@@ -331,7 +335,7 @@ def advance(conn, did, spawn=True):
                       plan=json.dumps(plan) if plan else None)
                 return "your move"
             if live.session.tracker.turn_player != ai:
-                idxs = [defend(live, ai, respond, cards, wasted, dead)]
+                idxs = [defend(live, ai, respond, cards, wasted, dead, keys)]
             else:
                 idxs = _plan_step(live, plan)
                 if idxs is None:
