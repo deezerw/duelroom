@@ -302,6 +302,16 @@ CREATE TABLE IF NOT EXISTS game_used (
 -- What you stopped of the enemy's in each game (skills/stops.py), read once
 -- from its replay like game_used: JSON {played: {code: turn},
 -- stops: [[turn, kind (stops.STOP_KINDS; "removed" before v2), your code or 0 = field, their code]]}.
+CREATE TABLE IF NOT EXISTS flags (           -- positions you flagged as unoptimal (2026-11-21)
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    created  TEXT NOT NULL,
+    kind     TEXT NOT NULL,                     -- 'watch' (a stored game / line) or 'duel'
+    page     TEXT NOT NULL,                     -- the page it was flagged on (path + query)
+    step     INTEGER,                           -- playback frame, or the duel's move count
+    note     TEXT,
+    status   TEXT NOT NULL DEFAULT 'open'       -- open / resolved
+);
+
 CREATE TABLE IF NOT EXISTS game_choices (
     deck_hash   TEXT NOT NULL,
     enemy       TEXT NOT NULL,

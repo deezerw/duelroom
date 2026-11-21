@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}flags · duelroom{% endblock %}
+{% block body %}
+<div class="page-head">
+  <h1>Flags</h1>
+  <div class="sub">Positions you flagged as unoptimal, with your note. Each is a test case: the AI is
+    checked against it as it changes. Flag from a game's playback or a duel with the ⚑ button.</div>
+</div>
+<div class="panel">
+{% if not flags %}<p class="muted" style="margin:0">Nothing flagged yet.</p>{% else %}
+<table class="impact" style="width:100%">
+  <thead><tr><th>when</th><th>where</th><th>your note</th><th></th></tr></thead>
+  <tbody>
+  {% for f in flags %}
+    <tr style="{{ 'opacity:.55' if f.status == 'resolved' else '' }}">
+      <td style="white-space:nowrap">{{ f.when }}</td>
+      <td><a href="{{ f.href }}">{{ 'game playback' if f.kind == 'watch' else 'duel' }}{% if f.step is not none %} · {{ 'frame' if f.kind == 'watch' else 'move' }} {{ f.step }}{% endif %}</a></td>
+      <td>{{ f.note or '—' }}</td>
+      <td><form method="post" action="{{ url_for('views.flag_status', fid=f.id, what='reopen' if f.status == 'resolved' else 'resolve') }}" style="margin:0">
+        <button>{{ 'reopen' if f.status == 'resolved' else 'resolved' }}</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+</div>
+{% endblock %}

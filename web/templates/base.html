@@ -188,6 +188,7 @@
        class="{{ 'on' if ep == 'views.games_view' }}">games</a>
     <a href="{{ url_for('views.duel_list') }}"
        class="{{ 'on' if ep in ('views.duel_list', 'views.duel_page', 'views.duel_new') }}">duel</a>
+    <a href="{{ url_for('views.flags_view') }}" class="{{ 'on' if ep == 'views.flags_view' }}">flags</a>
     <a href="{{ url_for('views.job_list') }}"
        class="{{ 'on' if ep in ('views.job_list', 'views.job_detail', 'views.maintenance') }}">jobs</a>
   </nav>

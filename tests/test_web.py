@@ -1176,6 +1176,26 @@ def test_games_page_leads_with_the_latest_results(loggedin):
         assert f'id="{anchor}"' in opened and 'class="oldsec" open' in opened
 
 
+def test_flag_a_position_as_unoptimal(loggedin):
+    """User, 2026-11-21: a button to flag a move as unoptimal, saving the
+    position and a note as a test case. Listed on /flags, linking back to the
+    frame; resolvable; a bad flag (no page / unknown kind) is refused."""
+    from skills import db
+
+    r = loggedin.post("/flag", json={"kind": "watch", "page": "/watch/game/imported/E/1/1000/0",
+                                     "step": 42, "note": "should have set Scream"})
+    assert r.status_code == 200 and r.get_json()["ok"]
+    assert loggedin.post("/flag", json={"kind": "nope", "page": "/x"}).status_code == 400
+    assert loggedin.post("/flag", json={"kind": "duel", "page": "http://evil"}).status_code == 400
+    page = loggedin.get("/flags").get_data(as_text=True)
+    assert "should have set Scream" in page and "#step=42" in page
+    fid = db.connect().execute("SELECT MAX(id) FROM flags").fetchone()[0]
+    assert loggedin.post(f"/flags/{fid}/resolve").status_code == 302
+    assert db.connect().execute("SELECT status FROM flags WHERE id=?", (fid,)).fetchone()[0] == "resolved"
+    with db.connect() as c:
+        c.execute("DELETE FROM flags WHERE id=?", (fid,))
+
+
 def test_watch_latest_game_opens_the_newest_one(loggedin):
     """"Watch latest game" resolves at click time to the newest watchable game."""
     from skills import db, impact, trainer

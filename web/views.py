@@ -2,7 +2,7 @@
 
 import re
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import (Blueprint, Response, abort, flash, redirect,
@@ -1593,6 +1593,50 @@ def duel_state(did):
         return jsonify(_duel_state(did))
     except KeyError:
         abort(404)
+
+
+@bp.route("/flag", methods=["POST"])
+@login_required
+def flag_add():
+    """Flag the position you are looking at as unoptimal (user, 2026-11-21): the
+    page, the frame / move count, your note. They become the AI's test cases."""
+    d = request.get_json(silent=True) or request.form
+    kind = d.get("kind") if d.get("kind") in ("watch", "duel") else None
+    page = str(d.get("page") or "")
+    if not kind or not page.startswith("/") or len(page) > 400:
+        return jsonify({"error": "bad flag"}), 400
+    try:
+        step = int(d.get("step")) if d.get("step") not in (None, "") else None
+    except (TypeError, ValueError):
+        step = None
+    c = conn()
+    with c:
+        c.execute("INSERT INTO flags (created, kind, page, step, note) VALUES (?,?,?,?,?)",
+                  (datetime.now().astimezone().isoformat(timespec="seconds"), kind, page, step,
+                   str(d.get("note") or "")[:2000]))
+    return jsonify({"ok": True, "open": c.execute("SELECT COUNT(*) FROM flags WHERE status='open'").fetchone()[0]})
+
+
+@bp.route("/flags")
+@login_required
+def flags_view():
+    c = conn()
+    rows = [dict(r) for r in c.execute("SELECT * FROM flags ORDER BY status = 'resolved', id DESC")]
+    for r in rows:
+        r["when"] = _when(datetime.fromisoformat(r["created"]).astimezone(timezone.utc).isoformat())
+        r["href"] = r["page"] + (f"#step={r['step']}" if r["kind"] == "watch" and r["step"] is not None else "")
+    return render_template("flags.html", flags=rows)
+
+
+@bp.route("/flags/<int:fid>/<what>", methods=["POST"])
+@login_required
+def flag_status(fid, what):
+    if what not in ("resolve", "reopen"):
+        abort(404)
+    c = conn()
+    with c:
+        c.execute("UPDATE flags SET status=? WHERE id=?", ("resolved" if what == "resolve" else "open", fid))
+    return redirect(url_for("views.flags_view"))
 
 
 @bp.route("/duel/<int:did>/undo", methods=["POST"])

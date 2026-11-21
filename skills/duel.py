@@ -780,6 +780,7 @@ def view(conn, did):
                 "phase": live.session.tracker.phase,
                 "respond": row.get("respond") or "auto",
                 "can_undo": row["status"] != "thinking" and bool(json.loads(row["actions"] or "[]")),
+                "moves": len(json.loads(row["actions"] or "[]")),
                 "board": b, "chain": list(live.chain),
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)
