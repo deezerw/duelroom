@@ -199,14 +199,35 @@ NEGATE_LIVE = None
 _bin_help = {}
 
 
-def _negate_live():
-    if NEGATE_LIVE is not None:
-        return NEGATE_LIVE
+def _bin_has(flag):
     key = str(ROOTED_BIN)
     if key not in _bin_help:
         _bin_help[key] = subprocess.run([key, "--help"], capture_output=True,
                                         text=True).stdout if ROOTED_BIN.exists() else ""
-    return "--opp-negate" in _bin_help[key]
+    return flag in _bin_help[key]
+
+
+def _negate_live():
+    if NEGATE_LIVE is not None:
+        return NEGATE_LIVE
+    return _bin_has("--opp-negate")
+
+
+# The searcher's kill keys (patch 0012 --opp-key): the cards its killing turn
+# hinges on, read from its stored kills by tools/experiments/kill_keys.py into
+# KILL_KEYS_FILE, most important first. Angelechy-Meta 2026-11-21: Enlisted
+# (Kusanagi's Tuner, 94% of 383 kills), Destrier (54%). None: emitted when
+# ROOTED_BIN has the flag; an A/B arm sets True / False.
+KILL_KEYS_FILE = Path(__file__).resolve().parents[1] / "data" / "kill_keys.json"
+KILL_KEYS_LIVE = None
+
+
+def kill_keys(deck):
+    """`deck`'s kill keys by its file name, most material-share first; []."""
+    if not KILL_KEYS_FILE.exists():
+        return []
+    entry = json.loads(KILL_KEYS_FILE.read_text()).get(Path(deck).stem)
+    return list(entry["keys"]) if entry else []
 
 
 def field_dead(deck):
@@ -238,6 +259,10 @@ def own_turn_args(deck):
         dead = field_dead(deck)
         if dead:
             args += ["--opp-dead", "|".join(map(str, dead))]
+    if KILL_KEYS_LIVE if KILL_KEYS_LIVE is not None else _bin_has("--opp-key"):
+        keys = kill_keys(deck)
+        if keys:
+            args += ["--opp-key", "|".join(map(str, keys))]
     codes = own_turn_dead(deck)
     if not codes:
         return args

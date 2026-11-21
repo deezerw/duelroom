@@ -1,0 +1,78 @@
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-21 11:14:10.144451619 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-21 12:24:41.879296816 -0500
+@@ -1497,6 +1497,8 @@
+ 	std::vector<uint32_t> opp_hand_root;
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <code|code...> (patch 0011).
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
++	// --opp-key <code|code...> (patch 0012).
++	std::vector<uint32_t> opp_key;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2045,6 +2047,8 @@
+ 				"  --opp-negate-mon <c>  the same, counting face-up MONSTERS only (0011)\n"
+ 				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
+ 				"                     no live negate target, least worth taking (0011)\n"
++				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
++				"                     defender's target pick takes one over any other (0012)\n"
+ 				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
+ 				"                     with --start [--root]) and write to <d> one prefix\n"
+ 				"                     per reply the defender did not make at each of its\n"
+@@ -2564,7 +2568,7 @@
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+-				  a == "--opp-negate-mon" || a == "--opp-dead") {
++				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2573,7 +2577,8 @@
+ 				: (a == "--opp-hand-root") ? o.opp_hand_root
+ 				: (a == "--opp-negate") ? o.opp_negate
+ 				: (a == "--opp-negate-mon") ? o.opp_negate_mon
+-				: (a == "--opp-dead") ? o.opp_dead : o.opp_respond;
++				: (a == "--opp-dead") ? o.opp_dead
++				: (a == "--opp-key") ? o.opp_key : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+@@ -4225,6 +4230,7 @@
+ 	cfg.opp_negate = opt.opp_negate;
+ 	cfg.opp_negate_mon = opt.opp_negate_mon;
+ 	cfg.opp_dead = opt.opp_dead;
++	cfg.opp_key = opt.opp_key;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-21 11:14:01.731252579 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-21 12:24:41.871296611 -0500
+@@ -1893,6 +1893,16 @@
+ 		   std::find(cfg.opp_dead.begin(), cfg.opp_dead.end(),
+ 					 duel.Db().Canonical(cands[i].code)) != cfg.opp_dead.end())
+ 			val[i] = 0;
++		// Patch 0012: the attacker's kill keys first, in --opp-key order (its
++		// kills hinge on them: Angelechy's Kusanagi used Enlisted as its Tuner in
++		// 332 of 340 kills, and the ATK pick took Destrier over it).
++		if(cands[i].con != prompt_player && !cfg.opp_key.empty()) {
++			const auto it = std::find(cfg.opp_key.begin(), cfg.opp_key.end(),
++									  duel.Db().Canonical(cands[i].code));
++			if(it != cfg.opp_key.end())
++				val[i] = (int64_t(1) << 40) -
++						 (int64_t(it - cfg.opp_key.begin()) << 32) + val[i];
++		}
+ 	}
+ 	size_t best = 0;
+ 	int64_t best_v = 0;
+--- combo-solver-rooted/solver-patched/search.h	2026-11-21 11:14:01.728252508 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-21 12:24:41.869296559 -0500
+@@ -2728,6 +2728,9 @@
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <codes> (duelroom patch
+ 	// 0011): see Search::NegateLive.
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
++	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
++	// important first; the defender's target pick takes one over any other.
++	std::vector<uint32_t> opp_key;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and

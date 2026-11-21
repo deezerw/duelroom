@@ -5648,6 +5648,25 @@ def test_negate_only_pieces_wait_for_a_live_target(monkeypatch):
     assert "--opp-dead" not in game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
 
 
+def test_the_defender_is_told_the_searchers_kill_keys_in_order(monkeypatch, tmp_path):
+    """Patch 0012: the searcher's kill keys (kill_keys.py, most material-share
+    first) reach the defender as --opp-key in that order -- Angelechy's
+    Enlisted before Destrier -- and only when the binary has the flag."""
+    import json
+
+    from skills import engine, game
+
+    f = tmp_path / "kill_keys.json"
+    f.write_text(json.dumps({"Angelechy-Meta": {"keys": [81797573, 55393975], "kills": 383}}))
+    monkeypatch.setattr(game, "KILL_KEYS_FILE", f)
+    monkeypatch.setattr(game, "KILL_KEYS_LIVE", True)
+    args = game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
+    assert args[args.index("--opp-key") + 1] == "81797573|55393975"
+    assert "--opp-key" not in game.own_turn_args(engine.DECKS / "imported.ydk"), "no keys read"
+    monkeypatch.setattr(game, "KILL_KEYS_LIVE", False)
+    assert "--opp-key" not in game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
+
+
 def test_defence_family_their_turn_keeps_the_script_that_holds(monkeypatch, tmp_path):
     """Patch 0004 family: on their turn the kill check runs once per defence;
     a loss needs every defence beaten, otherwise the one that kept the most
