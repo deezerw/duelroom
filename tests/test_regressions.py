@@ -6834,3 +6834,33 @@ def test_trainer_asks_for_a_marked_spell_set_and_never_for_a_dead_card(tmp_path)
     assert '@szone:fd' in src and "0x2 | 0x4" in src
     gen = inspect.getsource(trainer.run_generation)
     assert "never_live" in gen and "not in dead" in gen
+
+
+def test_duel_hides_the_ais_hand_and_never_plans_on_yours(tmp_path, monkeypatch):
+    """Duel mode (user, 2026-11-20): the AI may know your decklist, never your
+    hand. The page shows its hand as a count; its planning flags name no card
+    of your real hand (with PLAY_AROUND they name your deck's hand traps)."""
+    import os
+    from skills import db, duel, engine
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    v = duel.view(conn, did)
+    assert v["status"] == "your move" and v["actions"]
+    assert all(c is None for c in v["board"]["players"][v["ai"]]["hand"])
+    assert all(c for c in v["board"]["players"][v["you"]]["hand"])
+    row = duel.get(conn, did)
+    real_hand = {str(c) for c in v["board"]["players"][v["you"]]["hand"]}
+    cards = default_cards()
+    for around in (False, True):
+        monkeypatch.setattr(duel, "PLAY_AROUND", around)
+        args = duel.plan_args(row, cards, 2)
+        named = {a for i, a in enumerate(args) if i and args[i - 1] == "--opp-hand"}
+        assert named <= {str(c) for c in duel.opp_hand("imported", cards)}
+        assert not (named - {str(c) for c in duel.opp_hand("imported", cards)}) and (
+            around or not named)
+    monkeypatch.setattr(duel, "PLAY_AROUND", False)
+    assert "--opp-respond" not in duel.plan_args(row, cards, 2)   # PLAY_AROUND off: you never answer
