@@ -78,7 +78,8 @@ def create(conn, user_deck, ai_deck, user_first=True, seed=None, think_ms=THINK_
             (user_deck, ai_deck, 0 if user_first else 1, seed, "", "your move", int(think_ms),
              _now(), _now()))
     did = cur.lastrowid
-    root = DUELS / str(did)
+    # number AND seed: a database started afresh never lands in an old folder
+    root = DUELS / f"{did}-{seed}"
     root.mkdir(parents=True, exist_ok=True)
 
     def shuffled(name, salt):
@@ -411,8 +412,10 @@ def deck_target(conn, deck):
 
 
 def _spawn_plan(did):
+    from . import db
+    folder = Path(get(db.connect(), did)["template"]).parent
     subprocess.Popen([sys.executable, "-m", "skills.duel", "plan", str(did)], cwd=str(ROOT),
-                     stdout=open(DUELS / str(did) / "plan.log", "a"), stderr=subprocess.STDOUT,
+                     stdout=open(folder / "plan.log", "a"), stderr=subprocess.STDOUT,
                      start_new_session=True)
 
 
@@ -429,7 +432,7 @@ def plan(conn, did):
     live = Live(row)
     try:
         turn = live.session.tracker.turn
-        root = DUELS / str(did) / f"plan-{len(json.loads(row['actions']))}"
+        root = Path(row["template"]).parent / f"plan-{len(json.loads(row['actions']))}"
         start, prefix = breaking.split_position(Replay.from_yrp(Path(row["template"])),
                                                 live.responses, root)
         cards = live.cards
