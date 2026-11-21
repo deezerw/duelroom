@@ -12,6 +12,10 @@ in 340, its Tuner Angelechy Enlisted in 332 -- while the defender took the
 highest-ATK target and S:P banished Enlisted in 48 of its 125 uses.
 
     venv/bin/python tools/experiments/kill_keys.py [enemy] [device]   -> writes data/kill_keys.json
+    venv/bin/python tools/experiments/kill_keys.py --ours [enemy] [device]
+        OUR deck's keys, from its going-second wins vs that enemy (our turn 2 is
+        engine player 1's turn 2 there too): the enemy's defender takes them first
+        on our break -- the strong enemy the user asked for.
 """
 
 import json
@@ -30,7 +34,7 @@ OUT = ROOT / "data" / "kill_keys.json"
 EXTRA_SUMMON = 0x2000 | 0x800000 | 0x4000000      # TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK
 
 
-def main(enemy="Angelechy-Meta", device="duelpc"):
+def main(enemy="Angelechy-Meta", device=None, ours=False):
     os.environ.update(engine.env())
     import ygorl.engine.messages as M
     from ygorl.engine.duel import default_cards
@@ -40,9 +44,13 @@ def main(enemy="Angelechy-Meta", device="duelpc"):
     c = db.connect()
     nm = lambda x: (card_db.resolve(c, x) or {"name": str(x)})["name"]  # noqa: E731
     dh = trainer.deck_hash(engine.DECKS / "imported.ydk")
-    games = c.execute("SELECT line FROM game_results WHERE deck_hash=? AND enemy=? AND first=1 "
-                      "AND device=? AND outcome='lost_t2' AND line IS NOT NULL",
-                      (dh, enemy, device)).fetchall()
+    # the killing turn is engine player 1's turn 2 both ways: going first the
+    # enemy's (it killed us: lost_t2), going second ours (we won on turn 2)
+    first, outcome, who = (0, "win", "imported") if ours else (1, "lost_t2", enemy)
+    device = device or ("server" if ours else "duelpc")
+    games = c.execute("SELECT line FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+                      "AND device=? AND outcome=? AND line IS NOT NULL",
+                      (dh, enemy, first, device, outcome)).fetchall()
     mats, n = Counter(), 0
     for g in games:
         if not Path(g["line"]).exists():
@@ -79,14 +87,16 @@ def main(enemy="Angelechy-Meta", device="duelpc"):
             mats.update(st["last"])
     # most important first: --opp-key's order is the defender's priority
     keys = [code for code, k in mats.most_common() if n and k / n >= KEY_SHARE]
-    print(f"{enemy} [{device}]: {n} kills read; material of the last big summon:")
+    print(f"{who} (vs {enemy}) [{device}]: {n} kills read; material of the last big summon:")
     for code, k in mats.most_common(8):
         print(f"   {nm(code)[:40]:40} {k:4} ({k / max(1, n):.0%}){'   <-- KEY' if code in keys else ''}")
     data = json.loads(OUT.read_text()) if OUT.exists() else {}
-    data[enemy] = {"keys": keys, "kills": n, "device": device, "share": KEY_SHARE}
+    data[who] = {"keys": keys, "kills": n, "device": device, "share": KEY_SHARE,
+                 **({"vs": enemy} if ours else {})}
     OUT.write_text(json.dumps(data, indent=1) + "\n")
-    print(f"wrote {OUT}: {enemy} keys {[nm(x) for x in keys]}")
+    print(f"wrote {OUT}: {who} keys {[nm(x) for x in keys]}")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    a = [x for x in sys.argv[1:] if x != "--ours"]
+    main(*a, ours="--ours" in sys.argv)

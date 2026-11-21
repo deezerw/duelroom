@@ -7,5 +7,14 @@
   "kills": 383,
   "device": "duelpc",
   "share": 0.5
+ },
+ "imported": {
+  "keys": [
+   60764609
+  ],
+  "kills": 64,
+  "device": "server",
+  "share": 0.5,
+  "vs": "Angelechy-Meta"
  }
 }
