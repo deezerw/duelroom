@@ -113,7 +113,7 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-20e"
+METHOD = "2026-11-21a"
 METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -992,6 +992,8 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
         + own_turn_args(enemy_deck)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = fewest_gifts(r.get("solutions") or [], our_deck) or r["approach"]
+    if src is not None and usable_gifts(src, 1, our_deck, 2):
+        src = _regift(tpl, args, scratch, ms, seed, our_deck, r) or src
     if src is None:
         return None
     dealt = replay(src, []).board
@@ -1110,6 +1112,40 @@ def usable_gifts(source, player, receiver_deck, until_turn):
         return 0
     finally:
         session.close()
+
+
+GIFT_RETRIES = 2     # extra enemy turn-1 solves when its line hands us a usable monster
+
+
+def _approach_progress(path):
+    """X of a solver 'best_approach_XofY' file (targets placed), else -1."""
+    m = re.search(r"best_approach_(\d+)of\d+", Path(path).name)
+    return int(m.group(1)) if m else -1
+
+
+def _regift(tpl, args, scratch, ms, seed, our_deck, first):
+    """The enemy's turn 1 handed us a monster we can USE: re-solve with other
+    seeds and keep, over every line found, a solution before any approach,
+    approaches only at their best goal progress, then the fewest usable gifts,
+    the fewest gifts. The gift rule saw only full SOLUTIONS, and the enemy's
+    goal is often unreached -- its one best approach gifted freely: 5 of the
+    first 13 games of the 2026-11-21 smoke batch gave us a usable Bastion /
+    Castellan / Destrier / Shatranga."""
+    runs = [first]
+    for k in range(1, GIFT_RETRIES + 1):
+        runs.append(_solve(tpl, args, Path(scratch) / f"regift{k}", "t1", ms, seed + 7919 * k))
+    sols = [s for r in runs for s in (r.get("solutions") or [])]
+    if sols:
+        pool = sols
+    else:
+        apps = [r["approach"] for r in runs if r.get("approach")]
+        if not apps:
+            return None
+        best = max(_approach_progress(a) for a in apps)
+        pool = [a for a in apps if _approach_progress(a) == best]
+    score = [(usable_gifts(p, 1, our_deck, 2),
+              len(gifts(replay(p, until_turn=2).board, 1, our_deck)), i) for i, p in enumerate(pool)]
+    return pool[min(score)[2]]
 
 
 def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):

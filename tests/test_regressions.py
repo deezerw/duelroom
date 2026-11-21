@@ -6925,3 +6925,33 @@ def test_trainer_asks_small_stack_jumps_first_and_never_far_past_its_best():
     assert sizes and max(sizes) <= 1 + trainer.STACK_JUMP
     tiers = [0 if s - 1 in (0, 1) else 1 if s - 1 in (-1, 2, 3) else 2 for s in sizes]
     assert tiers == sorted(tiers), "best-yield jumps first"
+
+
+def test_a_gifting_enemy_turn_1_is_re_solved_and_the_least_harmful_line_kept(monkeypatch, tmp_path):
+    """2026-11-21 smoke batch: with no full solution the enemy's one best
+    approach gave us usable monsters in 5 of 13 games. _regift re-solves and
+    keeps solutions before approaches, approaches at their best progress,
+    then the fewest usable gifts."""
+    from pathlib import Path
+    from types import SimpleNamespace as NS
+    from skills import game
+
+    usable = {"a1": 1, "a2": 0, "a3": 0, "s1": 1}
+    runs = iter([{"solutions": [], "approach": Path("best_approach_2of3.yrp")}])
+    def fake_solve(tpl, args, scratch, label, ms, seed):
+        return next(runs)
+    monkeypatch.setattr(game, "usable_gifts", lambda p, pl, d, t: usable.get(Path(p).stem.split("_")[-1], 0))
+    monkeypatch.setattr(game, "gifts", lambda b, pl, d: [])
+    monkeypatch.setattr(game, "replay", lambda p, until_turn=None: NS(board={}))
+    # first run: approach 3of3 (usable); retries: a 2of3 (clean) and a 3of3 (clean)
+    first = {"solutions": [], "approach": Path("best_approach_3of3_a1.yrp")}
+    runs = iter([{"solutions": [], "approach": Path("best_approach_2of3_a2.yrp")},
+                 {"solutions": [], "approach": Path("best_approach_3of3_a3.yrp")}])
+    monkeypatch.setattr(game, "_solve", fake_solve)
+    got = game._regift("t", [], tmp_path, 1, 1, "d", first)
+    assert got.name == "best_approach_3of3_a3.yrp"         # best progress, no usable gift
+    # a full solution anywhere beats every approach, even if it gifts
+    runs = iter([{"solutions": [Path("solution_01_s1.yrp")], "approach": None},
+                 {"solutions": [], "approach": Path("best_approach_3of3_a3.yrp")}])
+    got = game._regift("t", [], tmp_path, 1, 1, "d", first)
+    assert got.name == "solution_01_s1.yrp"
