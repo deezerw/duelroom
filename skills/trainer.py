@@ -924,9 +924,20 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
     banned = set(_banned_targets(p)) | dead
     cards = default_cards()
     batch, goals = [], []
+    def as_set(t):
+        # a bare Spell/Trap code asks for a MONSTER on the field: unsolvable. The
+        # attempts stored that way (Super Polymerization, before 2026-11-20 19:00)
+        # were still stacked by `sweep.combinations_to_try` (failed pieces stack
+        # too): read them as the set card they meant.
+        if t.isdigit():
+            card = cards.get(int(t))
+            if card and card.type & (0x2 | 0x4):
+                return f"{t}@szone:fd"
+        return t
     for h in hands:
         hand = json.loads(h["hand"])
-        hist = _attempts(conn, dh, h["hand_index"])
+        hist = [{**a, "targets": [as_set(str(t)) for t in a["targets"]]}
+                for a in _attempts(conn, dh, h["hand_index"])]
         base, breadth = breadth_goals(deck_path, hand, p)
         best_goal = json.loads(h["best_goal"]) if h["best_goal"] else None
         if best_goal:
