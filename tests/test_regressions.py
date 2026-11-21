@@ -7063,6 +7063,48 @@ def test_duel_buttons_never_name_the_ais_hidden_cards():
     assert "Dominus Purge" in duel.label(act(you, 0x2, 0), cards, you, hidden)          # yours
 
 
+def test_duel_moves_say_where_they_point_for_the_playmat():
+    """The playmat puts each move on the card or zone it uses: an action
+    carries its kind, the card's (controller, location, sequence), a place
+    prompt's zone decoded from player<<16 | location<<8 | sequence -- and a
+    hidden card of the AI's keeps its place but never its code."""
+    from types import SimpleNamespace as NS
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    summon = NS(kind="summon", index=0, value=0, description=0,
+                card=NS(code=14558127, loc=NS(controller=0, location=0x2, sequence=3, position=0)))
+    a = duel._act(4, summon, cards, 0, set())
+    assert a["i"] == 4 and a["kind"] == "summon" and a["code"] == 14558127
+    assert a["at"] == {"con": 0, "loc": 0x2, "seq": 3}
+    place = NS(kind="place", index=0, value=(1 << 16) | (0x8 << 8) | 2, description=0, card=None)
+    assert duel._act(0, place, cards, 0, set())["zone"] == {"con": 1, "loc": 0x8, "seq": 2}
+    target = NS(kind="select", index=0, value=0, description=0,
+                card=NS(code=97045737, loc=NS(controller=1, location=0x8, sequence=2, position=0)))
+    t = duel._act(1, target, cards, 0, {(0x8, 2)})
+    assert t["code"] is None and t["at"] == {"con": 1, "loc": 0x8, "seq": 2}
+
+
+def test_duel_passes_a_response_window_you_have_nothing_for(tmp_path, monkeypatch):
+    """A real client skips the response windows where pass is your only move;
+    the duel did not, and every summon stopped on a lone Pass button."""
+    import os
+    from skills import db, duel, engine
+    os.environ.update(engine.env())
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    for _ in range(6):
+        v = duel.view(conn, did)
+        if v["status"] != "your move":
+            break
+        assert not (v["prompt"] == "MSG_SELECT_CHAIN" and [a["kind"] for a in v["actions"]] == ["pass"])
+        duel.user_act(conn, did, v["actions"][0]["i"])
+        duel.advance(conn, did, spawn=False)
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

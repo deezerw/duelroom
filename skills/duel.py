@@ -329,6 +329,13 @@ def advance(conn, did, spawn=True):
                       if res.winner is not None else f"over ({res.reason})")
                 return "over"
             n_resp = len(live.responses)
+            if p.player != ai and p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1 \
+                    and p.actions[0].kind == "pass":
+                # a response window you have nothing for: passed for you, as a real
+                # client does (user, 2026-11-21: "it needs to feel like a regular game")
+                live.act(0)
+                acts.append(0)
+                continue
             if p.player != ai:
                 # your decision: a plan that expected another answer is stale
                 _save(conn, did, actions=json.dumps(acts), status="your move",
@@ -577,6 +584,28 @@ def label(action, cards, you, hidden=frozenset()):
         return f"{verb} #{action.index + 1}"
     return verb
 
+def _act(i, a, cards, you, hidden):
+    """One legal action for the playmat: what it is (kind, a short verb, the
+    full label) and WHERE it points -- the card's (controller, location,
+    sequence), a zone for a place prompt, a position -- so the page puts it on
+    the card or zone you tap, as a real game does, instead of a list. A hidden
+    card of the AI's keeps its place but never its code."""
+    c = a.card
+    hid = _hidden(a, you, hidden)
+    out = {"i": i, "kind": a.kind, "label": label(a, cards, you, hidden),
+           "verb": _VERB.get(a.kind) or label(a, cards, you, hidden),
+           "code": c.code if c is not None and c.code and not hid else None,
+           "at": ({"con": c.loc.controller, "loc": c.loc.location, "seq": c.loc.sequence}
+                  if c is not None and c.loc is not None and a.kind != "position" else None)}
+    if a.kind == "place":
+        out["zone"] = {"con": a.value >> 16 & 0xFF, "loc": a.value >> 8 & 0xFF, "seq": a.value & 0xFF}
+    if a.kind == "position":
+        out["pos"] = a.value
+    if a.kind in ("option", "number", "declare"):
+        out["value"] = a.value
+    return out
+
+
 def view(conn, did):
     """Your side of the table: the board with the AI's hand as a count, your
     legal actions (labels), the chain, the status."""
@@ -599,16 +628,14 @@ def view(conn, did):
         return {"id": row["id"], "status": row["status"], "note": row["note"],
                 "you": you, "ai": ai, "user_deck": row["user_deck"], "ai_deck": row["ai_deck"],
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,
+                "phase": live.session.tracker.phase,
                 "board": b, "chain": list(live.chain),
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)
                 "log": [{"turn": t, "who": "you" if pl == you else ("AI" if pl == ai else ""),
                          "text": txt} for t, pl, txt in live.log[-14:]],
                 "prompt": p.decision.name if mine else None,
-                "actions": [{"i": i, "label": label(a, live.cards, you, hidden),
-                             # the card's art beside the button, never a hidden one
-                             "code": (a.card.code if a.card is not None and a.card.code
-                                      and not _hidden(a, you, hidden) else None)}
+                "actions": [_act(i, a, live.cards, you, hidden)
                             for i, a in enumerate(p.actions)] if mine else []}
     finally:
         live.close()
