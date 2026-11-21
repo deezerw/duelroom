@@ -72,21 +72,69 @@ def schema(conn):
     # respond mode (user, 2026-11-21: "auto or manual respond mode"): auto = a
     # response window where pass is your only move is passed for you; manual = the
     # duel stops at every response window
+    # none / select (user, 2026-11-21: "none or select cards to wait for"): never
+    # stop at a response window, or stop only when one of `respond_cards` can respond
     from .db import _add_column
     _add_column(conn, "duels", "respond", "TEXT NOT NULL DEFAULT 'auto'")
+    _add_column(conn, "duels", "respond_cards", "TEXT NOT NULL DEFAULT '[]'")
 
 
-RESPOND_MODES = ("auto", "manual")
+RESPOND_MODES = ("auto", "manual", "none", "select")
 
 
-def set_respond(conn, did, mode):
-    """Switch a duel's respond mode; going to auto moves past a pass-only window
-    the duel is waiting at."""
+def _auto_pass(row, p):
+    """The pass action's index if this response window is passed for you under
+    the duel's respond mode, else None: auto -- nothing of yours can respond;
+    manual -- never; none -- always; select -- none of `respond_cards` can."""
+    if p.decision.name != "MSG_SELECT_CHAIN":
+        return None
+    passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), None)
+    if passing is None:
+        return None
+    mode = row.get("respond") or "auto"
+    chains = [a for a in p.actions if a.kind == "chain"]
+    if mode == "manual":
+        return None
+    if mode == "none":
+        return passing
+    if mode == "select":
+        want = set(json.loads(row.get("respond_cards") or "[]"))
+        return None if any(a.card is not None and a.card.code in want for a in chains) else passing
+    return passing if not chains else None
+
+
+def respond_choices(row, cards):
+    """The cards of your deck that can respond at all -- the respond-mode picker:
+    Traps, Quick-Play Spells, hand traps / interrupters (game.respond_codes, your
+    marked ones too), and cards with a Quick Effect or a "when your opponent
+    activates" clause."""
+    from . import engine, game, trainer, db as _db
+    from .deck import Deck
+    path = engine.DECKS / f"{row['user_deck']}.ydk"
+    d = Deck.from_ydk(path)
+    extra = trainer.prefs(_db.connect(), row["user_deck"])["interrupters"]
+    out = set(game.respond_codes(path, cards, extra=extra))
+    for code in set(d.main) | set(d.extra):
+        card, t = cards.get(code), game.card_text(code)
+        if card is None:
+            continue
+        if card.type & 0x4 or (card.type & 0x2 and card.type & 0x10000) \
+                or "(Quick Effect)" in t or re.search(r"When your opponent activates", t, re.I):
+            out.add(code)
+    return sorted(out, key=lambda c: (cards.get(c).name if cards.get(c) is not None else str(c)))
+
+
+def set_respond(conn, did, mode, cards=None):
+    """Switch a duel's respond mode (and, for select, the cards it waits for);
+    a response window the duel is waiting at that the new mode passes is passed."""
     if mode not in RESPOND_MODES:
         raise ValueError(f"respond mode is one of {RESPOND_MODES}")
     get(conn, did)
-    _save(conn, did, respond=mode)
-    if mode == "auto" and get(conn, did)["status"] == "your move":
+    cols = {"respond": mode}
+    if cards is not None:
+        cols["respond_cards"] = json.dumps(sorted({int(c) for c in cards}))
+    _save(conn, did, **cols)
+    if get(conn, did)["status"] == "your move":
         advance(conn, did)
 
 
@@ -356,13 +404,12 @@ def advance(conn, did, spawn=True):
                       note=_winner_note(res, live.session.tracker.lp, row["user_seat"]))
                 return "over"
             n_resp = len(live.responses)
-            if p.player != ai and row.get("respond", "auto") != "manual" \
-                    and p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1 \
-                    and p.actions[0].kind == "pass":
-                # a response window you have nothing for: passed for you, as a real
-                # client does (user, 2026-11-21: "it needs to feel like a regular game")
-                live.act(0)
-                acts.append(0)
+            ix = _auto_pass(row, p) if p.player != ai else None
+            if ix is not None:
+                # a response window your respond mode passes (auto: you have nothing for
+                # it, as a real client does -- user, 2026-11-21)
+                live.act(ix)
+                acts.append(ix)
                 continue
             if p.player != ai:
                 # your decision: a plan that expected another answer is stale
@@ -415,15 +462,13 @@ def undo(conn, did):
         raise ValueError("wait until the AI has moved")
     acts = json.loads(row["actions"])
     you = row["user_seat"]
-    auto = (row.get("respond") or "auto") != "manual"
     live = Live({**row, "actions": "[]"})
     mine = []
     try:
         for k, idx in enumerate(acts):
             p = live.point
-            lone_pass = (p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1
-                         and p.actions[0].kind == "pass")
-            if p.player == you and not (auto and lone_pass):
+            # windows the respond mode passed for you are not your decisions
+            if p.player == you and _auto_pass(row, p) is None:
                 mine.append(k)
             live.act(idx)
     finally:
@@ -779,6 +824,9 @@ def view(conn, did):
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,
                 "phase": live.session.tracker.phase,
                 "respond": row.get("respond") or "auto",
+                "respond_cards": json.loads(row.get("respond_cards") or "[]"),
+                "respond_choices": [{"code": c, "name": live.cards.get(c).name}
+                                    for c in respond_choices(row, live.cards)],
                 "can_undo": row["status"] != "thinking" and bool(json.loads(row["actions"] or "[]")),
                 "moves": len(json.loads(row["actions"] or "[]")),
                 "board": b, "chain": list(live.chain),

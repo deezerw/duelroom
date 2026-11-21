@@ -7266,6 +7266,27 @@ def test_best_choices_rank_a_cards_choices_against_its_other_choices(tmp_path):
     assert made[GARURA] == 1.0 and made[MUD] == -1.0 and SP not in made, "itself is no choice"
 
 
+def test_duel_respond_modes_none_and_select_cards():
+    """User, 2026-11-21: "none or select cards to wait for". At a response window:
+    auto passes only when nothing can respond; manual never; none always; select
+    unless one of the chosen cards can respond. Other prompts are never passed."""
+    from types import SimpleNamespace as NS
+    from skills import duel
+
+    ash, sp = 14558127, 29301450
+    win = lambda *codes: NS(decision=NS(name="MSG_SELECT_CHAIN"),
+                            actions=[NS(kind="chain", card=NS(code=c)) for c in codes] + [NS(kind="pass", card=None)])
+    row = lambda mode, cards=(): {"respond": mode, "respond_cards": __import__("json").dumps(list(cards))}
+    assert duel._auto_pass(row("auto"), win()) == 0
+    assert duel._auto_pass(row("auto"), win(ash)) is None
+    assert duel._auto_pass(row("manual"), win()) is None
+    assert duel._auto_pass(row("none"), win(ash, sp)) == 2
+    assert duel._auto_pass(row("select", [ash]), win(sp)) == 1, "S:P is not one you wait for"
+    assert duel._auto_pass(row("select", [ash]), win(sp, ash)) is None, "Ash is"
+    idle = NS(decision=NS(name="MSG_SELECT_IDLECMD"), actions=[NS(kind="pass", card=None)])
+    assert duel._auto_pass(row("none"), idle) is None, "only response windows"
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

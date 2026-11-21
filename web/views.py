@@ -1659,7 +1659,9 @@ def duel_respond(did):
     """Auto (stop only when you can respond) or manual (stop at every window)."""
     from skills import duel
     try:
-        duel.set_respond(conn(), did, request.form.get("mode", ""))
+        raw = request.form.get("cards")
+        cards = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw is not None else None
+        duel.set_respond(conn(), did, request.form.get("mode", ""), cards)
     except (ValueError, KeyError) as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(_duel_state(did))
