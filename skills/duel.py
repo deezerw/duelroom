@@ -191,8 +191,6 @@ def defend(live, ai, respond, cards, wasted=()):
     the eligible piece ranked first in `respond` (hand traps, then negates,
     then the rest), board pieces held until you control a monster, never
     onto its own chain link; else pass. Your hand is never read."""
-    from . import game
-
     p = live.point
     kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
