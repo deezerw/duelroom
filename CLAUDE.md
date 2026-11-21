@@ -87,9 +87,12 @@ master reloads workers gracefully on SIGHUP without touching the job worker:
 ```bash
 venv/bin/python -c "from skills import db; from web import jobs; \
     print(jobs.active(db.connect()))"      # check first
-kill -HUP $(ps -u deezer -o pid,ppid,args --no-headers | grep 'web\.wsgi:app' \
-    | grep -v grep | awk '$2 != 1 {print $1}' | head -1)
+kill -HUP $(pgrep -o -u deezer -f '[w]eb\.wsgi:app')   # -o: the MASTER (oldest)
 ```
+
+The old line here (`ps ... | awk '$2 != 1' | head -1`) picks whichever gunicorn
+process `ps` lists first, and the workers' parent is the master, not 1 -- on
+2026-11-21 it hit a WORKER, so one of the two kept serving the old page.
 
 A full restart is still needed for changes to `web/worker.py` or `skills/`
 used by the worker. `tmux-stop.sh` now SIGTERMs the worker first and waits
