@@ -493,6 +493,24 @@ def is_hand_trap(code, cards):
                                               for i in _interrupts(code, cards))
 
 
+# Cards that act on the OPPONENT's turn from the hand / field with a Quick Effect
+# but are not interruptions themselves (swept 2026-11-21): the defender only plays
+# what `respond_codes` lists, so Tearlaments Havnis ("when your opponent activates a
+# monster effect: Special Summon this card from your hand, mill 3") fired 0 times in
+# 480 games and Kashtira (a Main Phase Quick Effect summon) once -- the very Aqua-
+# to-GY that sets off Kaleido-Heart. Off until an A/B says listing them helps.
+QUICK_RESPOND = False
+_THEIR_TURN_QUICK = re.compile(r"\(Quick Effect\): You can Special Summon this card from your hand|"
+                               r"When your opponent activates[^.]*\(Quick Effect\): You can Special Summon "
+                               r"this card from your hand", re.I)
+
+
+def quick_codes(deck):
+    """`deck`'s main-deck cards with a Quick Effect that summons them from the hand."""
+    from .deck import Deck
+    return sorted(c for c in set(Deck.from_ydk(Path(deck)).main) if _THEIR_TURN_QUICK.search(card_text(c)))
+
+
 def respond_codes(deck, cards=None, extra=()):
     """Everything in `deck`'s main deck the defender may answer with: the
     known hand traps plus every card whose script interrupts the opponent's
@@ -507,8 +525,9 @@ def respond_codes(deck, cards=None, extra=()):
         from ygorl.engine.duel import default_cards
         cards = default_cards()
     main = set(Deck.from_ydk(Path(deck)).main)
+    quick = set(quick_codes(deck)) if QUICK_RESPOND else set()
     return sorted({c for c in main if c in scenarios.HANDTRAPS or _interrupts(c, cards)}
-                  | {int(c) for c in extra})
+                  | {int(c) for c in extra} | quick)
 
 
 def respond_order(codes, cards, order="traps"):
