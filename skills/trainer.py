@@ -62,6 +62,7 @@ PLATEAU = 6         # generations in a row with no hand improved = "as good
                     # as it'll get" (train ... <enemy>); 3 stopped the first
                     # deck after 9 attempts a hand
 EXT = "ext:"        # a goal's "this line must use <code>" requirement
+STACK_JUMP = 3      # stacks at most this many board pieces over the hand's best (plan step 2)
 
 
 def _now():
@@ -768,6 +769,11 @@ def _attempts(conn, dh, hand_index):
                 "ORDER BY rowid", (dh, hand_index))]
 
 
+def _board_size(targets):
+    """Board targets of a goal (hand cards kept and `ext:` requirements left out)."""
+    return sum(1 for t in targets if not str(t).endswith("@hand") and not str(t).startswith(EXT))
+
+
 def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=(),
          extenders=()):
     """[(targets, label, draw)] for one hand's next generation.
@@ -820,8 +826,19 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=(),
             if frozenset(targets) not in tried:
                 add(targets, f"{EXT}{c}")
 
-    # 2. stacks nobody has asked this hand for
-    for targets, label in sweep.combinations_to_try(attempts, max_new=per_hand):
+    # 2. stacks nobody has asked this hand for, the small jumps first. Measured
+    #    2026-11-20 over every stored attempt, by a stack's size minus the biggest
+    #    board the hand had solved: tries per improvement 29 (same size), 25 (+1),
+    #    89 (+2), 98 (+3) and 812 (+4 or more: 812 tries, ONE improvement -- most
+    #    of 135 server-hours on stacks of 6-9 that never solved once). "Bigger
+    #    first" spent the budget on the jumps that pay least. Stacks over
+    #    STACK_JUMP above the hand's best are not asked; a hand that grows earns
+    #    bigger asks.
+    biggest = max((_board_size(a["targets"]) for a in attempts if a["status"] == "solved"),
+                  default=0)
+    stacks = [(t, lbl) for t, lbl in sweep.combinations_to_try(attempts, max_new=per_hand * 8)
+              if _board_size(t) - biggest <= STACK_JUMP]
+    for targets, label in sorted(stacks, key=lambda s: _board_size(s[0]) - biggest):
         add(targets, label)
 
     # 3. near misses, biggest goal first, least-retried first

@@ -6910,3 +6910,17 @@ def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
                               scripts=("first", "all1", "all2"))
     assert t["script"] == "all1" and calls == ["first", "all1", "all2"]
     assert game.T1_ENEMY_SCRIPTS == ("first",)          # off until the experiment says so
+
+
+def test_trainer_asks_small_stack_jumps_first_and_never_far_past_its_best():
+    """2026-11-20: stacks 4+ board pieces over the hand's best solved board
+    took 812 tries for ONE improvement; small jumps pay ~4x better."""
+    from skills import trainer
+
+    breadth = [((f"P{i}",), f"piece:{i}") for i in range(1, 8)]
+    hist = [{"label": f"piece:{i}", "targets": [f"P{i}"], "status": "solved", "best_placed": 1}
+            for i in range(1, 8)]
+    out = trainer.plan(hist, breadth, None, per_hand=40)
+    sizes = [trainer._board_size(t) for t, lbl, d in out if lbl.startswith("stack")]
+    assert sizes and max(sizes) <= 1 + trainer.STACK_JUMP
+    assert sizes == sorted(sizes), "small jumps first"
