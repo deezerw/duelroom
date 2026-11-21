@@ -553,6 +553,10 @@ def _hidden(action, you, hidden):
     if c is None or c.loc is None or c.loc.controller == you:
         return False
     loc = c.loc.location
+    if loc & 0x80:
+        # an Xyz material (location MZONE|OVERLAY, position = its index under the
+        # monster): materials are public, and the index is not a face-down flag
+        return False
     return bool(loc & 0x3 or (loc, c.loc.sequence) in hidden or (loc & 0xC and c.loc.position & 0xA))
 
 

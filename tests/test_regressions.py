@@ -7084,6 +7084,12 @@ def test_duel_moves_say_where_they_point_for_the_playmat():
                 card=NS(code=97045737, loc=NS(controller=1, location=0x8, sequence=2, position=0)))
     t = duel._act(1, target, cards, 0, {(0x8, 2)})
     assert t["code"] is None and t["at"] == {"con": 1, "loc": 0x8, "seq": 2}
+    # an Xyz material: location MZONE|OVERLAY, sequence = its monster's zone, position =
+    # its index (2 here, which is NOT a face-down flag): public, keeps its code
+    mat = NS(kind="select", index=0, value=0, description=0,
+             card=NS(code=24088928, loc=NS(controller=1, location=0x84, sequence=1, position=2)))
+    m = duel._act(2, mat, cards, 0, set())
+    assert m["code"] == 24088928 and m["at"] == {"con": 1, "loc": 0x84, "seq": 1}
 
 
 def test_duel_passes_a_response_window_you_have_nothing_for(tmp_path, monkeypatch):

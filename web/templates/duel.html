@@ -112,12 +112,15 @@ const esc = t => String(t).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;',
 const Z = {1: 'd', 2: 'h', 4: 'm', 8: 's', 16: 'g', 32: 'b', 64: 'x', 128: 'o'};
 const key = (con, loc, seq) => `${con}-${Z[loc] || loc}-${seq}`;
 const PILE = {g: 'GY', b: 'Banished', x: 'Extra Deck', d: 'Deck', o: 'Materials'};
-let BY = {}, ZONE = {}, FREE = [], PILES = {};
+let BY = {}, ZONE = {}, FREE = [], PILES = {}, MATS = {};
 
 function index() {
-  BY = {}; ZONE = {}; FREE = []; PILES = {};
+  BY = {}; ZONE = {}; FREE = []; PILES = {}; MATS = {};
   for (const a of S.actions || []) {
     if (a.zone) { ZONE[key(a.zone.con, a.zone.loc, a.zone.seq)] = a; continue; }
+    // an Xyz material (location MZONE|OVERLAY, sequence = its monster's zone): on the
+    // monster that holds it -- the monster glows, a tap shows its materials to pick
+    if (a.at && (a.at.loc & 0x80)) { const k = key(a.at.con, 4, a.at.seq); (MATS[k] = MATS[k] || []).push(a); continue; }
     // yes / no / an effect choice are questions, not card moves: buttons, with the card named
     if (a.at && !['position', 'yes', 'no', 'option'].includes(a.kind)) {
       const k = key(a.at.con, a.at.loc, a.at.seq), z = Z[a.at.loc];
@@ -129,7 +132,7 @@ function index() {
   }
 }
 const isPick = () => /SELECT_(CARD|UNSELECT_CARD|TRIBUTE|SUM)$/.test(S.prompt || '');
-function cls(k) { return BY[k] ? (isPick() ? ' pick' : ' glow') : ''; }
+function cls(k) { return BY[k] || MATS[k] ? (isPick() || MATS[k] ? ' pick' : ' glow') : ''; }
 
 function cardEl(code, pos, k, mats) {
   const back = code === null || code === undefined;
@@ -215,8 +218,11 @@ function banner() {
     case 'MSG_SELECT_OPTION': t = 'Choose an effect.'; break;
     default:
       // which chain link asks is not known here: name none rather than the wrong one
-      t = isPick() ? 'Choose a card — tap a highlighted card'
-                     + (Object.keys(PILES).length ? ' or a highlighted pile' : '') + '.' : 'Your move.';
+      t = Object.keys(MATS).length && !Object.keys(BY).length
+          ? 'Choose a material — tap the highlighted Xyz monster, then the material.'
+          : isPick() ? 'Choose a card — tap a highlighted card'
+                       + (Object.keys(PILES).length ? ' or a highlighted pile' : '')
+                       + (Object.keys(MATS).length ? ' (materials: tap their Xyz monster)' : '') + '.' : 'Your move.';
   }
   b.className = 'banner you'; b.innerHTML = t + lastTxt;
 }
@@ -243,12 +249,16 @@ function verbs(acts) {      // the moves of one card, told apart when a card has
 }
 function openCard(code, k) {
   const acts = (k && BY[k]) || [];
-  if (acts.length === 1 && ['select', 'unselect'].includes(acts[0].kind)) return act(acts[0].i);
+  const mats = (k && MATS[k]) || [];
+  if (!mats.length && acts.length === 1 && ['select', 'unselect'].includes(acts[0].kind)) return act(acts[0].i);
   const known = code !== '' && code !== undefined && code !== null;
   document.getElementById('sheet-in').innerHTML = `<div class="head">${known ? `<img src="${img(code, 'full')}" alt="">` : ''}
     <div><h4>${known ? esc(name(code)) : 'Face-down card'}</h4><p>${known ? esc(text(code)) : ''}</p></div></div>
     ${acts.length ? `<div class="moves">${verbs(acts).map((v, j) =>
       `<button class="${j === 0 ? 'main' : ''}" onclick="closeSheet();act(${v.a.i})">${esc(v.label)}</button>`).join('')}</div>` : ''}
+    ${mats.length ? `<h4 style="margin-top:12px">Its materials — tap one to ${mats[0].kind === 'unselect' ? 'unchoose' : 'choose'} it</h4>
+      <div class="grid">${mats.map(a => `<div class="pick" onclick="closeSheet();act(${a.i})" title="${esc(name(a.code))}"
+        style="${a.code ? `background-image:url(${img(a.code)})` : ''}"></div>`).join('')}</div>` : ''}
     <button class="close" onclick="closeSheet()">Close</button>`;
   document.getElementById('sheet').classList.add('on');
 }
