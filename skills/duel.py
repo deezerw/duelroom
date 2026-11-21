@@ -411,6 +411,25 @@ def deck_target(conn, deck):
     return trainer.split_goal([seen.most_common(1)[0][0]])[0]
 
 
+def hand_pieces(conn, row, live):
+    """The interruption pieces the AI's current hand could reach, as targets
+    (trainer.breadth_goals on its own hand; dead cards and targets already
+    asked left out)."""
+    from . import engine, trainer
+    ai = 1 - row["user_seat"]
+    hand = [c for c in live.board()["players"][ai].get("hand") or [] if c]
+    try:
+        _base, goals = trainer.breadth_goals(engine.DECKS / f"{row['ai_deck']}.ydk", hand,
+                                             trainer.prefs(conn, row["ai_deck"]))
+    except Exception:  # noqa: BLE001 -- no plan for this hand: the target alone
+        return []
+    out = []
+    for g, label in goals:
+        if label.startswith("piece:") and g and g[-1] not in out:
+            out.append(g[-1])
+    return out
+
+
 def _spawn_plan(did):
     from . import db
     folder = Path(get(db.connect(), did)["template"]).parent
@@ -452,8 +471,13 @@ def plan(conn, did):
             if not (r["solution"] or r["approach"]):
                 r = None
         if r is None:
-            r = game._solve(prefix, base + targets, root, "build",
-                            row["think_ms"], int(t0))
+            # the board: its target AND every interruption piece its hand can reach
+            # (the trainer's breadth, on the AI's OWN hand -- it knows that). A lone
+            # target stopped at the first line placing it: a thin board (Endgame
+            # Problem alone). The conjunction is rarely all reachable; the search's
+            # best approach keeps the line placing the most.
+            build = targets + [a for t in hand_pieces(conn, row, live) for a in ("--target", t)]
+            r = game._solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []
