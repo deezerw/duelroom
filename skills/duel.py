@@ -418,8 +418,9 @@ def _spawn_plan(did):
 
 def plan(conn, did):
     """Search the AI's turn from the current position and store the plan:
-    a lethal check first (--goal-win), else its deck's payoff target (turn 1:
-    no attacks, the board). Then play on."""
+    turn 2 on, the --goal-win search (lethal, else its line that hurts you
+    most); turn 1 (no attacks) or no line at all, its deck's target board.
+    Then play on."""
     from ygorl.engine.replay import Replay
 
     from . import breaking, game
@@ -441,8 +442,11 @@ def plan(conn, did):
                                             "--stop-on-win", str(game.STOP_ON_WIN)],
                             root, "lethal", row["think_ms"] // 2, int(t0))
             # under --goal-win a solution IS a win the solver verified -- on its copy
-            # with the assumed hand, which replaying the file here would lack
-            if not r["solution"]:
+            # with the assumed hand, which replaying the file here would lack. No
+            # win: its best approach is the line that took you LOWEST (it builds and
+            # attacks); a build line has no Battle Phase, so the AI never attacked
+            # unless it had lethal (2026-11-20). Only with no approach: build.
+            if not (r["solution"] or r["approach"]):
                 r = None
         if r is None:
             r = game._solve(prefix, base + targets, root, "build",
