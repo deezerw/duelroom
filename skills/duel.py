@@ -28,6 +28,7 @@ of one, it may plan against two. Effects that touch your hand at random
 
 import json
 import random
+import re
 import subprocess
 import sys
 import time
@@ -36,7 +37,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DUELS = ROOT / "results" / "duels"
-THINK_MS = 30_000            # the AI's search per plan (a lethal check, then its turn)
+# The AI's search per plan. Was 30 s (lethal 15 s): the games' kill check converges
+# at 320 s a defence, and the user "easily beat" it (2026-11-21). Its turn now runs
+# its searches IN PARALLEL (plain lethal + ANSWER_PLANS answer plans), each this long.
+THINK_MS = 90_000
+ANSWER_PLANS = 3             # "lethal, using answer X" searches beside the plain one
+_REMOVE = re.compile(r"\b(banish|destroy|negate|send|return|shuffle|take control|change control)", re.I)
+_HITS_MON = re.compile(r"(monsters?|cards?) (your )?opponent controls|opponent's monster|monsters? on the field|"
+                       r"cards? on the field|monster in (another|this card's|an adjacent) column|adjacent column", re.I)
+_HITS_ST = re.compile(r"Spell & Trap Zone|Spell/Trap|cards? (your )?opponent controls|cards? on the field|Set card", re.I)
 # Play around your decklist's hand traps: patch 0010's --opp-hand-root puts one of
 # each in your hand once the moves so far have replayed (--opp-hand, which adds them
 # at the DUEL'S start, made the core reject those moves: MSG_RETRY), and the smart
@@ -344,8 +353,7 @@ def advance(conn, did, spawn=True):
             if p is None or live.session.done:
                 res = live.session.tracker.result
                 _save(conn, did, actions=json.dumps(acts), status="over",
-                      note=f"winner: {'you' if res.winner is not None and res.winner == row['user_seat'] else 'the AI'} ({res.reason})"
-                      if res.winner is not None else f"over ({res.reason})")
+                      note=_winner_note(res, live.session.tracker.lp, row["user_seat"]))
                 return "over"
             n_resp = len(live.responses)
             if p.player != ai and row.get("respond", "auto") != "manual" \
@@ -533,6 +541,55 @@ def _spawn_plan(did):
                      start_new_session=True)
 
 
+def answer_cards(row, live, cards, limit=ANSWER_PLANS):
+    """The AI's own cards that beat what you have out (user, 2026-11-21: "the
+    cards in the deck that will be the best against that card and then tries to
+    find a way to get it"): from its decklist, those whose text removes (banish,
+    destroy, negate, send, return, shuffle, take control) a card where yours
+    are -- your field monsters, your Spell/Trap Zone (set cards included). Cards
+    reaching both come first, then those reaching your monsters; at most
+    `limit`. The plan then asks for a line that RESOLVES each (--resolve)."""
+    from . import engine, game
+    from .deck import Deck
+    you = row["user_seat"]
+    b = live.board()["players"][you]
+    mons = bool(b.get("mzone"))
+    st = bool(b.get("szone"))
+    if not (mons or st):
+        return []
+    d = Deck.from_ydk(engine.DECKS / f"{row['ai_deck']}.ydk")
+    ranked = []
+    for code in sorted(set(d.main) | set(d.extra)):
+        # the removal and what it reaches in ONE sentence, never your own hand
+        # (Mulcharmy Fuwalos "shuffles cards from your hand ... your opponent controls +6")
+        if game.is_hand_trap(code, cards):
+            continue        # it only REACTS (Ghost Ogre): no plan can use it on purpose
+        hm = hs = False
+        # sentences end at periods only: card text puts the target BEFORE a ";" and the
+        # effect after it ("target 1 monster your opponent controls; banish it")
+        for sent in re.split(r"(?<=\.)\s+", game.card_text(code)):
+            if not _REMOVE.search(sent) or re.search(r"from your (hand|Deck)", sent, re.I):
+                continue
+            if re.search(r"you own|you control", sent, re.I) and not re.search(r"opponent", sent, re.I):
+                continue    # its own cards (Strategy Score returns its own Angelechy)
+            hm = hm or (mons and bool(_HITS_MON.search(sent)))
+            hs = hs or (st and bool(_HITS_ST.search(sent)))
+        if hm or hs:
+            ranked.append((-(hm + hs), -hm, code))
+    return [c for *_k, c in sorted(ranked)][:limit]
+
+
+def _winner_note(res, lp, you):
+    """Who won. The result's winner is sometimes unset ("over (win)" told you
+    nothing, 2026-11-21): then the side at 0 LP lost."""
+    w = res.winner
+    if w is None and min(lp) <= 0 and max(lp) > 0:
+        w = 0 if lp[1] <= 0 else 1
+    if w is None:
+        return f"over ({res.reason})"
+    return f"winner: {'you' if w == you else 'the AI'} ({res.reason})"
+
+
 def plan(conn, did):
     """Search the AI's turn from the current position and store the plan:
     turn 2 on, the --goal-win search (lethal, else its line that hurts you
@@ -540,7 +597,7 @@ def plan(conn, did):
     Then play on."""
     from ygorl.engine.replay import Replay
 
-    from . import breaking, game
+    from . import breaking, engine, game
 
     row = get(conn, did)
     live = Live(row)
@@ -554,17 +611,49 @@ def plan(conn, did):
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
         t0 = time.time()
         r = None
+        you = row["user_seat"]
+        user_deck = engine.DECKS / f"{row['user_deck']}.ydk"
         if turn > 1:
-            r = game._solve(prefix, base + targets + ["--goal-win",
-                                            "--stop-on-win", str(game.STOP_ON_WIN)],
-                            root, "lethal", row["think_ms"] // 2, int(t0))
-            # under --goal-win a solution IS a win the solver verified -- on its copy
-            # with the assumed hand, which replaying the file here would lack. No
-            # win: its best approach is the line that took you LOWEST (it builds and
-            # attacks); a build line has no Battle Phase, so the AI never attacked
-            # unless it had lethal (2026-11-20). Only with no approach: build.
-            if not (r["solution"] or r["approach"]):
-                r = None
+            # Its turn, searched several ways AT ONCE: plain lethal (no build target:
+            # with one its best approach ranked target overlap over damage, so it
+            # built and never attacked, 2026-11-21), and "lethal using answer X" for
+            # the cards of its deck that beat what you have out (answer_cards).
+            # Under --goal-win a solution IS a win the solver verified.
+            from concurrent.futures import ThreadPoolExecutor
+            from .deck import Deck
+            # --no-ref needs a --target, and the best approach ranks target OVERLAP
+            # before win progress (search.cpp). A BOARD target nothing can match -- one
+            # of its Spells in the monster zone -- ties every line at 0, so the damage
+            # decides, and a board target never vetoes a win (the games' kill check
+            # carries one). An off-field one ("@hand") is a DEMAND: it rejected all
+            # four wins found on the replay of duel 1's turn 2 (2026-11-21), as the
+            # old build target vetoed every kill that did not also build its board.
+            main = Deck.from_ydk(engine.DECKS / f"{row['ai_deck']}.ydk").main
+            spell = next((x for x in main if cards.get(x) is not None and cards.get(x).type & 0x2), None)
+            neutral = ["--target", f"{spell}@mzone"] if spell else targets
+            variants = [("lethal", [])] + [(f"answer-{c}", ["--resolve", str(c), "--hint", str(c)])
+                                           for c in answer_cards(row, live, cards)]
+            def one(kv):
+                k, (label, extra) = kv
+                return label, game._solve(prefix, base + neutral + extra + ["--goal-win", "--stop-on-win",
+                                                                  str(game.STOP_ON_WIN)],
+                                          root, label, row["think_ms"], int(t0) + k)
+            with ThreadPoolExecutor(len(variants)) as ex:
+                tried = list(ex.map(one, enumerate(variants)))
+            won = [(lab, x) for lab, x in tried if x["solution"]]
+            if won:
+                r = won[0][1]
+            else:
+                # no win: of the lines that hurt you, the one giving you the fewest usable
+                # monsters, then the most damage; none hurts at all -> build
+                scored = []
+                for lab, x in tried:
+                    if x["approach"]:
+                        dmg = game._damage(prefix, x["approach"], 1 - you)
+                        gift = game.usable_gifts(x["approach"], you, user_deck, turn + 1)
+                        scored.append((gift, -dmg, lab, x))
+                scored.sort(key=lambda g: g[:2])
+                r = scored[0][3] if scored and scored[0][1] < 0 else None
         if r is None:
             # the board: its target AND every interruption piece its hand can reach
             # (the trainer's breadth, on the AI's OWN hand -- it knows that). A lone
@@ -573,6 +662,10 @@ def plan(conn, did):
             # best approach keeps the line placing the most.
             build = targets + [a for t in hand_pieces(conn, row, live) for a in ("--target", t)]
             r = game._solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
+            # of the lines reaching its board, the one handing you the least you can use
+            # (game.fewest_gifts: Opposition put Castellan, a banish, on your field)
+            r = {**r, "solution": game.fewest_gifts(r.get("solutions") or [], user_deck, player=you,
+                                                    until_turn=turn + 1) or r["solution"]}
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []

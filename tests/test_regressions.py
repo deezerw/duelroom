@@ -7175,6 +7175,29 @@ def test_duel_undo_takes_back_your_last_real_move(tmp_path, monkeypatch):
     assert duel.get(conn, did)["actions"] == after, "the same move, the same duel"
 
 
+def test_duel_ai_finds_the_cards_of_its_deck_that_beat_yours():
+    """User, 2026-11-21: the AI should find "the cards in the deck that will be
+    the best against that card and then tries to find a way to get it".
+    answer_cards reads its decklist for cards whose text removes a card where
+    yours are; a hand trap only reacts, and own-card / own-hand / own-deck
+    effects (Strategy Score, Mulcharmy, Foolish Burial Goods) are no answer."""
+    from types import SimpleNamespace as NS
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    row = {"user_seat": 0, "ai_deck": "Angelechy-Meta"}
+    board = {"players": [{"mzone": [{"code": 29301450, "position": 1, "sequence": 1}],
+                          "szone": [{"code": None, "position": 10, "sequence": 2}]}, {}]}
+    got = duel.answer_cards(row, NS(board=lambda: board), cards, limit=30)
+    names = {cards.get(c).name for c in got}
+    assert {"Angelechy Shatranga", "Angelechy Bastion"} <= names
+    assert not names & {"Mulcharmy Fuwalos", "Ghost Ogre & Snow Rabbit", "Angelechy Strategy Score",
+                        "Foolish Burial Goods"}
+    empty = {"players": [{"mzone": [], "szone": []}, {}]}
+    assert duel.answer_cards(row, NS(board=lambda: empty), cards) == [], "nothing of yours, nothing to answer"
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""
