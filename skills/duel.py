@@ -119,6 +119,7 @@ class Live:
         self.row, self.cards = row, default_cards()
         self.session = DuelSession(Replay.from_yrp(Path(row["template"])).duel(None, cards=self.cards))
         self.chain = []
+        self.log = []             # [(turn, player, text)], what happened, for the page
         self._seen = None
         self._track()
         for idx in json.loads(row["actions"]):
@@ -129,13 +130,26 @@ class Live:
         if p is None or p is self._seen:
             return
         self._seen = p
+        t = self.session.tracker.turn
+        nm = lambda c: (self.cards.get(c).name if c and self.cards.get(c) is not None else "a card")  # noqa: E731
         for e in p.events or ():
             k = type(e).__name__
             if k == "Chaining":
                 del self.chain[e.chain_count - 1:]
                 self.chain.append((e.code, e.loc.controller))
+                self.log.append((t, e.loc.controller, f"activates {nm(e.code)}"))
             elif k == "ChainEnd":
                 self.chain.clear()
+            elif k in ("Summoning", "SpSummoning", "FlipSummoning"):
+                self.log.append((t, e.loc.controller, f"summons {nm(e.code)}"))
+            elif k in ("ChainNegated", "ChainDisabled"):
+                self.log.append((t, None, f"chain link {e.chain_count} is negated"))
+            elif k == "Attack":
+                self.log.append((t, None, "attacks"))
+            elif k == "Damage":
+                self.log.append((t, e.player, f"takes {e.amount} damage"))
+            elif k == "NewTurn":
+                self.log.append((t, e.player, "--- new turn ---"))
 
     def act(self, idx):
         self.session.act(int(idx))
@@ -413,11 +427,44 @@ def plan(conn, did):
 
 # --- what the page shows -----------------------------------------------------------
 
+_VERB = {"summon": "Normal Summon", "spsummon": "Special Summon", "reposition": "Change position of",
+         "mset": "Set (monster)", "sset": "Set", "activate": "Activate", "chain": "Chain",
+         "attack": "Attack with", "battle_phase": "Go to the Battle Phase", "main2": "Go to Main Phase 2",
+         "end_phase": "End the turn", "shuffle": "Shuffle your hand", "pass": "Pass (do not respond)",
+         "yes": "Yes", "no": "No", "finish": "Done", "cancel": "Cancel", "select": "Choose",
+         "unselect": "Unchoose", "option": "Option", "position": "Position", "place": "Zone",
+         "declare": "Declare", "number": "Number", "sort": "Order", "counter": "Counter", "rps": "Rock-paper-scissors"}
+_WHERE = {0x1: "deck", 0x2: "hand", 0x4: "monster zone", 0x8: "spell/trap zone", 0x10: "GY",
+          0x20: "banished", 0x40: "Extra Deck", 0x80: "material"}
+_POS = {0x1: "face-up attack", 0x2: "face-down attack", 0x4: "face-up defense", 0x8: "face-down defense"}
+
+
+def label(action, cards, you):
+    """A readable button for one of your actions: verb, card name, where it is
+    (and whose, when it is the AI's card), else what ygorl describes."""
+    from ygorl.commands.branch import describe_action
+
+    verb = _VERB.get(action.kind)
+    c = action.card
+    if verb is None:
+        return describe_action(action, cards)
+    if action.kind == "position":
+        return f"{_POS.get(action.value, action.value)}"
+    if action.kind == "option" and c is None:
+        return f"Option {action.index + 1}"
+    if c is not None and c.code:
+        card = cards.get(c.code)
+        nm = card.name if card is not None and card.name else str(c.code)
+        where = _WHERE.get(c.loc.location if c.loc else 0, "")
+        whose = "" if c.loc is None or c.loc.controller == you else "AI's "
+        return f"{verb} {nm}" + (f" ({whose}{where})" if where else "")
+    if action.kind in ("select", "unselect", "sort", "counter"):
+        return f"{verb} #{action.index + 1}"
+    return verb
+
 def view(conn, did):
     """Your side of the table: the board with the AI's hand as a count, your
     legal actions (labels), the chain, the status."""
-    from ygorl.commands.branch import describe_action
-
     row = get(conn, did)
     live = Live(row)
     try:
@@ -436,8 +483,12 @@ def view(conn, did):
                 "you": you, "ai": ai, "user_deck": row["user_deck"], "ai_deck": row["ai_deck"],
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,
                 "board": b, "chain": list(live.chain),
+                # what happened lately -- the AI's face-down cards stay unnamed (its
+                # activations reveal them, as at a real table)
+                "log": [{"turn": t, "who": "you" if pl == you else ("AI" if pl == ai else ""),
+                         "text": txt} for t, pl, txt in live.log[-14:]],
                 "prompt": p.decision.name if mine else None,
-                "actions": [{"i": i, "label": describe_action(a, live.cards)}
+                "actions": [{"i": i, "label": label(a, live.cards, you)}
                             for i, a in enumerate(p.actions)] if mine else []}
     finally:
         live.close()

@@ -26,6 +26,7 @@
   <div class="side" id="ai"></div>
   <div class="block"><div class="acts" id="acts"></div></div>
   <div class="side" id="you"></div>
+  <div class="block"><b>What happened</b><div id="log" class="muted" style="font-size:12.5px;margin-top:4px"></div></div>
 </div>
 <script>
 let S = {{ state|tojson }};
@@ -56,6 +57,7 @@ function render() {
   document.getElementById('status').textContent = `${st} · turn ${S.turn} (${S.turn_player === S.you ? 'yours' : "the AI's"})`;
   document.getElementById('note').textContent = S.note ? '· ' + S.note : '';
   document.getElementById('chain').textContent = S.chain.length ? 'chain: ' + S.chain.map(([c, p]) => `${p === S.you ? 'you' : 'AI'}: ${name(c)}`).join(' → ') : '';
+  document.getElementById('log').innerHTML = (S.log || []).map(x => `t${x.turn} ${x.who ? '<b>' + x.who + '</b> ' : ''}${x.text}`).join('<br>');
   document.getElementById('acts').innerHTML = (S.actions || []).map(a =>
     `<button onclick="act(${a.i})">${a.label}</button>`).join('') || (S.status === 'your move' ? '' : '<span class="muted">waiting…</span>');
 }
