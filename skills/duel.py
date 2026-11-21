@@ -538,9 +538,22 @@ _WHERE = {0x1: "deck", 0x2: "hand", 0x4: "monster zone", 0x8: "spell/trap zone",
 _POS = {0x1: "face-up attack", 0x2: "face-down attack", 0x4: "face-up defense", 0x8: "face-down defense"}
 
 
-def label(action, cards, you):
+def _hidden(action, you, hidden):
+    """Is this action's card one you may not see: the AI's SET card (in
+    `hidden`: (location bit, sequence) of its face-down field cards), its
+    hand or its deck?"""
+    c = action.card
+    if c is None or c.loc is None or c.loc.controller == you:
+        return False
+    loc = c.loc.location
+    return bool(loc & 0x3 or (loc, c.loc.sequence) in hidden or (loc & 0xC and c.loc.position & 0xA))
+
+
+def label(action, cards, you, hidden=frozenset()):
     """A readable button for one of your actions: verb, card name, where it is
-    (and whose, when it is the AI's card), else what ygorl describes."""
+    (and whose, when it is the AI's card), else what ygorl describes. The AI's
+    set cards, hand and deck are never named: a target prompt over its
+    face-down cards named them before 2026-11-21 though the board hid them."""
     from ygorl.commands.branch import describe_action
 
     verb = _VERB.get(action.kind)
@@ -551,6 +564,9 @@ def label(action, cards, you):
         return f"{_POS.get(action.value, action.value)}"
     if action.kind == "option" and c is None:
         return f"Option {action.index + 1}"
+    if c is not None and c.code and _hidden(action, you, hidden):
+        where = _WHERE.get(c.loc.location if c.loc else 0, "")
+        return f"{verb} the AI's face-down card" + (f" ({where})" if where else "")
     if c is not None and c.code:
         card = cards.get(c.code)
         nm = card.name if card is not None and card.name else str(c.code)
@@ -573,9 +589,11 @@ def view(conn, did):
         mine = (p is not None and p.player == you and row["status"] == "your move")
         b["players"][ai]["hand"] = [None] * len(b["players"][ai].get("hand") or [])
         # its SET cards too (POS_FACEDOWN_ATTACK 0x2 / _DEFENSE 0x8): you see a back
-        for z in ("mzone", "szone"):
+        hidden = set()
+        for z, bit in (("mzone", 0x4), ("szone", 0x8)):
             for m in b["players"][ai].get(z) or []:
                 if m and m.get("position", 0) & 0xA:
+                    hidden.add((bit, m.get("sequence")))
                     m["code"] = None
                     m["overlay"] = [None] * len(m.get("overlay") or [])
         return {"id": row["id"], "status": row["status"], "note": row["note"],
@@ -587,7 +605,10 @@ def view(conn, did):
                 "log": [{"turn": t, "who": "you" if pl == you else ("AI" if pl == ai else ""),
                          "text": txt} for t, pl, txt in live.log[-14:]],
                 "prompt": p.decision.name if mine else None,
-                "actions": [{"i": i, "label": label(a, live.cards, you)}
+                "actions": [{"i": i, "label": label(a, live.cards, you, hidden),
+                             # the card's art beside the button, never a hidden one
+                             "code": (a.card.code if a.card is not None and a.card.code
+                                      and not _hidden(a, you, hidden) else None)}
                             for i, a in enumerate(p.actions)] if mine else []}
     finally:
         live.close()

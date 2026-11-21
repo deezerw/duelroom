@@ -7042,6 +7042,27 @@ def test_duel_ai_negates_only_a_live_card(monkeypatch):
     assert duel._follow_up(live3, 1, cards, dead, [engraver]) == 1, "your kill key over ATK"
 
 
+def test_duel_buttons_never_name_the_ais_hidden_cards():
+    """A target prompt over the AI's face-down card named it on the button
+    (and showed its art) though the board drew a back; its hand and deck
+    too. Your own cards and its face-up ones keep their names."""
+    from types import SimpleNamespace as NS
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    you, ai = 0, 1
+    act = lambda ctl, loc, seq, pos=0: NS(kind="select", index=0, value=None,
+                                          card=NS(code=97045737, loc=NS(controller=ctl, location=loc,
+                                                                        sequence=seq, position=pos)))
+    hidden = {(0x8, 2)}                                   # its set card in spell/trap zone 2
+    assert "Dominus Purge" not in duel.label(act(ai, 0x8, 2), cards, you, hidden)
+    assert "Dominus Purge" not in duel.label(act(ai, 0x8, 3, pos=0x8), cards, you, set())
+    assert "Dominus Purge" not in duel.label(act(ai, 0x2, 0), cards, you, hidden)     # its hand
+    assert "Dominus Purge" in duel.label(act(ai, 0x8, 4, pos=0x1), cards, you, hidden)  # face-up
+    assert "Dominus Purge" in duel.label(act(you, 0x2, 0), cards, you, hidden)          # yours
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

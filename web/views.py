@@ -1555,11 +1555,13 @@ def _duel_state(did):
         for z in ("hand", "grave", "banished", "extra_faceup"):
             codes |= {x for x in p.get(z) or [] if x}
     codes |= {code for code, _p in v["chain"]}
-    names = {}
+    names, texts = {}, {}
     for code in codes:
         r = card_db.resolve(c, code)
         names[str(code)] = r["name"] if r else str(code)
-    return {**v, "names": names}
+        # the card's text for the tap-to-read sheet (a phone has no hover)
+        texts[str(code)] = (r["text"] if r and r["text"] else "")
+    return {**v, "names": names, "texts": texts}
 
 
 @bp.route("/duel/<int:did>")
