@@ -197,7 +197,7 @@ def defend(live, ai, respond, cards, wasted=()):
     kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
     if p.decision.name != "MSG_SELECT_CHAIN":
-        return _follow_up(p, ai)
+        return _follow_up(live, ai, cards)
     if live.chain and live.chain[-1][1] == ai:
         return passing
     # your own-turn-dead card on your own turn (Mulcharmy Fuwalos on your turn
@@ -218,19 +218,31 @@ def defend(live, ai, respond, cards, wasted=()):
     return best if "chain" in kinds else passing
 
 
-def _follow_up(p, ai):
-    """Targets / options of the AI's own effect: an opponent's card (highest
-    ATK) where it can choose one, else the first legal choice."""
-    best, best_v = 0, None
-    for i, a in enumerate(p.actions):
-        c = a.card
-        if c is None or c.loc is None:
-            continue
-        theirs = c.loc.controller != ai
-        v = (1 if theirs else 0, getattr(c, "attack", 0) or 0)
-        if best_v is None or v > best_v:
-            best, best_v = i, v
-    return best
+def _follow_up(live, ai, cards):
+    """Targets / costs of the AI's own effect. Where one of YOUR cards can be
+    chosen: your most valuable -- an interruption piece first, then the
+    highest ATK. Where only its own cards can: the one it loses least -- not a
+    piece, lowest ATK. Else the first legal choice. (It read an `attack` the
+    prompt's card reference does not carry, so it took whichever came first,
+    and gave up its OWN strongest card to a cost.)"""
+    from . import game
+
+    p = live.point
+    b = live.board()
+    pieces = {0: set(game._pieces(b, 0, cards)), 1: set(game._pieces(b, 1, cards))}
+
+    def worth(c):
+        card = cards.get(c.code) if c.code else None
+        owner = c.loc.controller
+        return (1 if c.code in pieces[owner] else 0, (card.attack if card is not None else 0) or 0)
+
+    opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
+    theirs = [(i, c) for i, c in opts if c.loc.controller != ai]
+    if theirs:
+        return max(theirs, key=lambda t: worth(t[1]))[0]
+    if opts:
+        return min(opts, key=lambda t: worth(t[1]))[0]
+    return 0
 
 
 def _plan_step(live, plan):

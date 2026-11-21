@@ -6864,3 +6864,26 @@ def test_duel_hides_the_ais_hand_and_never_plans_on_yours(tmp_path, monkeypatch)
             around or not named)
     monkeypatch.setattr(duel, "PLAY_AROUND", False)
     assert "--opp-respond" not in duel.plan_args(row, cards, 2)   # PLAY_AROUND off: you never answer
+
+
+def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
+    """The AI's target / cost picks: your interruption piece over your
+    biggest monster; its own lowest-value card when it must give one."""
+    import os
+    from types import SimpleNamespace as NS
+    from skills import duel, engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    loc = lambda ctl: NS(controller=ctl, location=4)
+    # yours (player 0): Lars (a piece, 2500), Black Luster Soldier (3000, not a piece here)
+    acts = [NS(card=NS(code=35103106, loc=loc(0))), NS(card=NS(code=70405001, loc=loc(0)))]
+    live = NS(point=NS(actions=acts), board=lambda: {"players": [{}, {}]})
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 0 else [])
+    assert duel._follow_up(live, 1, cards) == 0
+    # only its own (player 1): gives up the non-piece, lower-ATK one
+    own = [NS(card=NS(code=35103106, loc=loc(1))), NS(card=NS(code=14558127, loc=loc(1)))]
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 1 else [])
+    live.point = NS(actions=own)
+    assert duel._follow_up(live, 1, cards) == 1
