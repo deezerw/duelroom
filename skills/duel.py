@@ -205,13 +205,17 @@ def defend(live, ai, respond, cards, wasted=()):
     # nothing -- the AI Ashed one in its first test duel (2026-11-20)
     if live.chain and live.chain[-1][0] in wasted:
         return passing
+    # EVERY piece -- hand traps too -- waits until you control a monster (the
+    # games' "all1" script). On a combo turn that kills more: 28 positions of
+    # t1_enemy_script.py, your board killed 86% vs 71% firing at once, never once
+    # worse (+4 / -0, 2026-11-20). The measured games switch when it is conclusive.
     held = _monsters(live.board(), 1 - ai) < 1
     rank = {c: i for i, c in enumerate(respond)}
     best, best_r = passing, len(rank) + 1
     for i, a in enumerate(p.actions):
         if a.kind != "chain" or not a.card or a.card.code not in rank:
             continue
-        if held and not game.is_hand_trap(a.card.code, cards):
+        if held:
             continue
         if rank[a.card.code] < best_r:
             best, best_r = i, rank[a.card.code]
