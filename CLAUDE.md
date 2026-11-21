@@ -509,6 +509,12 @@ budgets and searched defences come before any side-card comparison.
   interruption traps left in hand, dead goal targets, pieces counted vs fired, hand discards --
   and every line should read ~0 (the old games read 148 / 20 / 282 / 18; the first new
   Blue-Eyes batch 0 / 0 / 0 / 0). Non-zero = fix it, bump `game.METHOD`, then the long run.
+- **AI effectiveness log** (user, 2026-11-21: "for future graphing purposes ... logging the
+  effectiveness of the ai"): `tools/ai_metrics.py` -> tables `ai_metrics` (dated series: won /
+  killed_t2 per day and per era with crossed-bootstrap intervals, misplays per game from
+  play_audit, A/B results, older numbers from these notes marked `doc`) and `ai_events` (each AI
+  change). Daily cron 05:55 `snapshot`; `export` -> results/ai_metrics.csv. **When an AI change
+  ships, add it: `tools/ai_metrics.py event YYYY-MM-DD "title"`, and its A/B into EXPERIMENTS.**
 - Measured, not adopted: turn 1 at 4x the budget (`t1_budget.py`, 48 positions, converged kill
   check) built more (0.83 -> 1.06 pieces, full goal 6 -> 12%) and saved NO board (81% -> 85%
   killed). Hand traps leaving our hand on turn 1 unused (Ash summoned as a body, 29/240) happen

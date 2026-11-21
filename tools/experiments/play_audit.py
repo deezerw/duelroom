@@ -54,7 +54,9 @@ def _avoidable(t1_dir, deck):
     return any(game.usable_gifts(p, 1, deck, 2) == 0 for p in pool)
 
 
-def main(enemy, side, device="server", since=None, gate=False):
+def main(enemy, side, device="server", since=None, gate=False, quiet=False):
+    """Prints the audit (unless `quiet`) and returns its counts as a dict
+    (tools/ai_metrics.py logs them)."""
     import ygorl.engine.constants as C
     import ygorl.engine.messages as M
     from ygorl.engine.duel import default_cards
@@ -70,6 +72,7 @@ def main(enemy, side, device="server", since=None, gate=False):
     enemy_deck = engine.DECKS / f"{enemy}.ydk"
     dh = trainer.deck_hash(deck)
     me = 0 if first else 1            # our engine seat in this layout
+    say = (lambda *a, **k: None) if quiet else print
     dead_codes = {0: set(game.own_turn_dead(deck if me == 0 else enemy_deck)),
                   1: set(game.own_turn_dead(enemy_deck if me == 0 else deck))}
     prefs = trainer.prefs(conn, DECK)["interrupters"]
@@ -173,35 +176,42 @@ def main(enemy, side, device="server", since=None, gate=False):
               if t.split("@")[0] in never]
 
     n = len(games)
-    print(f"== {DECK} vs {enemy} going {side} [{device}]{' since ' + since if since else ''}: {n} games "
+    say(f"== {DECK} vs {enemy} going {side} [{device}]{' since ' + since if since else ''}: {n} games "
           f"{dict(outcomes)}")
     def line(label, cnt, extra=""):
         tot = sum(cnt.values())
-        print(f"  {label:15} {tot:4}{extra}  " + ", ".join(f"{w} {c} {k}" for (w, c), k in cnt.most_common(4)))
+        say(f"  {label:15} {tot:4}{extra}  " + ", ".join(f"{w} {c} {k}" for (w, c), k in cnt.most_common(4)))
     line("own-turn waste", c_waste)
     line("self-negate", c_selfneg)
     if not first:
-        print(f"  {'gifts':15} {gifts:4} games with a monster given (usable by us: {usable}, "
+        say(f"  {'gifts':15} {gifts:4} games with a monster given (usable by us: {usable}, "
               f"avoidable at the same goal progress: {avoidable})")
     line("free left", c_free)
     line("hand discards", c_disc)
-    print(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
+    say(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
     bad = {"own-turn waste": sum(c_waste.values()), "self-negate": sum(c_selfneg.values()),
            "free left": sum(c_free.values()), "hand discards": sum(c_disc.values())}
     if not first:
         bad["avoidable usable gifts"] = avoidable
-    print(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
+    say(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
     for code, k in counted.most_common(8):
         flag = "   <-- never fires" if k >= 5 and fired[code] == 0 else ""
-        print(f"    {nm(code)[:34]:34} {k:4} -> {fired[code]:4} ({fired[code] / k:.0%}){flag}")
+        say(f"    {nm(code)[:34]:34} {k:4} -> {fired[code]:4} ({fired[code] / k:.0%}){flag}")
+    result = {"games": n, "outcomes": dict(outcomes),
+              "own_turn_waste": sum(c_waste.values()), "self_negate": sum(c_selfneg.values()),
+              "free_left": sum(c_free.values()), "hand_discards": sum(c_disc.values()),
+              "gifts": gifts if not first else None, "usable_gifts": usable if not first else None,
+              "avoidable_gifts": avoidable if not first else None,
+              "pieces_counted": sum(counted.values()), "pieces_fired": sum(fired.values())}
     if gate:
         over = {k: v for k, v in bad.items() if n and v > GATE_SHARE * n}
         if not n:
-            print("GATE: no games to audit")
+            say("GATE: no games to audit")
             raise SystemExit(2)
-        print(f"GATE: {'FAILED ' + str(over) if over else 'passed'} (limit {GATE_SHARE:.0%} of {n} games)")
+        say(f"GATE: {'FAILED ' + str(over) if over else 'passed'} (limit {GATE_SHARE:.0%} of {n} games)")
         if over:
             raise SystemExit(1)
+    return result
 
 
 if __name__ == "__main__":
