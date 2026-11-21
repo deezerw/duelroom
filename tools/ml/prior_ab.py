@@ -117,6 +117,8 @@ def main():
     ap.add_argument("--depths", default="8,16,30")
     ap.add_argument("--sims", type=int, default=800)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--arms", default="uniform,net",
+                    help="uniform, net, uniform6x (6x the simulations: about the net's wall time)")
     args = ap.parse_args()
 
     from skills import net_prior
@@ -135,17 +137,18 @@ def main():
     for i, raw in enumerate(kills):
         line = raw.get("key") or f"{group_of(raw)}#{i}"
         for depth in map(int, args.depths.split(",")):
-            for arm in ("uniform", "net"):
+            for arm in args.arms.split(","):
                 if (line, depth, arm) in done:
                     continue
                 try:
-                    r = run_one(raw, depth, arm, args.sims, prior)
+                    sims = args.sims * 6 if arm == "uniform6x" else args.sims
+                    r = run_one(raw, depth, "net" if arm == "net" else "uniform", sims, prior)
                 except Exception as exc:  # noqa: BLE001 -- one position never ends the run
                     print(f"{line} d{depth} {arm}: failed: {type(exc).__name__}: {exc}", flush=True)
                     continue
                 if r is None:
                     continue
-                rec = {"line": line, "depth": depth, "arm": arm, "sims": args.sims, **r}
+                rec = {"line": line, "depth": depth, "arm": arm, "sims": sims, **r}
                 with res.open("a") as fh:
                     fh.write(json.dumps(rec) + "\n")
                 print(json.dumps(rec), flush=True)
@@ -165,6 +168,14 @@ def summary():
         pairs = [v for (_l, dp), v in by.items() if dp == depth and "uniform" in v and "net" in v]
         if not pairs:
             continue
+        eq = [v for v in pairs if "uniform6x" in v]
+        if eq:
+            u6 = sum(v["uniform6x"]["found"] for v in eq)
+            k6 = sum(v["net"]["found"] for v in eq)
+            t6 = sum(v["uniform6x"]["seconds"] for v in eq) / len(eq)
+            tn6 = sum(v["net"]["seconds"] for v in eq) / len(eq)
+            print(f"  {depth:3} out, EQUAL-ish TIME, {len(eq)} kills: uniform x6 sims found {u6} "
+                  f"({t6:.1f} s), net found {k6} ({tn6:.1f} s)")
         n = len(pairs)
         u = sum(v["uniform"]["found"] for v in pairs)
         k = sum(v["net"]["found"] for v in pairs)
