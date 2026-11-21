@@ -6923,4 +6923,5 @@ def test_trainer_asks_small_stack_jumps_first_and_never_far_past_its_best():
     out = trainer.plan(hist, breadth, None, per_hand=40)
     sizes = [trainer._board_size(t) for t, lbl, d in out if lbl.startswith("stack")]
     assert sizes and max(sizes) <= 1 + trainer.STACK_JUMP
-    assert sizes == sorted(sizes), "small jumps first"
+    tiers = [0 if s - 1 in (0, 1) else 1 if s - 1 in (-1, 2, 3) else 2 for s in sizes]
+    assert tiers == sorted(tiers), "best-yield jumps first"

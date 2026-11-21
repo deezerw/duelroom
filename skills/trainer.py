@@ -838,7 +838,12 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=(),
                   default=0)
     stacks = [(t, lbl) for t, lbl in sweep.combinations_to_try(attempts, max_new=per_hand * 8)
               if _board_size(t) - biggest <= STACK_JUMP]
-    for targets, label in sorted(stacks, key=lambda s: _board_size(s[0]) - biggest):
+    # order by measured yield (improvements per 10 server-hours, 2026-11-20): the
+    # same size as the hand's best or one bigger 4.4-4.7; -1 / +2 / +3 1.0; smaller
+    # still ~0-1.4 -- "smallest first" had put those cheap no-yield stacks first
+    tier = lambda j: 0 if j in (0, 1) else 1 if j in (-1, 2, 3) else 2  # noqa: E731
+    for targets, label in sorted(stacks, key=lambda s: (tier(_board_size(s[0]) - biggest),
+                                                        _board_size(s[0]) - biggest)):
         add(targets, label)
 
     # 3. near misses, biggest goal first, least-retried first
