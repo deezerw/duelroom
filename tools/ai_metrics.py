@@ -49,6 +49,7 @@ ERAS = {
     "endgame-t1": "the enemy's turn 1 aimed at one card (Endgame Problem)",
     "brk1x": "our going-second break searched 1x (now 8x)",
     "gift": "before 2026-11-20: own-turn hand traps spent, enemy gifts allowed",
+    "m21b": "2026-11-21b: before patches 0011-0013 and the end-of-turn sets",
 }
 
 # Numbers recorded in the project notes for games no longer stored as they were.
