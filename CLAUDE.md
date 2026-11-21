@@ -493,8 +493,9 @@ budgets and searched defences come before any side-card comparison.
   of 6-9 targets solved 0 of 1355 (135 server-hours). Marked Spells/Traps are asked for and
   scored SET (`@szone:fd`; a set Super Poly scored 0 before).
 - **`game.T1_ENEMY_SCRIPTS`** (default `("first",)`): the enemy may choose its hand-trap timing
-  on our turn 1 (fire at once / wait for 1 / 2 monsters), keeping the board with our fewest live
-  pieces. Switch on when `t1_enemy_script.py` is conclusive (12 positions: killed 58/67/75%).
+  on our turn 1 (fire at once / wait for 1 / 2 monsters). 28 positions: killed 71 / 86 / 79%;
+  "all1 always" +4 / -0 (p 0.125), the fewest-pieces pick only 75% (pieces do not predict kills).
+  Switch to `("all1",)` when `t1_enemy_script.py` is conclusive.
 - **Before any long games run: a smoke batch + `tools/experiments/play_audit.py`** (user:
   "make the data as good as possible before doing long long runs"). Smoke = the same job with
   `enemy_hands=2 runs=1` (48 games, ~1 h on the server): the same seeds, so it is the FIRST

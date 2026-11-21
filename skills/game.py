@@ -645,10 +645,12 @@ def ordered_deck(deck_path, order, hand, out_path, hand_first=True):
 # On OUR turn 1 the enemy has only hand traps; which of these scripts it plays
 # (fire at once / wait until we control 1 / 2 monsters, game.SCRIPTS). More than
 # one: turn 1 is solved against each and the enemy keeps the one leaving us the
-# fewest live pieces -- its best timing per position, as it picks its defence on
-# its own turn (DEFENCES). ("first",) = today's single script. To switch on once
-# tools/experiments/t1_enemy_script.py says waiting kills more (8 positions,
-# 2026-11-20: killed 50 / 62 / 75% -- not yet significant).
+# fewest live pieces. ("first",) = today's single script. Measured 2026-11-20
+# (tools/experiments/t1_enemy_script.py, 28 positions, converged kill check):
+# killed 71% (first) / 86% (all1) / 79% (all2); "all1 always" newly killed 4 and
+# saved 0 (p = 0.125); the fewest-pieces PICK only 75% -- pieces do not predict
+# kills. The switch is therefore ("all1",), one solve, once that test is
+# conclusive (6 / 0 would be p = 0.03).
 T1_ENEMY_SCRIPTS = ("first",)
 
 
