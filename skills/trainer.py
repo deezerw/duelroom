@@ -981,6 +981,13 @@ def run_generation(conn, deck_path, name, dh, gen, per_hand=PER_HAND,
                           hand, board, label, _budget(targets, base, solve_ms),
                           draw, extra + tuple(extender_args(p, need, cards))))
             goals.append(targets)
+    # longest budgets first (the 2x big stacks): the pool starts the slow solves
+    # while every worker is free, and a generation's tail -- workers idle until
+    # its last solve ends -- is then made of short ones (2026-11-20: one 360 s
+    # solve left 5 of 6 workers idle, the server 61% idle). Goals stay paired:
+    # results arrive in batch order.
+    order = sorted(range(len(batch)), key=lambda k: -batch[k][7])
+    batch, goals = [batch[k] for k in order], [goals[k] for k in order]
     big = sum(1 for b in batch if b[7] > solve_ms)
     say(f"generation {gen}: {len(batch)} solve(s) over {len(hands)} hand(s), "
         f"{solve_ms // 1000}s each ({big} big stack(s) at "
