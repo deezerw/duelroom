@@ -1,0 +1,118 @@
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-21 12:24:41.879296816 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-21 16:46:35.403680832 -0500
+@@ -1499,6 +1499,8 @@
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// --opp-key <code|code...> (patch 0012).
+ 	std::vector<uint32_t> opp_key;
++	// --opp-gy-want <code|code...> (patch 0013).
++	std::vector<uint32_t> opp_gy_want;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2049,6 +2051,8 @@
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+ 				"                     defender's target pick takes one over any other (0012)\n"
++				"  --opp-gy-want <c>  the defender's cards that profit from the GY: given first\n"
++				"                     when it must send its own card to the GY (0013)\n"
+ 				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
+ 				"                     with --start [--root]) and write to <d> one prefix\n"
+ 				"                     per reply the defender did not make at each of its\n"
+@@ -2568,7 +2572,8 @@
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+-				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key") {
++				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key" ||
++				  a == "--opp-gy-want") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2578,7 +2583,8 @@
+ 				: (a == "--opp-negate") ? o.opp_negate
+ 				: (a == "--opp-negate-mon") ? o.opp_negate_mon
+ 				: (a == "--opp-dead") ? o.opp_dead
+-				: (a == "--opp-key") ? o.opp_key : o.opp_respond;
++				: (a == "--opp-key") ? o.opp_key
++				: (a == "--opp-gy-want") ? o.opp_gy_want : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+@@ -4231,6 +4237,7 @@
+ 	cfg.opp_negate_mon = opt.opp_negate_mon;
+ 	cfg.opp_dead = opt.opp_dead;
+ 	cfg.opp_key = opt.opp_key;
++	cfg.opp_gy_want = opt.opp_gy_want;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-21 12:24:41.871296611 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-21 16:46:35.396680666 -0500
+@@ -345,6 +345,7 @@
+ 	saw_retry = false;
+ 	won_this_step = false;
+ 	damage_this_step = 0;
++	step_hint = 0;
+ 	bool duel_decided = false;
+ 	for(;;) {
+ 		int status = duel.Process();
+@@ -527,6 +528,12 @@
+ 			case MSG_NEW_TURN:
+ 				++turns_this_step;
+ 				break;
++			case MSG_HINT:
++				// payload: type(1) player(1) data(8); HINT_SELECTMSG = 3 names what
++				// the next selection is for (504 HINTMSG_TOGRAVE: to the GY) -- patch 0013
++				if(m.size >= 10 && m.data[0] == 3)
++					std::memcpy(&step_hint, m.data + 2, 8);
++				break;
+ 			case MSG_RETRY:
+ 				saw_retry = true;
+ 				break;
+@@ -554,6 +561,8 @@
+ 			if(IsPrompt(m.type)) {
+ 				prompt_type = m.type;
+ 				prompt_payload.assign(m.data, m.data + m.size);
++				prompt_hint = step_hint;
++				step_hint = 0;
+ 				prompt_player = m.size ? m.data[0] : -1;
+ 			}
+ 		}
+@@ -1893,6 +1902,14 @@
+ 		   std::find(cfg.opp_dead.begin(), cfg.opp_dead.end(),
+ 					 duel.Db().Canonical(cands[i].code)) != cfg.opp_dead.end())
+ 			val[i] = 0;
++		// Patch 0013: sending its OWN card to the GY, the defender gives one that
++		// profits from it (Sulliek's cost sent Fiendsmith's Sequence -- lowest ATK --
++		// over Tearlaments Reinoheart, whose GY trigger revives it and, an Aqua,
++		// sets off Kaleido-Heart: on 64 boards Kaleido-Heart never fired).
++		if(cands[i].con == prompt_player && prompt_hint == 504 && !cfg.opp_gy_want.empty() &&
++		   std::find(cfg.opp_gy_want.begin(), cfg.opp_gy_want.end(),
++					 duel.Db().Canonical(cands[i].code)) != cfg.opp_gy_want.end())
++			val[i] = 1;
+ 		// Patch 0012: the attacker's kill keys first, in --opp-key order (its
+ 		// kills hinge on them: Angelechy's Kusanagi used Enlisted as its Tuner in
+ 		// 332 of 340 kills, and the ATK pick took Destrier over it).
+--- combo-solver-rooted/solver-patched/search.h	2026-11-21 12:24:41.869296559 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-21 16:46:35.393680594 -0500
+@@ -2731,6 +2731,10 @@
+ 	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
+ 	// important first; the defender's target pick takes one over any other.
+ 	std::vector<uint32_t> opp_key;
++	// --opp-gy-want <codes> (duelroom patch 0013): the defender's cards that
++	// PROFIT from being sent to the GY (Tearlaments, Desirae); at a "send to the
++	// GY" selection of its own cards it gives one of these first.
++	std::vector<uint32_t> opp_gy_want;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -3638,6 +3642,9 @@
+ 	// State of the current prompt
+ 	uint8_t prompt_type = 0;
+ 	std::vector<uint8_t> prompt_payload;
++	// The selection hint (MSG_HINT HINT_SELECTMSG) the core sent before the
++	// current prompt, 0 if none (patch 0013), and the one seen so far this step.
++	uint64_t prompt_hint = 0, step_hint = 0;
+ 	int prompt_player = -1;
+ 	uint32_t actions_this_step = 0;
+ 	// Cards summoned (normal + special) by the last StepToPrompt, in order. Raw

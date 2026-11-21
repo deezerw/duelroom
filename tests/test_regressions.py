@@ -7216,6 +7216,24 @@ def test_sulliek_is_live_only_beside_a_face_up_tearlaments():
     assert sul not in drill.never_live([sul, scheiren]) and sul in drill.never_live([sul, desirae])
 
 
+def test_defender_is_told_which_of_its_cards_want_the_gy(monkeypatch):
+    """Patch 0013: the defending deck's cards that profit from the GY ("If this
+    card is sent to the GY": Reinoheart, Kaleido-Heart, Desirae...) go to the
+    solver as --opp-gy-want, so Sulliek's cost sends Reinoheart, not Sequence."""
+    from skills import engine, game
+
+    want = game.gy_want(engine.DECKS / "imported.ydk")
+    names_in = {28226490, 82135803}                     # Kaleido-Heart, Desirae
+    assert names_in <= set(want)
+    assert 49867899 not in want, "Fiendsmith's Sequence gains nothing in the GY"
+    monkeypatch.setattr(game, "GY_WANT_LIVE", True)
+    args = game.gy_want_args(engine.DECKS / "imported.ydk")
+    assert args[0] == "--opp-gy-want" and str(28226490) in args[1].split("|")
+    assert game.gy_want_args(None) == []
+    monkeypatch.setattr(game, "GY_WANT_LIVE", False)
+    assert game.gy_want_args(engine.DECKS / "imported.ydk") == []
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

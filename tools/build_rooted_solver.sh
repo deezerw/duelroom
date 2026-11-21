@@ -37,6 +37,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0012: --opp-key, the defender's target pick takes the attacker's kill keys first
 # (tools/experiments/kill_keys.py: Enlisted is Kusanagi's Tuner in 94% of Angelechy's kills).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0012-kill-key-targets.patch" >&2)
+# 0013: --opp-gy-want, at a "send to the GY" selection of its own cards the defender gives
+# one that profits from it (Sulliek's cost sent Sequence over Reinoheart, 2026-11-21).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0013-gy-want.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -52,4 +55,5 @@ grep -q -- "--no-own-chain" <<<"$help" || { echo "built binary lacks --no-own-ch
 grep -q -- "--opp-hand-root" <<<"$help" || { echo "built binary lacks --opp-hand-root" >&2; exit 1; }
 grep -q -- "--opp-negate" <<<"$help" || { echo "built binary lacks --opp-negate" >&2; exit 1; }
 grep -q -- "--opp-key" <<<"$help" || { echo "built binary lacks --opp-key" >&2; exit 1; }
+grep -q -- "--opp-gy-want" <<<"$help" || { echo "built binary lacks --opp-gy-want" >&2; exit 1; }
 echo "$dst/bin/combosolver"

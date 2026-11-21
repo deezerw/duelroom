@@ -222,6 +222,30 @@ KILL_KEYS_FILE = Path(__file__).resolve().parents[1] / "data" / "kill_keys.json"
 KILL_KEYS_LIVE = None
 
 
+# The defender's cards that PROFIT from being sent to the GY (patch 0013
+# --opp-gy-want): given first when it must send its own card there (Sulliek's
+# cost). Read from the text: "If this card is sent to the GY" (Tearlaments monsters,
+# Desirae...). Swept 2026-11-21: Sulliek's cost sent Fiendsmith's Sequence over
+# Tearlaments Reinoheart (lowest ATK first), so Kaleido-Heart, on 64 boards, never
+# fired. None: emitted when ROOTED_BIN has the flag.
+GY_WANT_LIVE = None
+_GY_WANT = re.compile(r"If this card is sent to (the|your) (GY|Graveyard)", re.I)
+
+
+def gy_want(deck):
+    from .deck import Deck
+    d = Deck.from_ydk(Path(deck))
+    return sorted(c for c in set(d.main) | set(d.extra) if _GY_WANT.search(card_text(c)))
+
+
+def gy_want_args(defender_deck):
+    """--opp-gy-want for the DEFENDING side's deck ([] without one / an old binary)."""
+    if not defender_deck or not (GY_WANT_LIVE if GY_WANT_LIVE is not None else _bin_has("--opp-gy-want")):
+        return []
+    codes = gy_want(defender_deck)
+    return ["--opp-gy-want", "|".join(map(str, codes))] if codes else []
+
+
 def kill_keys(deck):
     """`deck`'s kill keys by its file name, most material-share first; []."""
     if not KILL_KEYS_FILE.exists():
@@ -858,8 +882,8 @@ def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
             "--hand", "|".join(map(str, hand))]
     for t in goal:
         args += ["--target", t]
-    args += (defender_args(enemy_respond) + self_target_args() + own_turn_args(our_deck)
-             + list(extra))
+    args += (defender_args(enemy_respond) + gy_want_args(enemy_deck) + self_target_args()
+             + own_turn_args(our_deck) + list(extra))
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = r["solution"] or r["approach"]
     if src is None:
@@ -897,7 +921,7 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
         best = None
         for v in defences:
             label = "t2-otk" if v == defences[0] else f"t2-otk-h{v}"
-            k = _solve(prefix, base + defence_args(our_respond, v)
+            k = _solve(prefix, base + defence_args(our_respond, v) + gy_want_args(our_deck)
                        + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
                        scratch, label, otk_ms, seed)
             if k["solution"] and _winner(k["solution"]) == 1:
@@ -913,7 +937,7 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
     if targets:
         at = base.index("--target")
         build = base[:at] + base[at + 2:] + [a for t in targets for a in ("--target", t)]
-    r = _solve(prefix, build + defence_args(our_respond, chosen),
+    r = _solve(prefix, build + defence_args(our_respond, chosen) + gy_want_args(our_deck),
                scratch, "t2", ms, seed)
     # No line at all: the enemy passes its turn from the root.
     src = (fewest_gifts(r.get("solutions") or [], our_deck, player=0, until_turn=3)
@@ -1135,7 +1159,7 @@ def enemy_turn1(our_deck, enemy_deck, hand, enemy_seed, enemy_target, scratch,
     args = ["--no-ref", "--deck", Path(enemy_deck).resolve(),
             "--hand", "|".join(map(str, ehand))] \
         + [a for t in targets for a in ("--target", t)] + defender_args(our_respond) \
-        + own_turn_args(enemy_deck)
+        + gy_want_args(our_deck) + own_turn_args(enemy_deck)
     r = _solve(tpl, args, scratch, "t1", ms, seed)
     src = fewest_gifts(r.get("solutions") or [], our_deck) or r["approach"]
     if src is not None and usable_gifts(src, 1, our_deck, 2):
