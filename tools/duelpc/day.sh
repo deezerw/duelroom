@@ -30,7 +30,8 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
     echo "=== $(date) imitation training: $( [ -f results/ml/bc/policy.pt ] && echo done || echo FAILED, see results/ml/bc_train.log) ===" >> $LOG
   fi
   # Stage 16 step 3(a): the net as the search's prior vs uniform, on held-out kills (GPU, ~1 h)
-  if [ -f results/ml/bc/policy.pt ] && [ ! -f results/ml/prior_ab/done ]; then
+  # in the BACKGROUND: it is GPU + one core, the solver steps below take the rest
+  if [ -f results/ml/bc/policy.pt ] && [ ! -f results/ml/prior_ab/done ]; then (
     rsync -a skills/__init__.py skills/mcts.py skills/net_prior.py deezer@duelpc.local:duelroom/skills/ \
       && rsync -a tools/ml/prior_ab.py deezer@duelpc.local:duelroom/tools/ml/ \
       && rsync -a results/ml/demos/demos.jsonl deezer@duelpc.local:duelroom/results/ml/demos/ \
@@ -40,7 +41,7 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
       && mkdir -p results/ml/prior_ab && rsync -a deezer@duelpc.local:duelroom/results/ml/prior_ab/ results/ml/prior_ab/ \
       && touch results/ml/prior_ab/done
     echo "=== $(date) net-prior A/B: $( [ -f results/ml/prior_ab/done ] && echo done || echo FAILED, see results/ml/prior_ab.log) ===" >> $LOG
-  fi
+  ) & fi
   venv/bin/python tools/experiments/budget_plateau.py --stages kill --levels 32 >> results/experiments/plateau_32.log 2>&1
   echo "=== $(date) plateau 32x done ===" >> $LOG
   # is our turn 3 converged at 4x (game.T3_X)? 87/89/94% at 1/2/4x, 2x->4x still flipped 3
@@ -49,9 +50,7 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
   # why is going first weak? does a bigger turn-1 search survive the converged kill check?
   venv/bin/python tools/experiments/t1_budget.py 48 --levels 1,4 >> results/experiments/t1_budget.log 2>&1
   echo "=== $(date) t1 budget test done ===" >> $LOG
-  # on OUR turn 1 the enemy has only hand traps: should they wait for a better target?
-  venv/bin/python tools/experiments/t1_enemy_script.py 40 >> results/experiments/t1_enemy_script.log 2>&1
-  echo "=== $(date) enemy turn-1 script test done ===" >> $LOG
+  # (the enemy turn-1 timing test ran on the server: 79 positions, settled 2026-11-21)
   # the honest going-first baseline (16x kill check, trained enemy turn 2), run here and
   # not through the jobs queue: a queued duelpc job is retried with Wake-on-LAN, at night too
   # smoke first (the full run's first slice: 2 enemy hands, 1 run), audited; the long run
