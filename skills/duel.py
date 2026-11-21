@@ -384,6 +384,32 @@ def plan_args(row, cards, turn):
     return args
 
 
+def deck_target(conn, deck):
+    """What the AI builds toward with `deck` (a target list): its payoff target, else the board
+    piece its trained hands reach most often (our own deck has no payoff target:
+    the planner asked for card "1", 2026-11-20)."""
+    from collections import Counter
+
+    from . import engine, game, scenarios, trainer
+
+    t = scenarios.target_for(deck)
+    if t:
+        return [t]
+    path = engine.DECKS / f"{deck}.ydk"
+    dh = trainer.deck_hash(path)
+    seen = Counter()
+    for r in conn.execute("SELECT best_goal FROM trainer_hands WHERE deck_hash=? AND best_goal "
+                          "IS NOT NULL", (dh,)):
+        g = game.live_goal(json.loads(r["best_goal"]), path)
+        first = game.steer(g, None)
+        if first:
+            seen[first] += 1
+    if not seen:
+        raise RuntimeError(f"no target for {deck}: no payoff target and no trained hands")
+    # through split_goal: a piece that needs an equip gets it (Desirae -> Sequence)
+    return trainer.split_goal([seen.most_common(1)[0][0]])[0]
+
+
 def _spawn_plan(did):
     subprocess.Popen([sys.executable, "-m", "skills.duel", "plan", str(did)], cwd=str(ROOT),
                      stdout=open(DUELS / str(did) / "plan.log", "a"), stderr=subprocess.STDOUT,
@@ -396,7 +422,7 @@ def plan(conn, did):
     no attacks, the board). Then play on."""
     from ygorl.engine.replay import Replay
 
-    from . import breaking, game, scenarios
+    from . import breaking, game
 
     row = get(conn, did)
     live = Live(row)
@@ -407,11 +433,11 @@ def plan(conn, did):
                                                 live.responses, root)
         cards = live.cards
         base = ["--start", str(start), "--root", str(prefix)] + plan_args(row, cards, turn)
-        target = scenarios.target_for(row["ai_deck"]) or "1"
+        targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
         t0 = time.time()
         r = None
         if turn > 1:
-            r = game._solve(prefix, base + ["--target", target, "--goal-win",
+            r = game._solve(prefix, base + targets + ["--goal-win",
                                             "--stop-on-win", str(game.STOP_ON_WIN)],
                             root, "lethal", row["think_ms"] // 2, int(t0))
             # under --goal-win a solution IS a win the solver verified -- on its copy
@@ -419,7 +445,7 @@ def plan(conn, did):
             if not r["solution"]:
                 r = None
         if r is None:
-            r = game._solve(prefix, base + ["--target", target], root, "build",
+            r = game._solve(prefix, base + targets, root, "build",
                             row["think_ms"], int(t0))
         src = r["solution"] or r["approach"]
         n = len(live.responses)
