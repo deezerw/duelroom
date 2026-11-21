@@ -510,6 +510,12 @@ budgets and searched defences come before any side-card comparison.
   interruption traps left in hand, dead goal targets, pieces counted vs fired, hand discards --
   and every line should read ~0 (the old games read 148 / 20 / 282 / 18; the first new
   Blue-Eyes batch 0 / 0 / 0 / 0). Non-zero = fix it, bump `game.METHOD`, then the long run.
+- **METHOD 2026-11-21c (deployed 2026-11-21 22:40):** live rooted solver = patches 0002-0013
+  (old one: `combo-solver-rooted-pre0011`); every Trap set and Continuous Spell activated at end of
+  turn (`free_sets`, Scream). Measured: 0011 3 saved / 0 lost of 49; 0012 0 / 0 of 60 (kept: it also
+  makes the enemy hit OUR kill keys); 0013 unmeasured; QUICK_RESPOND (Havnis/Kashtira) still off.
+  Job 619 (Angelechy going second, server) finishes on 2026-11-21b: relabel its section before the
+  next Angelechy going-second run there (`tools/relabel_games.py`), as with `gift`.
 - **AI effectiveness log** (user, 2026-11-21: "for future graphing purposes ... logging the
   effectiveness of the ai"): `tools/ai_metrics.py` -> tables `ai_metrics` (dated series: won /
   killed_t2 per day and per era with crossed-bootstrap intervals, misplays per game from

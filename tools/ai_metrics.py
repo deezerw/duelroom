@@ -103,6 +103,12 @@ EXPERIMENTS = [
      "negate_live_ab.py: 49 positions where a negate waited"),
     ("2026-11-21", "patch 0011 | our board killed | negate waits for a live target", 38 / 49, 49, None,
      None, "bench-16x", "3 saved, 0 newly lost (sign p 0.25)"),
+    ("2026-11-21", "patch 0012 | our board killed | ATK target pick", 52 / 60, 60, None, None, "bench-16x",
+     "kill_key_ab.py: 60 positions holding S:P / Dragostapelia / Lars"),
+    ("2026-11-21", "patch 0012 | our board killed | kill keys first", 52 / 60, 60, None, None, "bench-16x",
+     "0 saved, 0 newly lost: no measurable effect"),
+    ("2026-11-21", "Dominus from hand on our turn 1 | our board killed | fires all", 0.95, 40, None, None,
+     "bench-16x", "t1_dominus.py: without Impulse 92%, Purge 98%, Spark 92% -- firing them is no misplay"),
 ]
 
 # The AI changes, dated (from the commits and the notes)

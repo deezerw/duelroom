@@ -6865,15 +6865,19 @@ def test_interruption_traps_left_in_hand_are_set_before_passing(tmp_path):
     from skills.deck import Deck
 
     ydk = tmp_path / "d.ydk"
-    # Sulliek, Trivikarma (no Visas), Ash, Infinite Impermanence
-    Deck(name="d", main=[74920585, 7436169, 14558127, 10045474] * 10,
+    # Sulliek, Trivikarma (no Visas), Ash, Infinite Impermanence, Scheiren (a Tearlaments:
+    # without one Sulliek can never work -- drill.NEEDS_ANY_ON_FIELD, 2026-11-21)
+    Deck(name="d", main=[74920585, 7436169, 14558127, 10045474, 572850] * 8,
          extra=[], side=[]).write_ydk(ydk)
     assert game.free_sets(ydk) == (10045474, 74920585)
+    no_tear = tmp_path / "n.ydk"
+    Deck(name="n", main=[74920585, 7436169, 14558127, 10045474] * 10, extra=[], side=[]).write_ydk(no_tear)
+    assert game.free_sets(no_tear) == (10045474,), "Sulliek with no Tearlaments: nothing to set up"
     assert game.free_sets(None) == ()
     # a Quick-Play the player counts as an interruption is set too (it works on
     # their turn only from the field); a marked hand trap is not
     ydk2 = tmp_path / "d2.ydk"
-    Deck(name="d2", main=[74920585, 48130397, 14558127] * 10, extra=[], side=[]).write_ydk(ydk2)
+    Deck(name="d2", main=[74920585, 48130397, 14558127, 572850] * 8, extra=[], side=[]).write_ydk(ydk2)
     assert game.free_sets(ydk2) == (74920585,)
     assert game.free_sets(ydk2, extra=[48130397, 14558127]) == (48130397, 74920585)
     assert "free_sets(our_deck) if sets is None else sets" in inspect.getsource(game.turn1)

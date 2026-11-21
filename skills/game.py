@@ -113,9 +113,11 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-21b"
-METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
-                True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
+METHOD = "2026-11-21c"
+METHOD_SINCE = {False: "2026-11-21T22:40:00",    # 2026-11-21c, both sides: patches 0011
+                True: "2026-11-21T22:40:00"}     # (negates wait for a live target), 0012 (kill
+# keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
+# Continuous Spell activated at end of turn (Scream). Before: {False: "2026-11-20T22:14:00",    # going second: + free sets                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
 # A --goal-win search stops once this many winning lines exist (patch 0003).
 # The question it answers is yes/no; the rest of the budget only picked a
@@ -609,6 +611,12 @@ class Position:
     min_lp: list = field(default_factory=lambda: [None, None])
 
 
+def _continuous_spell(code):
+    from ygorl.engine.duel import default_cards
+    card = default_cards().get(code)
+    return bool(card is not None and card.type & 0x2 and card.type & 0x20000)
+
+
 def replay(source, responses=None, until_turn=None, free_set=None):
     """Replay `responses` (default: the file's own) from `source`'s start.
 
@@ -660,7 +668,10 @@ def replay(source, responses=None, until_turn=None, free_set=None):
                 break
             kinds = [a.kind for a in point.actions]
             put = (next((i for i, a in enumerate(point.actions)
-                         if a.kind == "sset" and a.card and a.card.code in to_set), None)
+                         if a.card and a.card.code in to_set and (
+                             (a.kind == "sset" and not _continuous_spell(a.card.code)) or
+                             (a.kind == "activate" and _continuous_spell(a.card.code)
+                              and a.card.loc is not None and a.card.loc.location & 0x2))), None)
                    if point.player == setter and point.turn_player == setter else None)
             pick = put if put is not None else next(
                 (kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0)
@@ -1225,9 +1236,11 @@ def live_goal(goal, deck):
 
 
 def free_sets(deck, cards=None, extra=()):
-    """`deck`'s Traps whose scripts read as an interruption (Tearlaments
-    Sulliek): a turn's line that ends with one in hand sets it before
-    passing (`replay(free_set=...)`). The search places only what its goal
+    """`deck`'s Traps (every one since 2026-11-21: Tearlaments Scream, searched by
+    Trivikarma, sat in hand all game -- it is no interruption, so it was not
+    listed; a set Trap costs nothing and does more than one in hand): a turn's
+    line that ends with one in hand sets it before passing
+    (`replay(free_set=...)`). The search places only what its goal
     asks for, so our turn 1 kept Sulliek in hand in 8 of 240 going-first
     games with free zones (2026-11-20); in hand a trap answers nothing.
     `extra`: cards the player counts as interruptions (trainer prefs) that
@@ -1245,8 +1258,11 @@ def free_sets(deck, cards=None, extra=()):
     out = []
     for c in sorted(main - dead):
         card = cards.get(c)
-        if card and card.type & 0x4 and _interrupts(c, cards):     # TYPE_TRAP
+        if card and card.type & 0x4:                                # TYPE_TRAP
             out.append(c)
+        elif card and card.type & 0x2 and card.type & 0x20000:     # a Continuous Spell:
+            out.append(c)          # activated face-up instead (a set one never flips on
+                                   # their turn): Tearlaments Scream triggers on THEIR summons
     for c in extra:
         card = cards.get(int(c))
         if (int(c) in main and int(c) not in out and card
