@@ -1583,6 +1583,18 @@ def duel_state(did):
         abort(404)
 
 
+@bp.route("/duel/<int:did>/undo", methods=["POST"])
+@login_required
+def duel_undo(did):
+    """Take back your last move."""
+    from skills import duel
+    try:
+        duel.undo(conn(), did)
+    except (ValueError, KeyError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_duel_state(did))
+
+
 @bp.route("/duel/<int:did>/respond", methods=["POST"])
 @login_required
 def duel_respond(did):

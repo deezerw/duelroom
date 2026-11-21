@@ -394,6 +394,38 @@ def advance(conn, did, spawn=True):
         live.close()
 
 
+def undo(conn, did):
+    """Take back your last move (user, 2026-11-21: "make an undo move button"):
+    the duel's moves are cut to just before your last decision -- the windows
+    auto mode passed for you are skipped over, so one undo is one real choice
+    -- and every AI move after it goes too. The AI's plan is dropped (it re-plans
+    when it must). The duel replays deterministically, so the same move gives the
+    same result: undo cannot reroll luck. Not while the AI is thinking: its
+    planner would write a plan for a position that is gone."""
+    row = get(conn, did)
+    if row["status"] == "thinking":
+        raise ValueError("wait until the AI has moved")
+    acts = json.loads(row["actions"])
+    you = row["user_seat"]
+    auto = (row.get("respond") or "auto") != "manual"
+    live = Live({**row, "actions": "[]"})
+    mine = []
+    try:
+        for k, idx in enumerate(acts):
+            p = live.point
+            lone_pass = (p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1
+                         and p.actions[0].kind == "pass")
+            if p.player == you and not (auto and lone_pass):
+                mine.append(k)
+            live.act(idx)
+    finally:
+        live.close()
+    if not mine:
+        raise ValueError("nothing to undo")
+    _save(conn, did, actions=json.dumps(acts[:mine[-1]]), status="your move", plan=None,
+          note="move taken back")
+
+
 def user_act(conn, did, idx):
     """Play your choice `idx` (an index into the current point's actions)."""
     row = get(conn, did)
@@ -654,6 +686,7 @@ def view(conn, did):
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,
                 "phase": live.session.tracker.phase,
                 "respond": row.get("respond") or "auto",
+                "can_undo": row["status"] != "thinking" and bool(json.loads(row["actions"] or "[]")),
                 "board": b, "chain": list(live.chain),
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)

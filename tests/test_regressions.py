@@ -7144,6 +7144,37 @@ def test_duel_manual_respond_mode_stops_at_every_window(tmp_path, monkeypatch):
         duel.set_respond(conn, did, "off")
 
 
+def test_duel_undo_takes_back_your_last_real_move(tmp_path, monkeypatch):
+    """Undo (user, 2026-11-21): back to just before your last decision, with
+    the AI's moves after it gone; the same move again gives the same duel
+    (deterministic: no rerolling luck); refused while the AI thinks."""
+    import os
+    import pytest
+    from skills import db, duel, engine
+    os.environ.update(engine.env())
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    monkeypatch.setattr(duel, "_spawn_plan", lambda *a, **k: None, raising=False)
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    v0 = duel.view(conn, did)
+    pick = v0["actions"][0]
+    duel.user_act(conn, did, pick["i"])
+    duel.advance(conn, did, spawn=False)
+    after = duel.get(conn, did)["actions"]
+    if duel.get(conn, did)["status"] == "thinking":
+        with pytest.raises(ValueError):
+            duel.undo(conn, did)
+        duel._save(conn, did, status="your move")
+    duel.undo(conn, did)
+    v1 = duel.view(conn, did)
+    assert v1["status"] == "your move" and [a["label"] for a in v1["actions"]] == [a["label"] for a in v0["actions"]]
+    assert v1["board"] == v0["board"], "back where you were"
+    duel.user_act(conn, did, pick["i"])
+    duel.advance(conn, did, spawn=False)
+    assert duel.get(conn, did)["actions"] == after, "the same move, the same duel"
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""
