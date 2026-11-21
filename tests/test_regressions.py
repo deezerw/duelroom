@@ -6670,7 +6670,8 @@ def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch
     usable.update(a=1, c=0)
     assert game.fewest_gifts(["a", "c"], "deck") == "c"
     usable.update(a=0, c=0)
-    assert game.fewest_gifts(["c", "a"], "deck") == "a"          # then fewest gifts
+    # an unusable gift (Seneschal) is NOT avoided: solver order decides
+    assert game.fewest_gifts(["c", "a"], "deck") == "c"
 
 
 def test_own_turn_dead_hand_traps_are_kept_for_the_opponents_turn(tmp_path):

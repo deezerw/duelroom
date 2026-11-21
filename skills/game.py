@@ -113,7 +113,7 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-21a"
+METHOD = "2026-11-21b"
 METHOD_SINCE = {False: "2026-11-20T22:14:00",    # going second: + free sets
                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -1143,16 +1143,15 @@ def _regift(tpl, args, scratch, ms, seed, our_deck, first):
             return None
         best = max(_approach_progress(a) for a in apps)
         pool = [a for a in apps if _approach_progress(a) == best]
-    score = [(usable_gifts(p, 1, our_deck, 2),
-              len(gifts(replay(p, until_turn=2).board, 1, our_deck)), i) for i, p in enumerate(pool)]
-    return pool[min(score)[2]]
+    score = [(usable_gifts(p, 1, our_deck, 2), i) for i, p in enumerate(pool)]
+    return pool[min(score)[1]]
 
 
 def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
     """The solution line whose gifts the RECEIVER can use least (`usable_gifts`),
-    then the one leaving the fewest monsters on its field at the end of the
-    turn, ties in the solver's order (so a deck that never gives monsters away
-    plays exactly its first line). None if no lines.
+    ties in the solver's order (a deck that never gives monsters away plays
+    exactly its first line; a gift the receiver cannot use, Seneschal, is not
+    avoided -- it is Angelechy's strategy). None if no lines.
 
     Every line reaches the same goal, but the search only scores its own
     board, so it gave the opponent whatever it liked: in 37 of 138 stored
@@ -1167,7 +1166,10 @@ def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
          for s in solutions]
     use = [usable_gifts(s, player, receiver_deck, until_turn) if n[i] else 0
            for i, s in enumerate(solutions)]
-    return solutions[min(range(len(solutions)), key=lambda i: (use[i], n[i], i))]
+    # a gift the receiver cannot use is NOT avoided: Angelechy GIVES Seneschal
+    # (the black king) on purpose -- attacking it swaps it back (user,
+    # 2026-11-21: "angelechy does have a strat that gives you a monster")
+    return solutions[min(range(len(solutions)), key=lambda i: (use[i], i))]
 
 
 # --- one matchup run -----------------------------------------------------------
