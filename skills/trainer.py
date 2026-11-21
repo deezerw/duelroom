@@ -469,12 +469,18 @@ def _extra_on_field(board, codes, cards, worth=None, sz_codes=()):
     n = 0
     for zone in ("mzone", "szone"):
         for c in me.get(zone) or []:
-            if not c.get("position", 0) & 0x5:
+            faceup = bool(c.get("position", 0) & 0x5)
+            card = cards.get(c["code"])
+            spell_trap = bool(card and card.type & (0x2 | 0x4))
+            # a marked Spell / Trap works FROM BEING SET (Super Polymerization on
+            # their turn): face-down in the spell & trap zone it counts too -- it
+            # scored 0 there, so no best goal ever set it (2026-11-20)
+            if not faceup and not (zone == "szone" and spell_trap and c["code"] in codes):
                 continue
-            if zone == "szone" and c["code"] in sz_codes:
+            if zone == "szone" and faceup and c["code"] in sz_codes:
                 n += worth(c["code"], "szone") if worth else 1
             elif (c["code"] in codes
-                  and not any(i.where == "field"
+                  and not any(i.where in ("field", "set")
                               for i in card_interruptions(c["code"], cards))):
                 n += worth(c["code"]) if worth else 1
     return n
