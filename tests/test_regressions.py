@@ -7198,6 +7198,24 @@ def test_duel_ai_finds_the_cards_of_its_deck_that_beat_yours():
     assert duel.answer_cards(row, NS(board=lambda: empty), cards) == [], "nothing of yours, nothing to answer"
 
 
+def test_sulliek_is_live_only_beside_a_face_up_tearlaments():
+    """User, 2026-11-21: "having Scheiren on the field lets Sulliek be active".
+    Sulliek negates only if you control a Tearlaments monster (or Visas): a set
+    Sulliek beside Desirae alone is dead; beside a face-up Scheiren it is live;
+    a face-down Scheiren has no name and enables nothing."""
+    from skills import drill
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    sul, scheiren, desirae = 74920585, 572850, 82135803
+    st = [{"code": sul, "position": 10, "sequence": 1}]
+    board = lambda mz: {"players": [{"mzone": mz, "szone": st}, {}]}
+    assert sul in drill.dead_on_field(board([{"code": desirae, "position": 1, "sequence": 0}]), cards)
+    assert sul not in drill.dead_on_field(board([{"code": scheiren, "position": 1, "sequence": 0}]), cards)
+    assert sul in drill.dead_on_field(board([{"code": scheiren, "position": 8, "sequence": 0}]), cards)
+    assert sul not in drill.never_live([sul, scheiren]) and sul in drill.never_live([sul, desirae])
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

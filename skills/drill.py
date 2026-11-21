@@ -115,6 +115,14 @@ TYPE_LINK = 0x4000000
 # (banish -> a Spell/Trap that mentions Visas) still works: a card, not a piece.
 NEEDS_ON_FIELD = {7436169: 56099748}      # Trivikarma -> Visas Starfrost
 
+# Interrupters that need ANY ONE of several partners face-up in your Monster Zone;
+# a partner is a card code or an archetype name ("a 'Tearlaments' monster"). User,
+# 2026-11-21: "having Scheiren on the field lets Sulliek be active" -- Sulliek
+# negates only "If you control a 'Tearlaments' monster or 'Visas Starfrost'", and
+# was counted live on any board (a set Sulliek beside Desirae + Dragostapelia
+# negates nothing). A face-down monster has no name, so it enables nothing.
+NEEDS_ANY_ON_FIELD = {74920585: ("Tearlaments", 56099748)}   # Tearlaments Sulliek
+
 
 # Xyz interrupters whose Quick Effect costs detaching N materials: dead with
 # fewer on the board. Evolzar Lars ("detach 2 materials ... or just 1 if all
@@ -202,14 +210,33 @@ def dead_on_field(board, cards, player=0):
     short of the materials its detach cost needs."""
     dead = set() if link_equips(board, cards, player) else set(NEEDS_LINK_EQUIP)
     mzone = {cards.canonical(c["code"]) for c in _me(board, player).get("mzone") or []}
+    faceup = [c["code"] for c in _me(board, player).get("mzone") or []
+              if c.get("code") and c.get("position", 0) & 0x5]
     return (dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
+            | {c for c, need in NEEDS_ANY_ON_FIELD.items() if not _partner(faceup, need, cards)}
             | short_of_materials(board, cards, player))
+
+
+def _partner(codes, need, cards):
+    """Is any of `codes` one of `need` (a code, or an archetype name in the card's name)?"""
+    for code in codes:
+        card = cards.get(code)
+        nm = (card.name if card is not None else "") or ""
+        if any((isinstance(n, int) and cards.canonical(code) == n) or
+               (isinstance(n, str) and n in nm) for n in need):
+            return True
+    return False
 
 
 def never_live(deck_codes):
     """Pieces a deck can never make work: their partner is not in it."""
+    from ygorl.engine.duel import default_cards
     have = {int(c) for c in deck_codes}
-    return {c for c, need in NEEDS_ON_FIELD.items() if need not in have}
+    cards = default_cards()
+    monsters = [c for c in have if cards.get(c) is not None and cards.get(c).type & 0x1]
+    return ({c for c, need in NEEDS_ON_FIELD.items() if need not in have}
+            | {c for c, need in NEEDS_ANY_ON_FIELD.items()
+               if c in have and not _partner(monsters, need, cards)})
 
 
 def _on_field(line, weight=None):
