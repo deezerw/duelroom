@@ -6648,8 +6648,9 @@ def test_boot_choice_linux_only_right_after_the_server_woke_it(tmp_path, monkeyp
 
 def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch, tmp_path):
     """User, 2026-11-20: Angelechy "is summoning Bastion to my field". Of
-    the lines reaching its goal the enemy now plays the one that leaves the
-    fewest of ITS monsters on our field; ties keep the solver's order."""
+    the lines reaching its goal the enemy plays the one giving us the fewest
+    monsters we can USE; an unusable gift (Seneschal, given on purpose) is not
+    avoided; ties keep the solver's order."""
     from types import SimpleNamespace as NS
     from skills import game, impact
 
@@ -6659,7 +6660,7 @@ def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch
     monkeypatch.setattr(game, "replay", lambda s, until_turn=None: NS(board={"players": [
         {"mzone": fields[s] if until_turn == 3 else []},
         {"mzone": fields[s] if until_turn == 2 else []}]}))
-    usable = {}
+    usable = {"a": 1, "c": 1}            # gifts we could use (Bastion-like)
     monkeypatch.setattr(game, "usable_gifts", lambda s, p, d, t: usable.get(s, 0))
     assert game.fewest_gifts(["a", "b", "c"], "deck") == "b"       # our own card: no gift
     assert game.fewest_gifts(["a", "c", "d", "b"], "deck") == "d"
