@@ -553,6 +553,33 @@ def starter_key(dh, k):
     return f"{dh}:starters{k}"
 
 
+def starter_goals(conn, dh, hand, sizes=(2, 1)):
+    """What the starter tables know this hand's PARTS make: for every k-card
+    sub-hand of `hand` (k in `sizes`) with a stored best line in the k-card
+    starter pool, its best goal. [(best_key, goal)], best board first,
+    distinct goals. (User, 2026-11-21: "let the ai memorize lines ... what it
+    can get from 1 engraver, or 1 engraver plus a black chaos".) The game's
+    turn 1 asks for these when the enemy breaks the full goal
+    (game.turn1_fallbacks)."""
+    from itertools import combinations
+    out, seen = [], set()
+    for k in sizes:
+        known = {}
+        for r in conn.execute("SELECT hand, best_key, best_goal FROM trainer_hands WHERE deck_hash=? "
+                              "AND best_goal IS NOT NULL", (starter_key(dh, k),)):
+            known[tuple(sorted(json.loads(r["hand"])))] = (json.loads(r["best_key"]),
+                                                           json.loads(r["best_goal"]))
+        for sub in {tuple(sorted(c)) for c in combinations(hand, k)}:
+            if sub in known:
+                key, goal = known[sub]
+                g = tuple(goal)
+                if g not in seen:
+                    seen.add(g)
+                    out.append((key, list(goal)))
+    out.sort(key=lambda kg: kg[0], reverse=True)
+    return out
+
+
 def starter_hands(deck_path, k, skip=()):
     """[(index, hand)] of every k-card hand the main deck can hold (copies
     respected), indices stable whatever `skip` leaves out, in sorted order."""

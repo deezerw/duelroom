@@ -5648,6 +5648,58 @@ def test_negate_only_pieces_wait_for_a_live_target(monkeypatch):
     assert "--opp-dead" not in game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
 
 
+def test_starter_tables_give_the_hands_parts_best_boards_first():
+    """trainer.starter_goals: the best boards stored for a hand's 2- and 1-card
+    parts, best first, distinct; parts the tables never solved add nothing."""
+    import json
+    import sqlite3
+
+    from skills import trainer
+
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE trainer_hands (deck_hash, hand, best_key, best_goal)")
+    rows = [(trainer.starter_key("D", 1), [60764609], [0, 2, 2, 1, 0, -40], ["A"]),
+            (trainer.starter_key("D", 2), [60764609, 98684220], [0, 3, 3, 1, 0, -60], ["A", "B"]),
+            (trainer.starter_key("D", 2), [1, 2], [0, 9, 9, 9, 0, 0], ["Z"]),          # not in the hand
+            (trainer.starter_key("D", 1), [98684220], [0, 2, 2, 1, 0, -40], ["A"])]     # same goal again
+    c.executemany("INSERT INTO trainer_hands VALUES (?,?,?,?)",
+                  [(k, json.dumps(h), json.dumps(b), json.dumps(g)) for k, h, b, g in rows])
+    got = trainer.starter_goals(c, "D", [98684220, 7436169, 60764609, 24088928, 4928565])
+    assert [g for _, g in got] == [["A", "B"], ["A"]]
+
+
+def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
+    """game.turn1_fallbacks: a reached full goal is kept untouched; else the
+    full goal's board, then the starter boards in order, each through the
+    look-ahead kill check; the first survivor is kept, none -> the full one."""
+    from skills import game
+
+    calls = []
+    monkeypatch.setattr(game, "turn1_vs_scripts",
+                        lambda *a, **kw: {"board": a[3], "start": "s", "prefix": a[3], "reached": True})
+    monkeypatch.setattr(game, "live_goal", lambda g, d: g)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [])
+    alive = set()
+    def fake_kill(start, prefix, *a, **kw):
+        calls.append(prefix)
+        return prefix not in alive
+    monkeypatch.setattr(game, "kill_check", fake_kill)
+    full = {"board": "full", "start": "s", "prefix": "full", "reached": False}
+    kw = dict(our_deck="d", enemy_deck="e", hand=[], enemy_seed=1000, scratch=tmp_path, ms=1,
+              seed=1000, enemy_respond=[], enemy_target="t", our_respond=[], cards=object())
+    assert game.turn1_fallbacks({**full, "reached": True}, ["g1"], n=2, **kw)["prefix"] == "full"
+    assert calls == [], "a reached goal costs nothing more"
+    alive.add("g2")
+    t = game.turn1_fallbacks(full, ["g1", "g2", "g3"], n=2, **kw)
+    assert t["fallback"] == 2 and t["reached"] is False and calls == ["full", "g1", "g2"]
+    alive.clear(); calls.clear()
+    t = game.turn1_fallbacks(full, ["g1"], n=2, **kw)
+    assert t["prefix"] == "full" and t["fallback"] == 0
+    assert game.turn1_fallbacks(full, ["g1"], n=0, **kw) is full, "off by default"
+    assert game.T1_FALLBACKS == 0
+
+
 def test_closing_a_turn_cut_mid_selection_ends():
     """2026-11-21: a best approach cut inside a Fiendsmith card selection left
     the prompt open; the passive closer answered "cancel", the core asked the

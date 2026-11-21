@@ -745,6 +745,68 @@ def enemy_script_args(respond, script, cards=None):
     return defender_args(respond, cards, **SCRIPTS[script])
 
 
+# Turn 1's fallbacks (user, 2026-11-21: "let the ai memorize lines ... what it can
+# get from 1 engraver, or 1 engraver plus a black chaos"). When the enemy breaks the
+# full goal (94% of going-first turn 1s vs Angelechy), turn 1 is re-solved toward the
+# best boards the STARTER TABLES know this hand's 2- and 1-card parts make
+# (trainer.starter_goals), and the board kept is the first, full goal's first, that a
+# look-ahead kill check does not kill. Stage 15 measured why the pick must look ahead:
+# a perfect pick would cut the kill rate 94% -> 70%, no fixed rule (most pieces, a
+# learned model) beat the full goal. Off (0) until tools/experiments/t1_starters.py
+# measures it. The look-ahead's seed is never the game's turn-2 seed, so a board it
+# keeps is not one the game's own search was already seen to miss.
+T1_FALLBACKS = 0            # fallback goals tried (best first); 0 = off
+FALLBACK_PICK_X = 4         # the look-ahead kill check, x OTK_MS per defence
+FALLBACK_SEED = 7           # added to the game's seed * 100: a seed no game uses
+
+
+def kill_check(start, prefix, enemy_target, our_respond, enemy_deck, scratch, ms, seed):
+    """turn2's kill check alone: True if the enemy kills through EVERY
+    DEFENCES script (as a game's loss is read)."""
+    base = ["--start", str(start), "--root", str(prefix), "--no-ref",
+            "--target", enemy_target, "--player", "1", "--turns", "2"] + own_turn_args(enemy_deck)
+    for v in DEFENCES:
+        k = _solve(prefix, base + defence_args(our_respond, v)
+                   + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
+                   Path(scratch), f"look-h{v}", ms, seed)
+        if not (k["solution"] and _winner(k["solution"]) == 1):
+            return False
+    return True
+
+
+def turn1_fallbacks(t1, goals, our_deck, enemy_deck, hand, enemy_seed, scratch, ms, seed,
+                    enemy_respond, enemy_target, our_respond, start=None, sets=None,
+                    cards=None, n=None):
+    """`t1` (the full goal's turn 1) or, when it missed the goal, the first of
+    it and the turn 1s toward `goals` (starter boards, best first; at most
+    `n`, default T1_FALLBACKS) that a look-ahead kill check leaves alive.
+    None alive: `t1`. The kept one carries `fallback` (0 = the full goal)."""
+    n = T1_FALLBACKS if n is None else n
+    if t1 is None or t1["reached"] or not n or not goals:
+        return t1
+    if cards is None:
+        from ygorl.engine.duel import default_cards
+        cards = default_cards()
+    scratch = Path(scratch)
+    cands = [(0, t1)]
+    for k, g in enumerate(goals[:n], 1):
+        t = turn1_vs_scripts(our_deck, enemy_deck, hand, live_goal(g, our_deck), enemy_seed,
+                             scratch / f"fb{k}", ms, seed, enemy_respond, start=start,
+                             sets=sets, cards=cards)
+        if t is not None:
+            cands.append((k, t))
+    if len(cands) == 1:
+        return t1
+    for k, t in cands:
+        ours = set(_pieces(t["board"], 0, cards)) | set(our_respond)
+        if not kill_check(t["start"], t["prefix"], enemy_target, ours, enemy_deck,
+                          scratch / f"look{k}", OTK_MS * FALLBACK_PICK_X,
+                          seed * 100 + FALLBACK_SEED):
+            # "reached" stays the FULL goal's: a fallback board never reached it
+            return {**t, "reached": t1["reached"] if k == 0 else False, "fallback": k}
+    return {**t1, "fallback": 0}
+
+
 def turn1_vs_scripts(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
                      enemy_respond, start=None, sets=None, scripts=None, cards=None):
     """`turn1` against each enemy script; the board the ENEMY prefers (fewest
@@ -1375,6 +1437,13 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                                   live_goal(json.loads(row["best_goal"]), deck_path),
                                   eseed, scratch, ms, eseed, theirs, start=start,
                                   sets=free_sets(deck_path, cards, ours_extra), cards=cards)
+            if T1_FALLBACKS:
+                fb = [trainer.split_goal(g)[0]
+                      for _, g in trainer.starter_goals(conn, dh, json.loads(row["hand"]))]
+                t1 = turn1_fallbacks(t1, fb, Path(deck_path), enemy_deck, json.loads(row["hand"]),
+                                     eseed, scratch, ms, eseed, theirs, enemy_target, ours_hand,
+                                     start=start, sets=free_sets(deck_path, cards, ours_extra),
+                                     cards=cards)
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,
