@@ -11,7 +11,8 @@ data as good as possible before doing long long runs"): each line should read
                    our own search; Sulliek/Trivikarma chained onto our link to
                    negate THEIR monster are not this)
   gifts            the enemy's monsters on our field when our turn begins;
-                   `usable` = ones offering us an activation there
+                   `usable` = ones offering us an activation there; the gate
+                   counts only those AVOIDABLE at the same goal progress
   free left        an interruption Trap / marked Quick-Play still in hand at
                    the end of its owner's turn (free sets should make this 0)
   dead targets     trained goals still asking for a card the deck can never
@@ -36,6 +37,21 @@ DECK = "imported"
 
 
 GATE_SHARE = 0.02     # --gate: a must-be-zero line over this share of the games fails
+
+
+def _avoidable(t1_dir, deck):
+    """A usable gift is a misplay only if some line of this turn 1 (the first
+    solve and its re-solves, game._regift) reached the same goal progress
+    without one: Angelechy Opposition's cost is otherwise forced (2026-11-21:
+    the 3 usable gifts of the smoke batch's first 16 games had none)."""
+    from skills import game
+    lines = [p for d in [t1_dir / "out-t1", *sorted(t1_dir.glob("regift*/out-t1"))]
+             for p in (sorted(d.glob("*.yrp")) if d.exists() else [])]
+    if not lines:
+        return False
+    sols = [p for p in lines if p.name.startswith("solution")]
+    pool = sols or [p for p in lines if game._approach_progress(p) == max(game._approach_progress(q) for q in lines)]
+    return any(game.usable_gifts(p, 1, deck, 2) == 0 for p in pool)
 
 
 def main(enemy, side, device="server", since=None, gate=False):
@@ -63,7 +79,7 @@ def main(enemy, side, device="server", since=None, gate=False):
     games = conn.execute(q, (dh, enemy, int(first), device, *([since] if since else []))).fetchall()
     who = lambda p: "us" if p == me else "them"  # noqa: E731
     c_waste, c_selfneg, c_free, c_disc = Counter(), Counter(), Counter(), Counter()
-    gifts = usable = 0
+    gifts = usable = avoidable = 0
     counted, fired = Counter(), Counter()
     outcomes = Counter(g["outcome"] for g in games)
     for g in games:
@@ -81,7 +97,10 @@ def main(enemy, side, device="server", since=None, gate=False):
         if not first:
             n = game.gifts(start, 1, deck)
             gifts += bool(n)
-            usable += bool(n) and game.usable_gifts(t1["prefix"], 1, deck, 2) > 0
+            u = bool(n) and game.usable_gifts(t1["prefix"], 1, deck, 2) > 0
+            usable += u
+            if u and _avoidable(Path(t1["prefix"]).parent.parent, deck):
+                avoidable += 1
         rep = Replay.from_yrp(Path(src))
         state = {"turn": 0, "tp": None, "chain": [], "fired": set(), "solving": None}
         last_turn = 3 if first else 2        # the game's final searched turn
@@ -160,14 +179,15 @@ def main(enemy, side, device="server", since=None, gate=False):
     line("own-turn waste", c_waste)
     line("self-negate", c_selfneg)
     if not first:
-        print(f"  {'gifts':15} {gifts:4} games with a monster given (usable by us: {usable})")
+        print(f"  {'gifts':15} {gifts:4} games with a monster given (usable by us: {usable}, "
+              f"avoidable at the same goal progress: {avoidable})")
     line("free left", c_free)
     line("hand discards", c_disc)
     print(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
     bad = {"own-turn waste": sum(c_waste.values()), "self-negate": sum(c_selfneg.values()),
            "free left": sum(c_free.values()), "hand discards": sum(c_disc.values())}
     if not first:
-        bad["usable gifts"] = usable
+        bad["avoidable usable gifts"] = avoidable
     print(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
     for code, k in counted.most_common(8):
         flag = "   <-- never fires" if k >= 5 and fired[code] == 0 else ""
