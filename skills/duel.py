@@ -9,10 +9,9 @@ lives in memory and a restart loses nothing.
 Who decides what:
 - YOU: every one of your decisions, from the page (`user_act`).
 - The AI on YOUR turn: the scripted defender, as the games use it
-  (`game.respond_order`), except that every piece -- hand traps too -- waits
-  until you control a monster (the "all1" timing: it kills more combo turns),
-  never onto its own chain link. It reads its own cards and the chain, never
-  your hand.
+  (`game.respond_order`: hand traps first, board pieces held until you
+  control a monster, never onto its own chain link). It reads its own cards
+  and the chain, never your hand.
 - The AI on ITS turn: a plan from the rooted solver (`plan`, run in its own
   process: it takes the think time), searched on a copy of the position in
   which you hold ONE OF EVERY HAND TRAP IN YOUR DECKLIST (`--opp-hand-root`, patch 0010) and
@@ -190,8 +189,9 @@ def _monsters(board, player):
 def defend(live, ai, respond, cards, wasted=()):
     """The AI's answer on YOUR turn (the games' smart defender in Python):
     the eligible piece ranked first in `respond` (hand traps, then negates,
-    then the rest), every piece held until you control a monster, never
+    then the rest), board pieces held until you control a monster, never
     onto its own chain link; else pass. Your hand is never read."""
+    from . import game
     p = live.point
     kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
@@ -204,17 +204,17 @@ def defend(live, ai, respond, cards, wasted=()):
     # nothing -- the AI Ashed one in its first test duel (2026-11-20)
     if live.chain and live.chain[-1][0] in wasted:
         return passing
-    # EVERY piece -- hand traps too -- waits until you control a monster (the
-    # games' "all1" script). On a combo turn that kills more: 28 positions of
-    # t1_enemy_script.py, your board killed 86% vs 71% firing at once, never once
-    # worse (+4 / -0, 2026-11-20). The measured games switch when it is conclusive.
+    # board pieces wait until you control a monster; hand traps fire at once.
+    # Making the hand traps wait too ("all1") was a wash over 79 positions of
+    # t1_enemy_script.py (killed 82% vs 80%, +6 / -4), so the duel plays the games'
+    # timing (2026-11-21).
     held = _monsters(live.board(), 1 - ai) < 1
     rank = {c: i for i, c in enumerate(respond)}
     best, best_r = passing, len(rank) + 1
     for i, a in enumerate(p.actions):
         if a.kind != "chain" or not a.card or a.card.code not in rank:
             continue
-        if held:
+        if held and not game.is_hand_trap(a.card.code, cards):
             continue
         if rank[a.card.code] < best_r:
             best, best_r = i, rank[a.card.code]

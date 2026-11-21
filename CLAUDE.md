@@ -493,11 +493,11 @@ budgets and searched defences come before any side-card comparison.
   of 6-9 targets solved 0 of 1355 (135 server-hours). Marked Spells/Traps are asked for and
   scored SET (`@szone:fd`; a set Super Poly scored 0 before).
 - **`game.T1_ENEMY_SCRIPTS`** (default `("first",)`): the enemy may choose its hand-trap timing
-  on our turn 1 (fire at once / wait for 1 / 2 monsters). 40 positions: killed 78 / 85 / 78%;
-  "all1 always" +4 / -1 (p 0.375), all2 3 / 3, the fewest-pieces pick 75% (pieces do not predict
-  kills) -- NO fixed rule is clearly better. Choosing per position BY THE KILL CHECK reaches 92%
-  (+14 pts), at 3x the turn-1 and kill-check cost: the enemy's own-turn DEFENCES idea, unbuilt.
-  Being extended to 80 positions (server, spare cores). The duel AI already waits (all1).
+  on our turn 1 (fire at once / wait for 1 / 2 monsters). FINAL, 79 positions: killed 80 / 82 /
+  76%; all1 +6 / -4 (p 0.75), all2 +4 / -7 -- no fixed timing beats firing at once (the 28-
+  position lead was noise; the fewest-pieces pick was 75%, pieces do not predict kills).
+  Choosing per position BY THE KILL CHECK reaches 90% (+10 pts) at 3x the turn-1 and kill-check
+  cost: the enemy's own-turn DEFENCES idea, unbuilt. Games and duel both fire at once.
 - **Before any long games run: a smoke batch + `tools/experiments/play_audit.py`** (user:
   "make the data as good as possible before doing long long runs"). Smoke = the same job with
   `enemy_hands=2 runs=1` (48 games, ~1 h on the server): the same seeds, so it is the FIRST
