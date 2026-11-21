@@ -642,6 +642,48 @@ def ordered_deck(deck_path, order, hand, out_path, hand_first=True):
 
 # --- the three turns -----------------------------------------------------------
 
+# On OUR turn 1 the enemy has only hand traps; which of these scripts it plays
+# (fire at once / wait until we control 1 / 2 monsters, game.SCRIPTS). More than
+# one: turn 1 is solved against each and the enemy keeps the one leaving us the
+# fewest live pieces -- its best timing per position, as it picks its defence on
+# its own turn (DEFENCES). ("first",) = today's single script. To switch on once
+# tools/experiments/t1_enemy_script.py says waiting kills more (8 positions,
+# 2026-11-20: killed 50 / 62 / 75% -- not yet significant).
+T1_ENEMY_SCRIPTS = ("first",)
+
+
+def enemy_script_args(respond, script, cards=None):
+    """defender_args for a T1_ENEMY_SCRIPTS entry."""
+    if script == "first":
+        return defender_args(respond, cards)
+    return defender_args(respond, cards, **SCRIPTS[script])
+
+
+def turn1_vs_scripts(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
+                     enemy_respond, start=None, sets=None, scripts=None, cards=None):
+    """`turn1` against each enemy script; the board the ENEMY prefers (fewest
+    live pieces of ours, ties to the earlier script), with `script` set."""
+    scripts = tuple(scripts or T1_ENEMY_SCRIPTS)
+    if scripts == ("first",):
+        t = turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
+                  enemy_respond, start=start, sets=sets)
+        return {**t, "script": "first"} if t else None
+    if cards is None:
+        from ygorl.engine.duel import default_cards
+        cards = default_cards()
+    best = None
+    for k, sc in enumerate(scripts):
+        t = turn1(our_deck, enemy_deck, hand, goal, enemy_seed, Path(scratch) / f"s-{sc}", ms,
+                  seed, [], start=start, sets=sets,
+                  extra=enemy_script_args(enemy_respond, sc, cards))
+        if t is None:
+            continue
+        n = len(_pieces(t["board"], 0, cards))
+        if best is None or n < best[0]:
+            best = (n, {**t, "script": sc})
+    return best[1] if best else None
+
+
 def turn1(our_deck, enemy_deck, hand, goal, enemy_seed, scratch, ms, seed,
           enemy_respond, start=None, extra=(), sets=None):
     """Your turn 1 against the real enemy deck, closed at turn 2.
@@ -1205,10 +1247,10 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
         # recorded keeps the file's order and the enemy seed's randomness.
         start = trainer.hand_start(row.get("best_record"))
         if first:
-            t1 = turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
-                       live_goal(json.loads(row["best_goal"]), deck_path),
-                       eseed, scratch, ms, eseed,
-                       theirs, start=start, sets=free_sets(deck_path, cards, ours_extra))
+            t1 = turn1_vs_scripts(Path(deck_path), enemy_deck, json.loads(row["hand"]),
+                                  live_goal(json.loads(row["best_goal"]), deck_path),
+                                  eseed, scratch, ms, eseed, theirs, start=start,
+                                  sets=free_sets(deck_path, cards, ours_extra), cards=cards)
         else:
             t1 = enemy_turn1(Path(deck_path), enemy_deck, json.loads(row["hand"]),
                              eseed, enemy_target, scratch, ms, eseed,

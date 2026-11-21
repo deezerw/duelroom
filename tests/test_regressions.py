@@ -6887,3 +6887,26 @@ def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
     monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 1 else [])
     live.point = NS(actions=own)
     assert duel._follow_up(live, 1, cards) == 1
+
+
+def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
+    """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
+    fewest live pieces; the default plays one turn 1 against today's script."""
+    from skills import game
+
+    calls = []
+    boards = {"first": 3, "all1": 1, "all2": 2}
+    def fake_turn1(*a, extra=(), **kw):
+        sc = next((k for k in ("all1", "all2") if f"s-{k}" in str(a[5])), "first")
+        calls.append(sc)
+        return {"board": boards[sc]}
+    monkeypatch.setattr(game, "turn1", fake_turn1)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [0] * b)
+    monkeypatch.setattr(game, "enemy_script_args", lambda r, s, c=None: [s])
+    t = game.turn1_vs_scripts("d", "e", [], [], 1000, tmp_path, 1, 1, [], scripts=("first",))
+    assert t["script"] == "first" and calls == ["first"]
+    calls.clear()
+    t = game.turn1_vs_scripts("d", "e", [], [], 1000, tmp_path, 1, 1, [], cards=object(),
+                              scripts=("first", "all1", "all2"))
+    assert t["script"] == "all1" and calls == ["first", "all1", "all2"]
+    assert game.T1_ENEMY_SCRIPTS == ("first",)          # off until the experiment says so
