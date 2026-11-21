@@ -609,7 +609,7 @@ def replay(source, responses=None, until_turn=None, free_set=None):
             watch()
             if tracker.result.retries:
                 raise RuntimeError(f"response {k}: MSG_RETRY")
-        steps = 0
+        steps = cancels = 0
         setter, to_set = free_set or (None, ())
         while until_turn and not session.done and tracker.turn < until_turn:
             point = session.point
@@ -619,8 +619,20 @@ def replay(source, responses=None, until_turn=None, free_set=None):
             put = (next((i for i, a in enumerate(point.actions)
                          if a.kind == "sset" and a.card and a.card.code in to_set), None)
                    if point.player == setter and point.turn_player == setter else None)
-            session.act(put if put is not None else
-                        next((kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0))
+            pick = put if put is not None else next(
+                (kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0)
+            # A line cut mid-selection (a best approach) leaves a card-selection
+            # prompt open: "cancel" there makes the core ask the same selection
+            # again, forever -- 2 going-first positions of 2026-11-21 (a Fiendsmith
+            # pick between Desirae and Sequence) never closed, so their games were
+            # never played. On a repeat, finish the selection instead. A close that
+            # did not repeat plays exactly as before.
+            if point.decision.name == "MSG_SELECT_UNSELECT_CARD" and kinds[pick] == "cancel":
+                cancels += 1
+                if cancels > 3:
+                    pick = kinds.index("finish") if "finish" in kinds else next(
+                        (i for i, k in enumerate(kinds) if k == "select"), pick)
+            session.act(pick)
             watch()
             steps += 1
             if steps > MAX_CLOSING_STEPS:

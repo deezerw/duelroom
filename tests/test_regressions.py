@@ -5648,6 +5648,23 @@ def test_negate_only_pieces_wait_for_a_live_target(monkeypatch):
     assert "--opp-dead" not in game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
 
 
+def test_closing_a_turn_cut_mid_selection_ends():
+    """2026-11-21: a best approach cut inside a Fiendsmith card selection left
+    the prompt open; the passive closer answered "cancel", the core asked the
+    same selection again, and the turn never closed ('closing the turn did not
+    end') -- that position's games were never played. A repeated cancel now
+    finishes the selection."""
+    import os
+    from pathlib import Path
+
+    from skills import engine, game
+    os.environ.update(engine.env())
+
+    line = Path(__file__).parent / "fixtures" / "lines" / "close_cancel_loop.yrp"
+    pos = game.replay(line, until_turn=2)
+    assert pos.board["players"][0]["mzone"], "closed onto a board"
+
+
 def test_the_defender_is_told_the_searchers_kill_keys_in_order(monkeypatch, tmp_path):
     """Patch 0012: the searcher's kill keys (kill_keys.py, most material-share
     first) reach the defender as --opp-key in that order -- Angelechy's
