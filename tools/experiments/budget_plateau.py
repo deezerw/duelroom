@@ -59,6 +59,13 @@ def kill(start, prefix, enemy_target, ours, scratch, otk_ms, seed):
     return True
 
 
+# Where its positions live now: they were the server's games when the plateau
+# began (2026-11-18), relabelled since (STAGE15 / 2026-11-19): going first ->
+# kill1x, going second -> endgame-t1. Asking for 'server' found NONE, and the
+# t3 8x stage of 2026-11-21 ran 0 tasks.
+SOURCE = {1: "kill1x", 0: "endgame-t1"}
+
+
 def plan(conn, dh, n=POSITIONS):
     """Every (stage, stored turn-1 row, rep) this bench runs, seed 0 of every
     stage first: a run cut short still covers every search."""
@@ -66,17 +73,17 @@ def plan(conn, dh, n=POSITIONS):
     for first in (1, 0):
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=? AND "
-            "device='server' AND ok=1 ORDER BY hand_index, enemy_seed", (dh, ENEMY, first))]
+            "device=? AND ok=1 ORDER BY hand_index, enemy_seed", (dh, ENEMY, first, SOURCE[first]))]
         pos[first] = random.Random(first).sample(rows, min(n, len(rows)))
     # Turn 3 only exists when we live through turn 2 (~31% of games): its
     # positions are drawn from those we usually survive in the stored games.
     lives = {(g["hand_index"], g["enemy_seed"]) for g in conn.execute(
         "SELECT hand_index, enemy_seed FROM game_results WHERE deck_hash=? AND enemy=? "
-        "AND first=1 AND device='server' GROUP BY hand_index, enemy_seed "
-        "HAVING SUM(outcome != 'lost_t2') >= 5", (dh, ENEMY))}
+        "AND first=1 AND device=? GROUP BY hand_index, enemy_seed "
+        "HAVING SUM(outcome != 'lost_t2') >= 5", (dh, ENEMY, SOURCE[1]))}
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=1 AND "
-        "device='server' AND ok=1 ORDER BY hand_index, enemy_seed", (dh, ENEMY))
+        "device=? AND ok=1 ORDER BY hand_index, enemy_seed", (dh, ENEMY, SOURCE[1]))
         if (r["hand_index"], r["enemy_seed"]) in lives]
     pos["t3"] = random.Random(3).sample(rows, min(n, len(rows)))
 
