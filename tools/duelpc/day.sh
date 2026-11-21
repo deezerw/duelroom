@@ -19,6 +19,17 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
 (
   # Queue of 2026-11-23 (rewritten 2026-11-21 after METHOD 2026-11-21c went live; the old
   # steps -- imitation training, the net-prior A/B, turn-1 budget, kill plateau -- are done).
+  # 0. (background, GPU + one core) does the learned net find wins the games' own solver
+  #    missed? 194 no-win lethal turns (tools/ml/net_lethal.py) -- decides Stage 16 step 3b
+  if [ -f results/ml/bc/policy.pt ] && [ -f results/ml/net_lethal/positions.jsonl ]; then (
+    rsync -a skills/__init__.py skills/mcts.py skills/net_prior.py deezer@duelpc.local:duelroom/skills/ \
+      && rsync -a tools/ml/net_lethal.py deezer@duelpc.local:duelroom/tools/ml/ \
+      && rsync -a results/ml/net_lethal/ deezer@duelpc.local:duelroom/results/ml/net_lethal/ \
+      && ssh deezer@duelpc.local 'cd ~/duelroom && YGORL_THIRD_PARTY=$HOME/duelroom/vendor/third_party_merged \
+           ~/duelroom-ml/bin/python tools/ml/net_lethal.py run results/ml/bc 800' >> results/ml/net_lethal.log 2>&1
+    rsync -a deezer@duelpc.local:duelroom/results/ml/net_lethal/results.jsonl results/ml/net_lethal/ 2>/dev/null
+    echo "=== $(date) net-lethal test: $(venv/bin/python tools/ml/net_lethal.py summary 2>&1 | tail -1) ===" >> $LOG
+  ) & fi
   # 1. the honest going-first baseline on METHOD 2026-11-21c (the 21b games are 'm21b'):
   #    smoke first (the full run's first slice), audited; the long run only if it is clean
   venv/bin/python daemon.py games imported Angelechy-Meta 1 2 --device duelpc \
@@ -53,5 +64,6 @@ while kill -0 $work 2>/dev/null && [ "$(date +%H%M)" -lt "$STOP" ]; do sleep 60;
 pkill -TERM -P $work 2>/dev/null; kill -TERM $work 2>/dev/null
 pkill -f "budget_plateau.py|use_timing.py|board_data.py|daemon.py games .*--device duelpc|side_gate.py|blunders.py|t1_starters.py" 2>/dev/null
 sleep 10
-ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py|[p]rior_ab.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
+rsync -a deezer@duelpc.local:duelroom/results/ml/net_lethal/results.jsonl results/ml/net_lethal/ 2>/dev/null
+ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -x combosolver; pkill -f "[b]c_train.py|[p]rior_ab.py|[n]et_lethal.py"; sudo -n systemctl poweroff' >> $LOG 2>&1
 echo "=== $(date) stopped, duelpc powered off ===" >> $LOG
