@@ -13,7 +13,7 @@ import json
 
 from skills import (builder, card_db, carddb, config, db, drill, engine, gate,
                     handlab, images, importer, meta_scrape as ms, playback,
-                    trainer, game, impact, remote, stops, timing,
+                    trainer, game, impact, remote, stops, timing, choices,
                     report as report_mod, scenarios, stats, watch)
 from skills import deck as deck_mod
 from skills.deck import Deck
@@ -634,6 +634,17 @@ def games_view(name=None):
                              device=device)
         cards = [{**r, "name": nm(r["code"])}
                  for r in impact.scores(c, dh, enemy, own=own, first=first, device=device)]
+        # best choices (user, 2026-11-21: Super Poly's best Fusion and best materials,
+        # and every card like it): read like stops, ranked by skills.choices
+        unread_choices = choices.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S,
+                                      first=first, device=device)
+        kind_lab = {"made": "made", "material": "material", "target": "targeted"}
+        best = [{"name": nm(r["card"]), "uses": r["uses"],
+                 "rows": [{**ch, "label": kind_lab[ch["kind"]], "what": nm(ch["choice"]),
+                           "side": "theirs" if ch["owner"] == "theirs" else "yours"}
+                          for ch in r["choices"]][:8]}
+                for r in choices.scores(c, dh, enemy, own, first=first, device=device)
+                if any(ch["compare"]["status"] == "scored" for ch in r["choices"])][:8]
         unread_stops = stops.fill(c, dh, name, enemy, budget_s=IMPACT_READ_S,
                                   first=first, device=device)
         snm = lambda code: ("a field effect" if code == stops.FIELD
@@ -669,7 +680,8 @@ def games_view(name=None):
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours, "must": must,
                         "timing": timing_rows, "light": False,
-                        "unread_stops": unread_stops})
+                        "unread_stops": unread_stops,
+                        "best": best, "unread_choices": unread_choices})
     # Sections played under older settings (relabelled devices, STAGE15) fold away
     # under the current ones: readable, never mistaken for today's numbers.
     # Within each group the section with the newest game comes first (user,

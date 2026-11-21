@@ -326,6 +326,36 @@
   </details>
   {% endif %}
   </details>
+  {% if e.best %}
+  <details class="block"><summary>Best choices</summary>
+  <div class="muted" style="font-size:12.5px;margin-bottom:6px">For cards that <b>choose</b> when used
+    -- Super Polymerization's Fusion and whose monsters it used, what S:P / Lars / Sulliek / Black
+    Chaos targeted -- how often you won when it chose that, against the <b>other choices of the same
+    card</b>, for the same opening hand against the same enemy hand, pooled (as Card impact).
+    It says what went with winning, not what caused it: a choice can just mark the games
+    that were going well.
+    {% if e.unread_choices %}<b>{{ e.unread_choices }} game(s) not read yet</b> — reload to read more.{% endif %}</div>
+  {% for b in e.best %}
+  <table class="impact" style="margin:6px 0 12px">
+    <thead><tr><th colspan="2">{{ b.name }} <span class="muted" style="font-weight:400">· used in {{ b.uses }} games</span></th>
+      <th>games</th><th>vs its other choices</th><th class="extra">wins with / without</th></tr></thead>
+    <tbody>
+    {% for r in b.rows %}{% set cmp = r.compare %}
+      <tr class="{{ 'few-games' if cmp.status != 'scored' else '' }}">
+        <td class="muted" style="width:70px">{{ r.label }}</td>
+        <td>{{ r.what }}{% if r.label != 'made' %} <span class="muted">({{ r.side }})</span>{% endif %}</td>
+        <td>{{ r.n }}</td>
+        <td>{% if cmp.impact is not none %}<span class="{{ 'pos' if cmp.impact > 0 else 'neg' if cmp.impact < 0 else '' }}">{{ '%+d' % (cmp.impact * 100) }}</span>
+            <span class="muted">± {{ (cmp.ci * 100)|round|int }}</span>{% if cmp.status != 'scored' %} <span class="muted">few games</span>{% endif %}
+            {% else %}<span class="muted">{{ cmp.status }}</span>{% endif %}</td>
+        <td class="extra muted">{% if cmp.impact is not none %}{{ (cmp.yes_win * 100)|round|int }}% / {{ (cmp.no_win * 100)|round|int }}%{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+  </details>
+  {% endif %}
   {% if e.must %}
   <details class="block"><summary>What you must stop, by their hand</summary>
   <div class="muted" style="font-size:12.5px;margin-bottom:6px">Their turn only

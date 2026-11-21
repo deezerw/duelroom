@@ -302,6 +302,20 @@ CREATE TABLE IF NOT EXISTS game_used (
 -- What you stopped of the enemy's in each game (skills/stops.py), read once
 -- from its replay like game_used: JSON {played: {code: turn},
 -- stops: [[turn, kind (stops.STOP_KINDS; "removed" before v2), your code or 0 = field, their code]]}.
+CREATE TABLE IF NOT EXISTS game_choices (
+    deck_hash   TEXT NOT NULL,
+    enemy       TEXT NOT NULL,
+    hand_index  INTEGER NOT NULL,
+    board       INTEGER NOT NULL,
+    enemy_seed  INTEGER NOT NULL,
+    first       INTEGER NOT NULL DEFAULT 1,
+    device      TEXT NOT NULL DEFAULT 'server',
+    run         INTEGER NOT NULL,
+    line        TEXT NOT NULL,          -- '' when the game had none
+    choices     TEXT,                   -- skills/choices.py read; NULL = unreadable
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
+);
+
 CREATE TABLE IF NOT EXISTS game_stops (
     deck_hash   TEXT NOT NULL,
     enemy       TEXT NOT NULL,

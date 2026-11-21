@@ -7234,6 +7234,34 @@ def test_defender_is_told_which_of_its_cards_want_the_gy(monkeypatch):
     assert game.gy_want_args(engine.DECKS / "imported.ydk") == []
 
 
+def test_best_choices_rank_a_cards_choices_against_its_other_choices(tmp_path):
+    """skills.choices (user, 2026-11-21: Super Poly's best Fusion and best
+    materials, and cards like it): a choice is compared with the OTHER choices
+    of the same card, within (hand, enemy hand); summoning itself is no choice."""
+    import json
+    from skills import choices, db
+
+    c = db.connect(tmp_path / "t.db")
+    SP, GARURA, MUD, ENL = 48130397, 11765832, 54757758, 81797573
+    def game(h, e, run, won, uses):
+        with c:
+            c.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, first, "
+                      "device, run, outcome, line, created) VALUES ('D','E',?,0,?,1,'server',?,?,'x','t')",
+                      (h, e, run, "win" if won else "lost_t2"))
+            c.execute("INSERT INTO game_choices VALUES ('D','E',?,0,?,1,'server',?,'x',?)",
+                      (h, e, run, json.dumps({"v": choices.VERSION, "uses": uses})))
+    for h in range(6):                    # Garura + their Enlisted wins, Mudragon loses
+        game(h, 1000, 0, True, [[2, SP, "made", GARURA, "yours"], [2, SP, "material", ENL, "theirs"],
+                                [2, SP, "made", SP, "yours"]])
+        game(h, 1000, 1, False, [[2, SP, "made", MUD, "yours"]])
+    rows = choices.scores(c, "D", "E", {SP}, min_side=3)
+    assert [r["card"] for r in rows] == [SP] and rows[0]["uses"] == 12
+    best = rows[0]["choices"][0]
+    assert best["compare"]["impact"] == 1.0 and best["kind"] in ("made", "material")
+    made = {r["choice"]: r["compare"]["impact"] for r in rows[0]["choices"] if r["kind"] == "made"}
+    assert made[GARURA] == 1.0 and made[MUD] == -1.0 and SP not in made, "itself is no choice"
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

@@ -179,6 +179,7 @@ daemon.py (CLI loop + report formatting)      web/ (Flask, same skills + same SQ
   │  skills/game.py         Finish the game: turns 1-3 vs a meta deck, win rate
   │  skills/impact.py       Card impact: win rate when a card was used vs not
   │  skills/stops.py        What you stopped of theirs, with what, how, and its worth
+  │  skills/choices.py      Best choices: what a card chose (Fusion made, whose materials, targets)
   │  skills/timing.py       Best time to use: measured fire-vs-hold (`measured`)
   │  skills/side.py         Side cards: paired in/out swaps on the games harness
   │  skills/mcts.py         PUCT tree search on the engine (Stage 16)
