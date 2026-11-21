@@ -1,0 +1,194 @@
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-20 19:20:32.798015798 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-21 11:14:10.144451619 -0500
+@@ -1495,6 +1495,8 @@
+ 	std::vector<uint32_t> no_own_chain;
+ 	// --opp-hand-root <code|code...> (duelroom patch 0010).
+ 	std::vector<uint32_t> opp_hand_root;
++	// --opp-negate / --opp-negate-mon / --opp-dead <code|code...> (patch 0011).
++	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2037,6 +2039,12 @@
+ 				"  --no-own-chain <c> codes (a|b|...): the searcher never chains these at its\n"
+ 				"                     declinable chain windows; the defender's copies are\n"
+ 				"                     untouched (0009)\n"
++				"  --opp-negate <c>   with --opp-smart: these defender pieces negate a face-up\n"
++				"                     card; they wait while every face-up card the searcher\n"
++				"                     controls is --opp-dead (0011)\n"
++				"  --opp-negate-mon <c>  the same, counting face-up MONSTERS only (0011)\n"
++				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
++				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
+ 				"                     with --start [--root]) and write to <d> one prefix\n"
+ 				"                     per reply the defender did not make at each of its\n"
+@@ -2555,13 +2563,17 @@
+ 			const char* v = next("--opp-hold-until"); if(!v) return false;
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+-				  a == "--no-own-chain" || a == "--opp-hand-root") {
++				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
++				  a == "--opp-negate-mon" || a == "--opp-dead") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+ 				: (a == "--no-self-target") ? o.no_self_target
+ 				: (a == "--no-own-chain") ? o.no_own_chain
+-				: (a == "--opp-hand-root") ? o.opp_hand_root : o.opp_respond;
++				: (a == "--opp-hand-root") ? o.opp_hand_root
++				: (a == "--opp-negate") ? o.opp_negate
++				: (a == "--opp-negate-mon") ? o.opp_negate_mon
++				: (a == "--opp-dead") ? o.opp_dead : o.opp_respond;
+ 			std::string sv(v);
+ 			size_t at = 0;
+ 			while(at <= sv.size()) {
+@@ -4210,6 +4222,9 @@
+ 	cfg.opp_skip = opt.opp_skip;
+ 	cfg.no_self_target = opt.no_self_target;
+ 	cfg.no_own_chain = opt.no_own_chain;
++	cfg.opp_negate = opt.opp_negate;
++	cfg.opp_negate_mon = opt.opp_negate_mon;
++	cfg.opp_dead = opt.opp_dead;
+ 
+ 	// The four levers and their successors. All of them are READ under the guard
+ 	// of `cfg.recipes`: wiring them with no graph is safe and inert, and
+@@ -8721,7 +8736,8 @@
+ 			// the rollout phase line is the only way to answer the open question:
+ 			// does the guard prune usefully, or does it raze the space?
+ 			uint64_t constraint_cuts = 0, guard_cuts = 0, self_negate_cuts = 0,
+-					 guard_keep_cuts = 0, self_target_cuts = 0, own_chain_cuts = 0;
++					 guard_keep_cuts = 0, self_target_cuts = 0, own_chain_cuts = 0,
++					 negate_holds = 0;
+ 			// Options: picks / decisions absorbed / aborted.
+ 			uint64_t macro_taken = 0, macro_absorbed = 0, macro_aborted = 0;
+ 			size_t ctx_entries = 0;
+@@ -8987,6 +9003,7 @@
+ 					m.self_negate_cuts += s.Stats().self_negate_cuts;
+ 					m.self_target_cuts += s.Stats().self_target_cuts;
+ 					m.own_chain_cuts += s.Stats().own_chain_cuts;
++					m.negate_holds += s.Stats().negate_holds;
+ 					m.guard_keep_cuts += s.Stats().guard_keep_cuts;
+ 					m.adapts += s.Stats().nrpa_adapts;
+ 					m.ctx_entries = (std::max)(m.ctx_entries,
+@@ -9315,6 +9332,12 @@
+ 							"own-card target pick(s) removed (--no-self-target)\n",
+ 							mi ? "NRPA" : "greedy",
+ 							(unsigned long long)m.self_target_cuts);
++			// Liveness of --opp-negate (patch 0011).
++			if(m.negate_holds)
++				std::printf("      %-7s defender: %llu negate(s) held, no live "
++							"target (--opp-negate)\n",
++							mi ? "NRPA" : "greedy",
++							(unsigned long long)m.negate_holds);
+ 			// Liveness of --no-own-chain (patch 0009).
+ 			if(m.own_chain_cuts)
+ 				std::printf("      %-7s discipline: %llu "
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-20 16:12:16.249844093 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-21 11:14:01.731252579 -0500
+@@ -665,6 +665,13 @@
+ 					if(hold && std::find(cfg.opp_hold.begin(), cfg.opp_hold.end(),
+ 										 code) != cfg.opp_hold.end())
+ 						continue;
++					// Patch 0011: a piece that only negates a face-up card's
++					// effects waits while the searcher has nothing live to
++					// negate (Evolzar Lars negated a Normal Summoned Mulcharmy
++					// Purulia -- a hand trap with no field effect -- in 5 of its
++					// 12 uses on Angelechy's turn 2, every one a lost game).
++					if(cfg.opp_smart && !NegateLive(code))
++						continue;
+ 					if(ruled && hit(cfg.opp_skip, code))
+ 						continue;
+ 					if(!cfg.opp_smart) {
+@@ -1792,6 +1799,30 @@
+ 	}
+ }
+ 
++bool Search::NegateLive(uint32_t code) {
++	const uint32_t c = duel.Db().Canonical(code);
++	const bool any = std::find(cfg.opp_negate.begin(), cfg.opp_negate.end(), c) !=
++					 cfg.opp_negate.end();
++	const bool mon = std::find(cfg.opp_negate_mon.begin(), cfg.opp_negate_mon.end(), c) !=
++					 cfg.opp_negate_mon.end();
++	if(!any && !mon)
++		return true;
++	std::vector<QueriedCard> q;
++	const uint8_t who = static_cast<uint8_t>(cfg.target_player);
++	for(uint32_t loc : { (uint32_t)LOCATION_MZONE, (uint32_t)LOCATION_SZONE }) {
++		if(loc == LOCATION_SZONE && !any)
++			break;
++		duel.Query(who, loc, QUERY_CODE | QUERY_ALIAS | QUERY_POSITION, q);
++		for(const QueriedCard& k : q)
++			if(k.present && (k.position & POS_FACEUP) &&
++			   std::find(cfg.opp_dead.begin(), cfg.opp_dead.end(),
++						 duel.Db().Canonical(k.Code())) == cfg.opp_dead.end())
++				return true;
++	}
++	++stats.negate_holds;
++	return false;
++}
++
+ uint32_t Search::DefenderTrigger() {
+ 	const uint32_t c = duel.LastChainCode();
+ 	return c ? duel.Db().Canonical(c) : 0;
+@@ -1830,13 +1861,14 @@
+ 	if(!u8(b) || !u8(b)) return 0;
+ 	if(prompt_type == MSG_SELECT_UNSELECT_CARD && !u8(b)) return 0;
+ 	if(!u32(w) || !u32(w) || !u32(count)) return 0;
+-	struct Cand { uint8_t con, loc; uint32_t seq; };
++	struct Cand { uint8_t con, loc; uint32_t seq; uint32_t code; };
+ 	std::vector<Cand> cands;
+ 	cands.reserve(count);
+ 	for(uint32_t i = 0; i < count; ++i) {
+ 		Cand c{};
+ 		uint32_t code = 0;
+ 		if(!u32(code) || !u8(c.con) || !u8(c.loc) || !u32(c.seq)) return 0;
++		c.code = code;
+ 		if(prompt_type == MSG_SELECT_TRIBUTE) { if(!u8(b)) return 0; }
+ 		else if(!u32(w)) return 0;          // position
+ 		cands.push_back(c);
+@@ -1854,6 +1886,13 @@
+ 				atk = std::max<int32_t>(0, q[cands[i].seq].attack);
+ 		}
+ 		val[i] = (cands[i].con == prompt_player) ? -(atk + 1) : (atk + 1);
++		// Patch 0011: the attacker's --opp-dead cards (hand traps, no field
++		// effect) are the least worth taking -- below any live card, still
++		// above giving up the defender's own.
++		if(cands[i].con != prompt_player && !cfg.opp_dead.empty() &&
++		   std::find(cfg.opp_dead.begin(), cfg.opp_dead.end(),
++					 duel.Db().Canonical(cands[i].code)) != cfg.opp_dead.end())
++			val[i] = 0;
+ 	}
+ 	size_t best = 0;
+ 	int64_t best_v = 0;
+--- combo-solver-rooted/solver-patched/search.h	2026-11-20 16:12:16.248844066 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-21 11:14:01.728252508 -0500
+@@ -2725,6 +2725,9 @@
+ 	std::vector<uint32_t> no_self_target;
+ 	// --no-own-chain <codes> (duelroom patch 0009): see Search::NoOwnChain.
+ 	std::vector<uint32_t> no_own_chain;
++	// --opp-negate / --opp-negate-mon / --opp-dead <codes> (duelroom patch
++	// 0011): see Search::NegateLive.
++	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// Burned bound (B&B): a state whose CURRENT burned count exceeds
+ 	// best_known_burned + burn_slack is cut (rollouts only). Burned cards are NOT
+ 	// monotonic along a line (recoveries), so the slack absorbs the recoveries and
+@@ -3004,6 +3007,8 @@
+ 	uint64_t self_target_cuts = 0;
+ 	// --no-own-chain options dropped (patch 0009).
+ 	uint64_t own_chain_cuts = 0;
++	// Defender negates held for want of a live target (patch 0011).
++	uint64_t negate_holds = 0;
+ 	// Main-phase activations removed by --guard-keep. Same liveness reading as
+ 	// above: zero with the flag armed means the window never came up, or the
+ 	// wiring is dead.
+@@ -3488,6 +3493,10 @@
+ 	// Patch 0009: drop the searcher's --no-own-chain cards at its own
+ 	// declinable chain windows.
+ 	void NoOwnChain(ChoiceList& out);
++	// Patch 0011: may the defender's --opp-negate piece `code` fire now? False
++	// when every face-up card the searcher controls (monsters only for
++	// --opp-negate-mon) is an --opp-dead card.
++	bool NegateLive(uint32_t code);
+ 	// One ChoiceList per depth, reused between siblings and between passes: the
+ 	// deque guarantees reference stability during the recursion.
+ 	ChoiceList& ChoicesAt(uint32_t depth) {

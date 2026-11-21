@@ -5622,6 +5622,32 @@ def test_smart_defender_orders_pieces_and_holds_board_pieces():
     assert game.defender_args([], cards, smart=True) == ["--opp-greedy", "--opp-smart"]
 
 
+def test_negate_only_pieces_wait_for_a_live_target(monkeypatch):
+    """Patch 0011. Traced 2026-11-21: Evolzar Lars negated a Normal Summoned
+    Mulcharmy Purulia (no field effect) in 5 of its 12 uses on Angelechy's
+    turn 2. Lars (any face-up card) and Dragostapelia (a face-up monster) are
+    told to wait while the attacker's face-up cards are all bodies of this
+    kind; the searcher's deck names its own (--opp-dead). Off when the
+    binary predates 0011, so a run never changes binary mid-way."""
+    from ygorl.engine.duel import default_cards
+
+    from skills import engine, game
+
+    cards = default_cards()
+    lars, drago, sp, ash, purulia = 35103106, 69946549, 29301450, 14558127, 84192580
+    monkeypatch.setattr(game, "NEGATE_LIVE", True)
+    args = game.defender_args([sp, lars, drago, ash], cards, smart=True)
+    assert args[args.index("--opp-negate") + 1] == str(lars)
+    assert args[args.index("--opp-negate-mon") + 1] == str(drago)
+    dead = game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
+    listed = dead[dead.index("--opp-dead") + 1].split("|")
+    assert str(purulia) in listed and str(ash) in listed
+    assert all(cards.get(int(c)).type & 0x1 for c in listed), "monsters only"
+    monkeypatch.setattr(game, "NEGATE_LIVE", False)
+    assert "--opp-negate" not in game.defender_args([sp, lars, drago, ash], cards, smart=True)
+    assert "--opp-dead" not in game.own_turn_args(engine.DECKS / "Angelechy-Meta.ydk")
+
+
 def test_defence_family_their_turn_keeps_the_script_that_holds(monkeypatch, tmp_path):
     """Patch 0004 family: on their turn the kill check runs once per defence;
     a loss needs every defence beaten, otherwise the one that kept the most

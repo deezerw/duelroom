@@ -184,6 +184,44 @@ def own_turn_dead(deck):
     return _own_turn_dead_cache[key]
 
 
+# Defender pieces that only NEGATE a face-up card's effects (patch 0011): they
+# wait while the searcher controls nothing live to negate -- "any": a face-up
+# card, "mon": a face-up monster. Traced 2026-11-21 (imported vs Angelechy going
+# first, 273 games): Evolzar Lars negated a Normal Summoned Mulcharmy Purulia /
+# Fuwalos / Droll / Ash in 5 of its 12 uses on their turn 2 (Purulia has no
+# field effect; the Angelechy Problem beside it was the live target), and
+# Dragostapelia put its counter on one in 10 of 73, every one a lost game.
+NEGATE_ONLY = {35103106: "any",        # Evolzar Lars: a face-up card
+               69946549: "mon"}        # Predaplant Dragostapelia: a face-up monster
+# None: emit the 0011 flags when ROOTED_BIN has them; an A/B arm on another
+# build sets True / False.
+NEGATE_LIVE = None
+_bin_help = {}
+
+
+def _negate_live():
+    if NEGATE_LIVE is not None:
+        return NEGATE_LIVE
+    key = str(ROOTED_BIN)
+    if key not in _bin_help:
+        _bin_help[key] = subprocess.run([key, "--help"], capture_output=True,
+                                        text=True).stdout if ROOTED_BIN.exists() else ""
+    return "--opp-negate" in _bin_help[key]
+
+
+def field_dead(deck):
+    """`deck`'s monsters with no field effect -- the known hand traps and the
+    own-turn-dead family (Mulcharmies, Maxx "C", Nibiru, Droll): on the field
+    they are bodies, nothing a negate can stop (patch 0011 --opp-dead)."""
+    from ygorl.engine.duel import default_cards
+
+    from .deck import Deck
+    cards = default_cards()
+    main = set(Deck.from_ydk(Path(deck)).main)
+    known = set(scenarios.HANDTRAPS) | set(own_turn_dead(deck))
+    return sorted(c for c in main & known if cards.get(c) and cards.get(c).type & 0x1)   # TYPE_MONSTER
+
+
 def own_turn_args(deck):
     """Flags for the side SEARCHING its own turn with `deck`: its
     `own_turn_dead` cards are never chained (patch 0009, the searcher only:
@@ -196,6 +234,10 @@ def own_turn_args(deck):
     # NEGATION effect of the searcher's deck on a chain link of its own. Going
     # second our break chained Ash onto our OWN link in 15 of 480 games.
     args = ["--no-self-negate"]
+    if _negate_live():
+        dead = field_dead(deck)
+        if dead:
+            args += ["--opp-dead", "|".join(map(str, dead))]
     codes = own_turn_dead(deck)
     if not codes:
         return args
@@ -455,6 +497,11 @@ def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
     if smart:
         args.append("--opp-smart")
         hold = [c for c in codes if hold_traps or not is_hand_trap(c, cards)]
+        if _negate_live():
+            for kind, flag in (("any", "--opp-negate"), ("mon", "--opp-negate-mon")):
+                neg = [c for c in codes if NEGATE_ONLY.get(c) == kind]
+                if neg:
+                    args += [flag, "|".join(map(str, neg))]
         if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:
