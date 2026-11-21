@@ -855,7 +855,11 @@ def plan(attempts, breadth, best_goal, per_hand=PER_HAND, banned=(),
     for a, placed in sorted(misses.values(),
                             key=lambda t: (-len(t[0]["targets"]), -t[1],
                                            draws(t[0]["targets"]))):
-        if frozenset(a["targets"]) not in solved:
+        # the STACK_JUMP cap holds here too: re-asked misses of the old
+        # biggest-first stacks were 9 of the next generation's 72 attempts at
+        # +4..+7 over the hand's best (2026-11-20 preview)
+        if (frozenset(a["targets"]) not in solved
+                and _board_size(a["targets"]) - biggest <= STACK_JUMP):
             add(a["targets"], a["label"])
 
     # 4. the best goal again, then the biggest solved goals
