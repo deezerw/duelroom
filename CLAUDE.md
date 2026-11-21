@@ -475,6 +475,26 @@ budgets and searched defences come before any side-card comparison.
 - **Stops say HOW** (`stops.STOP_KINDS`: negated / effect negated / destroyed / sent to GY /
   discarded / banished / bounced / shuffled into deck / taken) and where their card acts from
   (`played_from`, `stops.answers`: what can reach it there). Rows of v1 are re-read by `fill`.
+- **Duel the AI (`/duel`, `skills/duel.py`)** (user: duel it; it may know your list, never your
+  hand; play around all your hand traps). A duel = template + action indices, replayed per
+  request. Its turn: a rooted-solver plan in a subprocess -- from turn 2 the --goal-win search
+  (lethal, else the line that leaves you lowest: it attacks), turn 1 its target + every piece its
+  OWN hand reaches -- on a copy where you hold one of every hand trap of your list (solver patch
+  0010 `--opp-hand-root`, added once the moves so far replayed; `--opp-hand` at the duel's start
+  made the core reject them), the smart defender answering with them; followed while it fits,
+  re-planned when you surprise it (planned passes / answers only the copy's windows had are
+  stepped over). Your turn: the games' defender in Python (its cards + the chain, never your
+  hand), not answering your own-turn-dead cards, targets your interruption piece first, pays
+  costs with its least valuable card. The page hides its hand and SET cards. Folders
+  `results/duels/<id>-<seed>`. Decks without a payoff target build toward their trained board.
+- **Trainer stacks: `trainer.STACK_JUMP = 3`** -- at most 3 board pieces over the hand's best
+  solved board, small jumps first (new stacks AND re-asked near misses). Measured over every
+  stored attempt: tries per improvement 29 / 25 / 89 / 98 at +0..+3, 812 at +4 or more; stacks
+  of 6-9 targets solved 0 of 1355 (135 server-hours). Marked Spells/Traps are asked for and
+  scored SET (`@szone:fd`; a set Super Poly scored 0 before).
+- **`game.T1_ENEMY_SCRIPTS`** (default `("first",)`): the enemy may choose its hand-trap timing
+  on our turn 1 (fire at once / wait for 1 / 2 monsters), keeping the board with our fewest live
+  pieces. Switch on when `t1_enemy_script.py` is conclusive (12 positions: killed 58/67/75%).
 - **Before any long games run: a smoke batch + `tools/experiments/play_audit.py`** (user:
   "make the data as good as possible before doing long long runs"). Smoke = the same job with
   `enemy_hands=2 runs=1` (48 games, ~1 h on the server): the same seeds, so it is the FIRST
