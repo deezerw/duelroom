@@ -7111,6 +7111,39 @@ def test_duel_passes_a_response_window_you_have_nothing_for(tmp_path, monkeypatc
         duel.advance(conn, did, spawn=False)
 
 
+def test_duel_manual_respond_mode_stops_at_every_window(tmp_path, monkeypatch):
+    """Respond mode (user: "auto or manual respond mode"): auto passes the
+    windows where pass is your only move; manual stops at each of them; going
+    back to auto moves past the one it waits at."""
+    import os
+    from skills import db, duel, engine
+    os.environ.update(engine.env())
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    assert duel.view(conn, did)["respond"] == "auto"
+    duel.set_respond(conn, did, "manual")
+    lone = False
+    for _ in range(12):
+        v = duel.view(conn, did)
+        if v["status"] != "your move":
+            break
+        if v["prompt"] == "MSG_SELECT_CHAIN" and [a["kind"] for a in v["actions"]] == ["pass"]:
+            lone = True
+            break
+        duel.user_act(conn, did, v["actions"][0]["i"])
+        duel.advance(conn, did, spawn=False)
+    assert lone, "manual stops at a window with nothing to respond with"
+    monkeypatch.setattr(duel, "_spawn_plan", lambda *a, **k: None, raising=False)
+    duel.set_respond(conn, did, "auto")
+    v = duel.view(conn, did)
+    assert not (v["prompt"] == "MSG_SELECT_CHAIN" and [a["kind"] for a in v["actions"]] == ["pass"])
+    import pytest
+    with pytest.raises(ValueError):
+        duel.set_respond(conn, did, "off")
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""

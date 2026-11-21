@@ -60,6 +60,25 @@ def schema(conn):
             status TEXT NOT NULL,                -- your move / thinking / over
             note TEXT, think_ms INTEGER NOT NULL DEFAULT 30000,
             created TEXT NOT NULL, updated TEXT NOT NULL)""")
+    # respond mode (user, 2026-11-21: "auto or manual respond mode"): auto = a
+    # response window where pass is your only move is passed for you; manual = the
+    # duel stops at every response window
+    from .db import _add_column
+    _add_column(conn, "duels", "respond", "TEXT NOT NULL DEFAULT 'auto'")
+
+
+RESPOND_MODES = ("auto", "manual")
+
+
+def set_respond(conn, did, mode):
+    """Switch a duel's respond mode; going to auto moves past a pass-only window
+    the duel is waiting at."""
+    if mode not in RESPOND_MODES:
+        raise ValueError(f"respond mode is one of {RESPOND_MODES}")
+    get(conn, did)
+    _save(conn, did, respond=mode)
+    if mode == "auto" and get(conn, did)["status"] == "your move":
+        advance(conn, did)
 
 
 # --- the duel ------------------------------------------------------------------
@@ -329,7 +348,8 @@ def advance(conn, did, spawn=True):
                       if res.winner is not None else f"over ({res.reason})")
                 return "over"
             n_resp = len(live.responses)
-            if p.player != ai and p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1 \
+            if p.player != ai and row.get("respond", "auto") != "manual" \
+                    and p.decision.name == "MSG_SELECT_CHAIN" and len(p.actions) == 1 \
                     and p.actions[0].kind == "pass":
                 # a response window you have nothing for: passed for you, as a real
                 # client does (user, 2026-11-21: "it needs to feel like a regular game")
@@ -633,6 +653,7 @@ def view(conn, did):
                 "you": you, "ai": ai, "user_deck": row["user_deck"], "ai_deck": row["ai_deck"],
                 "turn": live.session.tracker.turn, "turn_player": live.session.tracker.turn_player,
                 "phase": live.session.tracker.phase,
+                "respond": row.get("respond") or "auto",
                 "board": b, "chain": list(live.chain),
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)

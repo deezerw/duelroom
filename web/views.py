@@ -1583,6 +1583,18 @@ def duel_state(did):
         abort(404)
 
 
+@bp.route("/duel/<int:did>/respond", methods=["POST"])
+@login_required
+def duel_respond(did):
+    """Auto (stop only when you can respond) or manual (stop at every window)."""
+    from skills import duel
+    try:
+        duel.set_respond(conn(), did, request.form.get("mode", ""))
+    except (ValueError, KeyError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_duel_state(did))
+
+
 @bp.route("/duel/<int:did>/act", methods=["POST"])
 @login_required
 def duel_act(did):
