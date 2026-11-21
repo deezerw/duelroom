@@ -185,7 +185,7 @@ def _monsters(board, player):
     return len(board["players"][player].get("mzone") or [])
 
 
-def defend(live, ai, respond, cards):
+def defend(live, ai, respond, cards, wasted=()):
     """The AI's answer on YOUR turn (the games' smart defender in Python):
     the eligible piece ranked first in `respond` (hand traps, then negates,
     then the rest), board pieces held until you control a monster, never
@@ -198,6 +198,11 @@ def defend(live, ai, respond, cards):
     if p.decision.name != "MSG_SELECT_CHAIN":
         return _follow_up(p, ai)
     if live.chain and live.chain[-1][1] == ai:
+        return passing
+    # your own-turn-dead card on your own turn (Mulcharmy Fuwalos on your turn
+    # draws only off the AI's summons): answering it spends a hand trap on
+    # nothing -- the AI Ashed one in its first test duel (2026-11-20)
+    if live.chain and live.chain[-1][0] in wasted:
         return passing
     held = _monsters(live.board(), 1 - ai) < 1
     rank = {c: i for i, c in enumerate(respond)}
@@ -275,6 +280,7 @@ def advance(conn, did, spawn=True):
         cards = live.cards
         respond = game.respond_order(game.respond_codes(engine.DECKS / f"{row['ai_deck']}.ydk", cards),
                                      cards)
+        wasted = set(game.own_turn_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
         plan = json.loads(row["plan"]) if row["plan"] else None
         acts = json.loads(row["actions"])
         for _ in range(2000):
@@ -292,7 +298,7 @@ def advance(conn, did, spawn=True):
                       plan=json.dumps(plan) if plan else None)
                 return "your move"
             if live.session.tracker.turn_player != ai:
-                idxs = [defend(live, ai, respond, cards)]
+                idxs = [defend(live, ai, respond, cards, wasted)]
             else:
                 idxs = _plan_step(live, plan)
                 if idxs is None:

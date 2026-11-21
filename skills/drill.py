@@ -131,9 +131,8 @@ _detach_cache = {}
 def detach_need(code):
     """Materials `code`'s detach cost needs (smallest named in its text), or 0."""
     if code not in _detach_cache:
-        from . import card_db, db
-        row = card_db.resolve(db.connect(), code)
-        text = (row["text"] if row else "") or ""
+        from .game import card_text
+        text = card_text(code)
         ns = [int(_WORDS.get(m.lower(), m)) for m in _DETACH.findall(text)]
         if ns and re.search(r"or just (\d+|one) material", text, re.I):
             ns.append(1)
@@ -165,9 +164,8 @@ _empty_cache = {}
 
 def needs_empty_field(code):
     if code not in _empty_cache:
-        from . import card_db, db
-        row = card_db.resolve(db.connect(), code)
-        _empty_cache[code] = bool(row and _NEEDS_EMPTY.search(row["text"] or ""))
+        from .game import card_text
+        _empty_cache[code] = bool(_NEEDS_EMPTY.search(card_text(code)))
     return _empty_cache[code]
 
 

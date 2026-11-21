@@ -161,6 +161,14 @@ _DRAW_ON_THEIR_SUMMON = re.compile(r"each time your opponent [^.]*summons[^.]*dr
 _own_turn_dead_cache = {}
 
 
+def card_text(code):
+    """A card's text from the ENGINE's card database (always there; the
+    YGOPRODeck mirror is not, e.g. in a test database)."""
+    from ygorl.engine.duel import default_cards
+    c = default_cards().get(int(code))
+    return (getattr(c, "desc", None) or "") if c is not None else ""
+
+
 def own_turn_dead(deck):
     """`deck`'s main-deck cards in the OWN_TURN_DEAD family (by code, or by a
     card text that draws on the opponent's summons), sorted."""
@@ -168,13 +176,9 @@ def own_turn_dead(deck):
 
     key = str(Path(deck).resolve())
     if key not in _own_turn_dead_cache:
-        from . import card_db, db
-        conn = db.connect()
         out = set()
         for code in set(Deck.from_ydk(Path(deck)).main):
-            row = card_db.resolve(conn, code)
-            if code in OWN_TURN_DEAD or (row and _DRAW_ON_THEIR_SUMMON.search(
-                    row["text"] or "")):
+            if code in OWN_TURN_DEAD or _DRAW_ON_THEIR_SUMMON.search(card_text(code)):
                 out.add(code)
         _own_turn_dead_cache[key] = sorted(out)
     return _own_turn_dead_cache[key]
