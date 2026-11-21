@@ -186,7 +186,16 @@ def _monsters(board, player):
     return len(board["players"][player].get("mzone") or [])
 
 
-def defend(live, ai, respond, cards, wasted=()):
+def _negate_live(board, player, kind, dead):
+    """Patch 0011 in Python: does `player` control a face-up card (kind "mon":
+    a face-up monster) that is not a `dead` body -- something a negate-only
+    piece (game.NEGATE_ONLY) could stop?"""
+    zones = ("mzone",) if kind == "mon" else ("mzone", "szone")
+    return any(c.get("position", 0) & 0x5 and c["code"] not in dead
+               for z in zones for c in board["players"][player].get(z) or [])
+
+
+def defend(live, ai, respond, cards, wasted=(), dead=()):
     """The AI's answer on YOUR turn (the games' smart defender in Python):
     the eligible piece ranked first in `respond` (hand traps, then negates,
     then the rest), board pieces held until you control a monster, never
@@ -196,7 +205,7 @@ def defend(live, ai, respond, cards, wasted=()):
     kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
     if p.decision.name != "MSG_SELECT_CHAIN":
-        return _follow_up(live, ai, cards)
+        return _follow_up(live, ai, cards, dead)
     if live.chain and live.chain[-1][1] == ai:
         return passing
     # your own-turn-dead card on your own turn (Mulcharmy Fuwalos on your turn
@@ -216,12 +225,17 @@ def defend(live, ai, respond, cards, wasted=()):
             continue
         if held and not game.is_hand_trap(a.card.code, cards):
             continue
+        # a negate-only piece waits while your face-up cards are hand-trap bodies
+        # (the games' Lars negated a Normal Summoned Mulcharmy Purulia, 2026-11-21)
+        kind = game.NEGATE_ONLY.get(a.card.code)
+        if kind and not _negate_live(live.board(), 1 - ai, kind, dead):
+            continue
         if rank[a.card.code] < best_r:
             best, best_r = i, rank[a.card.code]
     return best if "chain" in kinds else passing
 
 
-def _follow_up(live, ai, cards):
+def _follow_up(live, ai, cards, dead=()):
     """Targets / costs of the AI's own effect. Where one of YOUR cards can be
     chosen: your most valuable -- an interruption piece first, then the
     highest ATK. Where only its own cards can: the one it loses least -- not a
@@ -237,6 +251,8 @@ def _follow_up(live, ai, cards):
     def worth(c):
         card = cards.get(c.code) if c.code else None
         owner = c.loc.controller
+        if owner != ai and c.code in dead:
+            return (-1, 0)          # your hand-trap body: the least worth taking
         return (1 if c.code in pieces[owner] else 0, (card.attack if card is not None else 0) or 0)
 
     opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
@@ -297,6 +313,7 @@ def advance(conn, did, spawn=True):
         respond = game.respond_order(game.respond_codes(engine.DECKS / f"{row['ai_deck']}.ydk", cards),
                                      cards)
         wasted = set(game.own_turn_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
+        dead = set(game.field_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
         plan = json.loads(row["plan"]) if row["plan"] else None
         acts = json.loads(row["actions"])
         for _ in range(2000):
@@ -314,7 +331,7 @@ def advance(conn, did, spawn=True):
                       plan=json.dumps(plan) if plan else None)
                 return "your move"
             if live.session.tracker.turn_player != ai:
-                idxs = [defend(live, ai, respond, cards, wasted)]
+                idxs = [defend(live, ai, respond, cards, wasted, dead)]
             else:
                 idxs = _plan_step(live, plan)
                 if idxs is None:

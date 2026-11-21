@@ -6917,6 +6917,37 @@ def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
     assert duel._follow_up(live, 1, cards) == 1
 
 
+def test_duel_ai_negates_only_a_live_card(monkeypatch):
+    """Patch 0011 in duel mode: the AI's Lars waits while your only face-up
+    card is a hand-trap body (Mulcharmy Purulia: no field effect), fires once
+    a live card is face-up beside it, and never takes the body as a target
+    when a live card can be chosen."""
+    import os
+    from types import SimpleNamespace as NS
+    from skills import duel, engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    lars, purulia, problem, sp = 35103106, 84192580, 17782288, 29301450
+    dead = {purulia}
+    board = {"players": [{"mzone": [{"code": purulia, "position": 1}], "szone": []},
+                         {"mzone": [{"code": lars, "position": 1}]}]}
+    acts = [NS(kind="chain", card=NS(code=lars)), NS(kind="pass", card=None)]
+    live = NS(point=NS(actions=acts, decision=NS(name="MSG_SELECT_CHAIN")),
+              chain=[(problem, 0)], board=lambda: board)
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [])
+    assert duel.defend(live, 1, [lars], cards, dead=dead) == 1, "holds: nothing live"
+    board["players"][0]["szone"] = [{"code": problem, "position": 1}]
+    assert duel.defend(live, 1, [lars], cards, dead=dead) == 0, "fires: Problem is face-up"
+    board["players"][0]["szone"] = [{"code": problem, "position": 10}]
+    assert duel.defend(live, 1, [lars], cards, dead=dead) == 1, "a set card is no target"
+    loc = lambda ctl: NS(controller=ctl, location=4)
+    pick = [NS(card=NS(code=purulia, loc=loc(0))), NS(card=NS(code=sp, loc=loc(0)))]
+    live2 = NS(point=NS(actions=pick), board=lambda: board)
+    assert duel._follow_up(live2, 1, cards, dead) == 1, "the live card, not the body"
+
+
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
     """With several T1_ENEMY_SCRIPTS the enemy keeps the turn 1 leaving us the
     fewest live pieces; the default plays one turn 1 against today's script."""
