@@ -555,6 +555,21 @@ OLD_SECTIONS = {
 }
 
 
+def _when(iso):
+    """A stored UTC time as the page shows it: '11:54 AM' today, 'yesterday
+    11:54 AM', else 'Nov 19 11:54 AM' -- local time."""
+    if not iso:
+        return ""
+    t = datetime.fromisoformat(iso).astimezone()
+    days = (datetime.now().astimezone().date() - t.date()).days
+    clock = t.strftime("%I:%M %p").lstrip("0")
+    return clock if days == 0 else f"yesterday {clock}" if days == 1 else f"{t:%b} {t.day} {clock}"
+
+
+def _ago_min(iso):
+    return (datetime.now().astimezone() - datetime.fromisoformat(iso)).total_seconds() / 60
+
+
 def _job_device(job):
     return json.loads(job["params"] or "{}").get("device") or "server"
 
@@ -581,11 +596,22 @@ def games_view(name=None):
     own = impact.deck_codes(path)
     nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
     enemies = []
+    show = request.args.get("show")
     # One section per (enemy, side, device): a faster machine searches more
     # in the same budget, so its games are never pooled with the server's.
     for enemy, first, device in c.execute(
             "SELECT DISTINCT enemy, first, device FROM game_results WHERE deck_hash=? "
             "ORDER BY enemy, first DESC, device = 'server' DESC, device", (dh,)).fetchall():
+        anchor = f"{enemy}-{'first' if first else 'second'}-{device}"
+        # An older-settings section is its headline only unless asked for
+        # (?show=<anchor>): their per-hand squares and analysis tables were
+        # most of a 1.6 MB, 4 s page (2026-11-21).
+        if device in OLD_SECTIONS and anchor != show:
+            enemies.append({"name": enemy, "first": first, "device": device, "light": True,
+                            "watch_args": {**({} if first else {"second": 1}), "device": device},
+                            "device_label": device,
+                            "overall": game.overall(c, dh, enemy, first=first, device=device)})
+            continue
         games = {}
         for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND "
                            "enemy=? AND first=? AND device=? ORDER BY enemy_seed, run",
@@ -642,17 +668,57 @@ def games_view(name=None):
                         "openings": sorted(openings.items()),
                         "impact": cards, "unread": unread,
                         "theirs": theirs, "yours": yours, "must": must,
-                        "timing": timing_rows,
+                        "timing": timing_rows, "light": False,
                         "unread_stops": unread_stops})
     # Sections played under older settings (relabelled devices, STAGE15) fold away
     # under the current ones: readable, never mistaken for today's numbers.
-    for e in enemies:
-        e["old"] = OLD_SECTIONS.get(e["device"])
-    enemies.sort(key=lambda e: bool(e["old"]))
+    # Within each group the section with the newest game comes first (user,
+    # 2026-11-21: "so i can actually see the recent results").
     active_jobs = [{**dict(j), "device": _job_device(j)} for j in _games_jobs(c, name)]
     busy = {j["device"] for j in active_jobs}
+    for e in enemies:
+        e["old"] = OLD_SECTIONS.get(e["device"])
+        e["anchor"] = f"{e['name']}-{'first' if e['first'] else 'second'}-{e['device']}"
+        span = c.execute(
+            "SELECT MAX(created), COUNT(*), MAX(enemy_seed), MAX(run), "
+            "SUM(created >= datetime('now', '-1 day')) FROM game_results "
+            "WHERE deck_hash=? AND enemy=? AND first=? AND device=?",
+            (dh, e["name"], e["first"], e["device"])).fetchone()
+        e["last_at"], e["last_when"] = span[0], _when(span[0])
+        e["live"] = bool(span[0]) and _ago_min(span[0]) < 20
+        # The run's size: its queued job's grid, else the grid its games used
+        job = next((j for j in active_jobs if j["device"] == e["device"]
+                    and json.loads(j["params"] or "{}").get("enemy") == e["name"]
+                    and bool(json.loads(j["params"] or "{}").get("second")) != bool(e["first"])),
+                   None)
+        if job:
+            pj = json.loads(job["params"] or "{}")
+            e["total"] = len(hand_rows) * int(pj.get("enemy_hands") or game.ENEMY_HANDS) \
+                * int(pj.get("runs") or game.RUNS)
+        else:
+            e["total"] = (len(hand_rows) * (span[2] - game.ENEMY_SEED0 + 1) * (span[3] + 1)
+                          if span[2] is not None else 0)
+    for e in enemies:
+        prev = [o for o in enemies if o["old"] and o["name"] == e["name"]
+                and o["first"] == e["first"]]
+        e["before"] = max(prev, key=lambda o: o["last_at"] or "") if prev and not e["old"] else None
+    enemies.sort(key=lambda e: e["last_at"] or "", reverse=True)
+    enemies.sort(key=lambda e: bool(e["old"]))
+    current = [e for e in enemies if not e["old"]]
+    # The newest games across the current sections, newest first
+    recent = []
+    for e in current:
+        for g in c.execute("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? "
+                           "AND device=? ORDER BY created DESC LIMIT 25",
+                           (dh, e["name"], e["first"], e["device"])):
+            h = hand_rows.get(g["hand_index"])
+            recent.append({**dict(g), "when": _when(g["created"]), "e": e,
+                           "hand": h["hand"] if h else []})
+    recent.sort(key=lambda g: g["created"] or "", reverse=True)
     return render_template(
-        "games.html", name=name, enemies=enemies, options=_enemy_decks(name),
+        "games.html", name=name, enemies=enemies, current=current, recent=recent[:25],
+        show=show,
+        options=_enemy_decks(name),
         trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
                           "AND best_goal IS NOT NULL", (dh,)).fetchone()[0],
         active_jobs=active_jobs, running=jobs.active(c),

@@ -1146,6 +1146,36 @@ def test_games_page_shows_card_impact(loggedin):
     assert "Card impact" in page.get_data(as_text=True)
 
 
+def test_games_page_leads_with_the_latest_results(loggedin):
+    """User, 2026-11-21: "organize the games page so i can actually see the
+    recent results". Current matchups lead (Latest cards, then Recent games
+    newest first); older-settings sections are their headline only, opened
+    one at a time with ?show=<anchor>."""
+    import re
+
+    from skills import db, engine, trainer
+    from web.views import OLD_SECTIONS
+
+    page = loggedin.get("/games/imported")
+    if page.status_code != 200 or "vs " not in page.get_data(as_text=True):
+        return      # no games stored for this deck on this machine
+    html = page.get_data(as_text=True)
+    c = db.connect()
+    devs = {r[0] for r in c.execute("SELECT DISTINCT device FROM game_results WHERE deck_hash=?",
+                                    (trainer.deck_hash(engine.DECKS / "imported.ydk"),))}
+    if devs - set(OLD_SECTIONS):
+        assert html.index("<h2>Latest</h2>") < html.index('class="sec" id=')
+        whens = re.findall(r'<td style="white-space:nowrap">([^<]+)</td>', html)
+        assert whens, "Recent games lists games"
+    old = [d for d in devs if d in OLD_SECTIONS]
+    if old:
+        assert html.count("show every hand and the analysis") == len(
+            [1 for _ in re.finditer(r'<details class="oldsec"', html)])
+        anchor = re.search(r'show=([^"&#]+)', html).group(1)
+        opened = loggedin.get(f"/games/imported?show={anchor}").get_data(as_text=True)
+        assert f'id="{anchor}"' in opened and 'class="oldsec" open' in opened
+
+
 def test_watch_latest_game_opens_the_newest_one(loggedin):
     """"Watch latest game" resolves at click time to the newest watchable game."""
     from skills import db, impact, trainer

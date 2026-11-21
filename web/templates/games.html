@@ -12,6 +12,20 @@
     opacity:.8}
   details.oldsec > summary{cursor:pointer;color:var(--dim);font-size:13px;padding:4px 0}
   details.oldsec[open]{opacity:1}
+  .latest{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin:10px 0 4px}
+  .lcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel, transparent)}
+  .lcard h3{margin:0 0 2px;font-size:15px}
+  .lcard .when{font-size:12px;color:var(--dim)}
+  .lcard .live{color:#9ece6a;font-weight:600}
+  .lcard .big{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;margin:8px 0 0}
+  .lcard .row{font-size:13px;margin:3px 0}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:8px 0 3px}
+  .bar > i{display:block;height:100%;background:#7aa2f7}
+  .lcard .links{display:flex;gap:12px;font-size:13px;margin-top:8px}
+  table.recent{width:100%;border-collapse:collapse;font-size:13px}
+  table.recent td,table.recent th{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  table.recent .res{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  @media (max-width:760px){table.recent .extra{display:none}}
 </style>
 
 <style>
@@ -111,10 +125,55 @@
   {% endif %}
 </div>
 
+{% if current %}
+<div class="sec"><h2>Latest</h2>
+  <span class="hint">the matchups being played now, newest first · the numbers are the whole run so far</span></div>
+<div class="latest">
+  {% for e in current %}{% set o = e.overall %}
+  <div class="lcard">
+    <h3>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}</h3>
+    <div class="when">{{ e.device_label }} ·
+      {% if e.live %}<span class="live">playing now</span> · last game {{ e.last_when }}{% else %}last game {{ e.last_when }}{% endif %}</div>
+    <div class="big">{{ (o.win[0] * 100)|round|int }}% <span style="font-size:14px;font-weight:600">won</span></div>
+    <div class="row muted">95%: {{ (o.win[1] * 100)|round|int }}–{{ (o.win[2] * 100)|round|int }}%</div>
+    {% if e.first %}<div class="row">killed on their turn 2 <b>{{ (o.lost_t2[0] * 100)|round|int }}%</b></div>{% endif %}
+    {% if e.total %}<div class="bar"><i style="width:{{ [100, (o.games * 100 / e.total)|round|int]|min }}%"></i></div>
+    <div class="row muted">{{ o.games }} of {{ e.total }} games{% if o.games >= e.total %} · complete{% endif %}</div>
+    {% else %}<div class="row muted">{{ o.games }} games</div>{% endif %}
+    {% if e.before %}{% set b = e.before.overall %}
+    <div class="row muted" title="{{ e.before.old }}">older settings: {{ (b.win[0] * 100)|round|int }}% won{% if e.first %}, {{ (b.lost_t2[0] * 100)|round|int }}% killed{% endif %} ({{ b.games }} games)</div>
+    {% endif %}
+    <div class="links"><a href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **e.watch_args) }}">▶ watch latest</a>
+      <a href="#{{ e.anchor }}">every hand ↓</a></div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if recent %}
+<details class="block" open><summary>Recent games</summary>
+<table class="recent">
+  <thead><tr><th>when</th><th>matchup</th><th>your hand</th><th class="extra">their hand</th><th>result</th><th></th></tr></thead>
+  <tbody>
+  {% for g in recent %}
+    <tr>
+      <td style="white-space:nowrap">{{ g.when }}</td>
+      <td>{{ g.e.name }} · {{ '1st' if g.e.first else '2nd' }}{% if g.e.device != 'server' %} · {{ g.e.device }}{% endif %}</td>
+      <td title="{{ g.hand|join(', ') }}">Hand {{ g.hand_index + 1 }}</td>
+      <td class="extra">{{ g.enemy_seed - 999 }}{% if g.run %} · replay {{ g.run + 1 }}{% endif %}</td>
+      <td><span class="res"><i class="dot {{ g.outcome }}"></i>{% if g.outcome == 'win' %}won{% elif g.outcome == 'lost_t2' %}killed turn 2{% elif g.outcome == 'no_t1' %}no turn 1{% else %}no win{% if g.damage %} · {{ g.damage }} dmg{% endif %}{% endif %}</span></td>
+      <td>{% if g.outcome != 'no_t1' %}<a href="{{ url_for('views.watch_game', name=name, enemy=g.e.name, hand=g.hand_index, eseed=g.enemy_seed, run=g.run, **g.e.watch_args) }}">watch</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</details>
+{% endif %}
+{% endif %}
+
 {% for e in enemies %}
-{% if e.old %}<details class="oldsec"><summary>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }} ·
+{% if e.old %}<details class="oldsec"{% if e.anchor == show %} open{% endif %}><summary>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }} ·
   <span class="faint">{{ e.old }}</span></summary>{% endif %}
-<div class="sec"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}{% if e.device != 'server' %} · on {{ e.device }}{% endif %}</h2>
+<div class="sec" id="{{ e.anchor }}"><h2>vs {{ e.name }} · going {{ 'first' if e.first else 'second' }}{% if e.device != 'server' %} · on {{ e.device }}{% endif %}</h2>
   <span class="hint">best win rate first · dud = no win · near-dud = under {{ near_dud }}%</span></div>
   {% set o = e.overall %}
   <p style="margin:.2rem 0 .6rem">Wins <span class="rate">{{ (o.win[0] * 100)|round|int }}%</span>
@@ -123,6 +182,9 @@
     <span class="muted">({{ (o.lost_t2[1] * 100)|round|int }}–{{ (o.lost_t2[2] * 100)|round|int }}%)</span>{% endif %}
     <span class="muted">· {{ o.games }} games, {{ o.hands }} of your hands × {{ o.enemy_hands }} of theirs{% if o.no_t1 %}, {{ o.no_t1 }} with no turn 1{% endif %}{% if o.borderline %}; {{ o.borderline }} of {{ o.pairings }} pairings borderline (their replays disagree){% endif %}.
     The range is how sure we are: it narrows with more hands, not with more replays of the same ones.</span></p>
+{% if e.light %}
+  <p style="margin:0 0 .6rem"><a href="{{ url_for('views.games_view', name=name, show=e.anchor) }}#{{ e.anchor }}">show every hand and the analysis for this section</a></p>
+{% else %}
 <div class="panel">
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
      href="{{ url_for('views.watch_game_latest', name=name, enemy=e.name, **e.watch_args) }}">▶ Watch latest game</a>
@@ -320,6 +382,7 @@
   </details>
   {% endif %}
 </div>
+{% endif %}
 {% if e.old %}</details>{% endif %}
 {% endfor %}
 
