@@ -127,3 +127,10 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   Same split, more trunk outputs (context+globals+history, now the default): head 0.42 / 0.65;
   a ridge probe on those features (alpha 1) 0.43 / 0.69 -- the signal is in the trunk, the head
   adds nothing at 1660 training positions.
+- **2026-11-21, step 3(a) RESULT (duelpc, 40 held-out kills, 800 simulations):** found from 4 / 8 /
+  16 / 30 decisions out -- uniform 40 / 33 / 22 / 7, net prior 40 / 33 / 34 / 28 (net only 21,
+  uniform only 0 at 30 out). At about EQUAL wall time (uniform at 6x the simulations): 16 out 32
+  (5.9 s) vs net 34 (3.8 s); 30 out 14 (7.0 s) vs net 28 (5.1 s) -- the net finds twice the far
+  kills in less time. First evidence the learned prior makes the search better, not just slower.
+  Next: the prior where the games search (arm b: the C++ NRPA's starting policy, batched GPU
+  inference), or the PUCT search with the net driving real decisions (kill check, lethal turn).
