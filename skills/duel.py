@@ -9,9 +9,10 @@ lives in memory and a restart loses nothing.
 Who decides what:
 - YOU: every one of your decisions, from the page (`user_act`).
 - The AI on YOUR turn: the scripted defender, as the games use it
-  (`game.respond_order`: hand traps first, board pieces held until you
-  control a monster, never onto its own chain link). It reads its own cards
-  and the chain, never your hand.
+  (`game.respond_order`), except that every piece -- hand traps too -- waits
+  until you control a monster (the "all1" timing: it kills more combo turns),
+  never onto its own chain link. It reads its own cards and the chain, never
+  your hand.
 - The AI on ITS turn: a plan from the rooted solver (`plan`, run in its own
   process: it takes the think time), searched on a copy of the position in
   which you hold ONE OF EVERY HAND TRAP IN YOUR DECKLIST (`--opp-hand-root`, patch 0010) and
@@ -189,7 +190,7 @@ def _monsters(board, player):
 def defend(live, ai, respond, cards, wasted=()):
     """The AI's answer on YOUR turn (the games' smart defender in Python):
     the eligible piece ranked first in `respond` (hand traps, then negates,
-    then the rest), board pieces held until you control a monster, never
+    then the rest), every piece held until you control a monster, never
     onto its own chain link; else pass. Your hand is never read."""
     p = live.point
     kinds = [a.kind for a in p.actions]
