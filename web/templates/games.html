@@ -66,6 +66,16 @@
   }
 </style>
 
+{% if old_page %}
+<div class="page-head">
+  <h1>Old data <span class="muted" style="font-size:16px">(not valid)</span></h1>
+  <div class="sub"><b>{{ name }}</b> — games played under settings later found to be wrong: a
+    bug in how a side played, an enemy aiming at the wrong board, or a search too short to
+    trust. Kept so the history can be read and graphed (the AI effectiveness log); never
+    counted in the current numbers and never pooled with them.
+    <a href="{{ url_for('views.games_view', name=name) }}">← current games</a></div>
+</div>
+{% else %}
 <div class="page-head">
   <h1>Games</h1>
   <div class="sub"><b>{{ name }}</b> — <b>going first</b>: your turn 1, the enemy's turn 2
@@ -74,7 +84,9 @@
     turn 2; a hand wins if it kills through their board that turn. A hand that never
     wins is a <b>dud</b>.</div>
 </div>
+{% endif %}
 
+{% if not old_page %}
 <div class="panel">
   {% if not built %}
     <p style="margin:0">The game solver is not built yet. On the server:
@@ -125,6 +137,13 @@
   {% endif %}
 </div>
 
+{% endif %}
+{% if not old_page and not current %}
+<div class="panel"><p style="margin:0">No games on the current settings yet. Every game so far was played
+  under settings later found to be wrong; they are under
+  <a href="{{ url_for('views.games_old', name=name) }}">old data (not valid)</a>. The next runs
+  (the PC's day queue, the server's queue on the jobs page) play the first current ones.</p></div>
+{% endif %}
 {% if current %}
 <div class="sec"><h2>Latest</h2>
   <span class="hint">the matchups being played now, newest first · the numbers are the whole run so far</span></div>
@@ -183,7 +202,7 @@
     <span class="muted">· {{ o.games }} games, {{ o.hands }} of your hands × {{ o.enemy_hands }} of theirs{% if o.no_t1 %}, {{ o.no_t1 }} with no turn 1{% endif %}{% if o.borderline %}; {{ o.borderline }} of {{ o.pairings }} pairings borderline (their replays disagree){% endif %}.
     The range is how sure we are: it narrows with more hands, not with more replays of the same ones.</span></p>
 {% if e.light %}
-  <p style="margin:0 0 .6rem"><a href="{{ url_for('views.games_view', name=name, show=e.anchor) }}#{{ e.anchor }}">show every hand and the analysis for this section</a></p>
+  <p style="margin:0 0 .6rem"><a href="{{ url_for('views.games_old' if old_page else 'views.games_view', name=name, show=e.anchor) }}#{{ e.anchor }}">show every hand and the analysis for this section</a></p>
 {% else %}
 <div class="panel">
   <a class="btn primary" style="margin-bottom:10px;display:inline-block"
@@ -416,6 +435,10 @@
 {% if e.old %}</details>{% endif %}
 {% endfor %}
 
+{% if n_old and not old_page %}
+<p style="margin:18px 0 0" class="muted">Older games, played under settings later found to be wrong, are kept
+  apart: <a href="{{ url_for('views.games_old', name=name) }}">old data (not valid) — {{ n_old }} section{{ 's' if n_old != 1 }} →</a></p>
+{% endif %}
 <details class="note" style="margin-top:14px"><summary>how the enemy and your board are played</summary>
   Every turn is a full search from where the game actually stands. Whoever is not
   searching defends by a script: hand traps first, then negates, then removals; board

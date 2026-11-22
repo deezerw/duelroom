@@ -514,8 +514,10 @@ budgets and searched defences come before any side-card comparison.
   (old one: `combo-solver-rooted-pre0011`); every Trap set and Continuous Spell activated at end of
   turn (`free_sets`, Scream). Measured: 0011 3 saved / 0 lost of 49; 0012 0 / 0 of 60 (kept: it also
   makes the enemy hit OUR kill keys); 0013 unmeasured; QUICK_RESPOND (Havnis/Kashtira) still off.
-  Job 619 (Angelechy going second, server) finishes on 2026-11-21b: relabel its section before the
-  next Angelechy going-second run there (`tools/relabel_games.py`), as with `gift`.
+  Both 2026-11-21b sections (going first duelpc, going second server) are relabelled `m21b`.
+- **Old data (not valid)** (user, 2026-11-21: flag, don't delete): every relabelled era in
+  `web/views.OLD_SECTIONS` (kill1x, endgame-t1, brk1x, gift, m21b) shows only on
+  `/games/<deck>/old`, never in the regular /games spot; kept for history and the AI log.
 - **AI effectiveness log** (user, 2026-11-21: "for future graphing purposes ... logging the
   effectiveness of the ai"): `tools/ai_metrics.py` -> tables `ai_metrics` (dated series: won /
   killed_t2 per day and per era with crossed-bootstrap intervals, misplays per game from

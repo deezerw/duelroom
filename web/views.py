@@ -587,6 +587,19 @@ def _games_jobs(c, name):
 @bp.route("/games/<name>")
 @login_required
 def games_view(name=None):
+    return _games_page(name, old=False)
+
+
+@bp.route("/games/<name>/old")
+@login_required
+def games_old(name):
+    """Old data: the games played under settings now known to be wrong (user,
+    2026-11-21: "flag them as not valid and dont show up on the site in the
+    regular spot") -- kept for history, never in the current numbers."""
+    return _games_page(name, old=True)
+
+
+def _games_page(name, old):
     c = conn()
     name = name or db.get_meta(c, "active_deck")
     path = deck_path(name) if name else None
@@ -599,12 +612,17 @@ def games_view(name=None):
     nm = lambda code: (card_db.resolve(c, code) or {"name": str(code)})["name"]
     enemies = []
     show = request.args.get("show")
+    n_old = 0
     # One section per (enemy, side, device): a faster machine searches more
     # in the same budget, so its games are never pooled with the server's.
     for enemy, first, device in c.execute(
             "SELECT DISTINCT enemy, first, device FROM game_results WHERE deck_hash=? "
             "ORDER BY enemy, first DESC, device = 'server' DESC, device", (dh,)).fetchall():
         anchor = f"{enemy}-{'first' if first else 'second'}-{device}"
+        # not valid (an older-settings era) sections live on the Old data page only
+        if (device in OLD_SECTIONS) != old:
+            n_old += device in OLD_SECTIONS
+            continue
         # An older-settings section is its headline only unless asked for
         # (?show=<anchor>): their per-hand squares and analysis tables were
         # most of a 1.6 MB, 4 s page (2026-11-21).
@@ -730,7 +748,8 @@ def games_view(name=None):
                            "hand": h["hand"] if h else []})
     recent.sort(key=lambda g: g["created"] or "", reverse=True)
     return render_template(
-        "games.html", name=name, enemies=enemies, current=current, recent=recent[:25],
+        "games.html", name=name, enemies=enemies, current=current if not old else [],
+        recent=recent[:25] if not old else [], old_page=old, n_old=n_old,
         show=show,
         options=_enemy_decks(name),
         trained=c.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash=? "
