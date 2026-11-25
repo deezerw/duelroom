@@ -6804,8 +6804,8 @@ def test_own_turn_dead_hand_traps_are_kept_for_the_opponents_turn(tmp_path):
          extra=[], side=[]).write_ydk(ydk)
     assert game.own_turn_dead(ydk) == [23434538, 42141493, 84192580, 94145021]
     args = game.own_turn_args(ydk)
-    assert args[:3] == ["--no-self-negate", "--no-own-chain",
-                        "23434538|42141493|84192580|94145021"]
+    assert args[0] == "--no-self-negate"     # (patch 0011's --opp-dead may follow it)
+    assert args[args.index("--no-own-chain") + 1] == "23434538|42141493|84192580|94145021"
     assert args.count("--no-activate") == 4 and "42141493@hand" in args
     assert game.own_turn_args(None) == []
 

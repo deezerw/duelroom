@@ -113,9 +113,10 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-21c"
-METHOD_SINCE = {False: "2026-11-21T22:40:00",    # 2026-11-21c, both sides: patches 0011
-                True: "2026-11-21T22:40:00"}     # (negates wait for a live target), 0012 (kill
+METHOD = "2026-11-25a"
+METHOD_SINCE = {False: "2026-11-25T12:00:00",    # 2026-11-25a, both sides: one committed
+                True: "2026-11-25T12:00:00"}     # defence script (DEFENCES = (1,)), no hindsight.
+# Before: 2026-11-21c (patches 0011-0013 live, every Trap set, Continuous Spells activated)     # (negates wait for a live target), 0012 (kill
 # keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
 # Continuous Spell activated at end of turn (Scream). Before: {False: "2026-11-20T22:14:00",    # going second: + free sets                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
 NEAR_DUD_RATE = 0.10  # under this share of games won: as bad as a dud in practice
@@ -462,7 +463,14 @@ DEFENDER = "smart"
 # that stops the kill (then the least damage); on your lethal turn you must
 # win against EVERY one. Costs one kill search per entry, one lethal search
 # per entry for won turns. (1,) = a single script.
-DEFENCES = (1, 2)
+# (1,) since 2026-11-25 (user chose, from the flaw audit): a family gave the
+# defending side HINDSIGHT -- it lost only if the attacker beat every script, so
+# in effect it picked its script after seeing the attacker's line, which no
+# player can (our going-first survival was flattered; the enemy's defence of our
+# lethal turn likewise). It now commits, before the search, to the single best
+# script measured alone (hold board pieces until the attacker has a monster:
+# 38% of 237 kill checks lost, vs 45% holding until 2 -- defender_bench.py).
+DEFENCES = (1,)
 # Named scripts a DEFENCES entry may also be (an int n = SCRIPTS-free
 # "hold board pieces until n monsters", as above). Candidates measured by
 # tools/experiments/defender_family.py: answer order (`respond_order`
