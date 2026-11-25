@@ -33,6 +33,7 @@
           <option value="60">60s</option>
         </select></label>
     </span>
+    <label class="muted">run on <select name="device">{% for d, label in run_devices %}<option value="{{ d }}">{{ label }}</option>{% endfor %}</select></label>
     <button class="primary" id="go" disabled>Solve this hand</button>
   </div>
   <div id="picked" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"></div>

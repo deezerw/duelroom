@@ -117,9 +117,15 @@ def cancel(conn, job_id):
 
 # --- worker side ---------------------------------------------------------
 
+# Jobs whose searches can run on another machine (skills/remote.py); the rest
+# are the server's whatever their params say.
+DEVICE_KINDS = ("games", "train", "starters", "pilot")
+
+
 def device_of(job):
-    """Where a job's searches run (skills/remote.py). Only `games` jobs can
-    go elsewhere; everything else is the server's."""
+    """Where a job's searches run (skills/remote.py)."""
+    if job["kind"] not in DEVICE_KINDS:
+        return "server"
     return json.loads(job["params"] or "{}").get("device") or "server"
 
 
@@ -154,7 +160,7 @@ def run(conn, job):
     try:
         with log.open("w") as fh:
             proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
-                                    cwd=str(ROOT), env=engine.env())
+                                    cwd=str(ROOT), env={**engine.env(), remote.ENV_VAR: device_of(job)})
             with conn:
                 conn.execute("UPDATE jobs SET pid=? WHERE id=?",
                              (proc.pid, job["id"]))

@@ -7379,3 +7379,40 @@ def test_a_gifting_enemy_turn_1_is_re_solved_and_the_least_harmful_line_kept(mon
                  {"solutions": [], "approach": Path("best_approach_3of3_a3.yrp")}])
     got = game._regift("t", [], tmp_path, 1, 1, "d", first)
     assert got.name == "solution_01_s1.yrp"
+
+
+def test_ygorl_solves_follow_the_jobs_device(monkeypatch, tmp_path):
+    """Train / starters / pilot run ygorl's `solve_hand`, which shelled out
+    locally whatever device the job was given. `remote.route_ygorl` swaps
+    ygorl's run_solver for one that runs on the device -- and on the server
+    leaves it alone."""
+    from ygorl.solver import batch
+    from skills import remote
+
+    local = batch.run_solver
+    monkeypatch.setattr(batch, "run_solver", local)
+    monkeypatch.setenv(remote.ENV_VAR, "server")
+    remote.route_ygorl()
+    assert batch.run_solver is local, "the server must keep the local solver"
+
+    seen = []
+    monkeypatch.setattr(remote, "run", lambda dev, cmd, env, t, push_dirs=(), outdir=None:
+                        seen.append((dev.name, outdir)) or remote.Result(0, "", ""))
+    monkeypatch.setattr(remote, "heat_of", lambda dev, log=print: None)
+    monkeypatch.setenv(remote.ENV_VAR, "duelpc")
+    remote.route_ygorl()
+    assert batch.run_solver is not local
+
+    class Req:
+        solve_ms, fire_ms = 1000, None
+        def args(self, wd, out):
+            return ["--outdir", str(out)]
+
+    class WD:
+        path = tmp_path / "wd"
+    out = tmp_path / "out"
+    exe = tmp_path / "combosolver"
+    exe.write_text("")
+    exe.chmod(0o755)
+    run = batch.run_solver(Req(), WD(), out, binary=exe)
+    assert seen == [("duelpc", out)] and run.returncode == 0 and run.solutions == []

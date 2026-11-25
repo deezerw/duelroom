@@ -56,6 +56,7 @@ DEVICES = {
 _V = engine.VENDOR
 STATIC = (
     _V / "build" / "combo-solver-rooted" / "bin",
+    _V / "build" / "combo-solver" / "bin",     # the pinned one: trainer, starters, pilot
     engine.ROOT / "vendor" / "third_party_merged",
     engine.UPSTREAM_THIRD_PARTY / "CardScripts",
     engine.UPSTREAM_THIRD_PARTY / "BabelCDB",
@@ -404,3 +405,56 @@ def run(dev, cmd, env, timeout_s, push_dirs=(), outdir=None):
     if outdir:
         _rsync([f"{_target(dev)}:{os.path.abspath(outdir)}/", f"{os.path.abspath(outdir)}/"])
     return Result(r.returncode, r.stdout, r.stderr)
+
+
+# --- ygorl's solves (trainer, starters, pilot) --------------------------------
+
+# shortcut: the pool keeps the server's worker count (engine.DEFAULT_WORKERS) on any
+# device; size it from Device.workers if duelpc should run more solves at once.
+def route_ygorl():
+    """Send ygorl's `solve_hand` solves to this process's device. Called in
+    each pool child before `solve_hand`; a no-op on the server."""
+    dev = current()
+    if not dev.remote:
+        return
+    from ygorl.solver import batch
+    if getattr(batch.run_solver, "_remote", False):
+        return
+    local = batch.run_solver
+
+    def run_solver(request, workdir, outdir, *, binary=None, timeout=None):
+        from ygorl.solver.combo_solver import (SolverRun, find_solver, parse_events,
+                                               parse_solution_name)
+        exe = find_solver(binary)
+        outdir = Path(outdir)
+        if outdir.exists():
+            import shutil
+            shutil.rmtree(outdir)
+        outdir.mkdir(parents=True)
+        args = request.args(workdir, outdir)
+        if timeout is None:
+            timeout = request.solve_ms / 1000 + 120 + (request.fire_ms or 0) / 1000 * 8
+        # this child's own heat watch (remote.run waits while it reads hot);
+        # only the pause / resume lines reach the job log
+        heat_of(dev, log=lambda m: None if m.startswith("temps ") else print(m, flush=True))
+        env = {"YGORL_THIRD_PARTY": str(engine.THIRD_PARTY)}
+        start = time.monotonic()
+        try:
+            try:
+                r = run(dev, [str(exe), *args], env, timeout, push_dirs=[workdir.path], outdir=outdir)
+            except DeviceDown:
+                ensure_up(dev)
+                r = run(dev, [str(exe), *args], env, timeout, push_dirs=[workdir.path], outdir=outdir)
+        except subprocess.TimeoutExpired:
+            r, timed_out = Result(-9, "", ""), True
+        else:
+            timed_out = False
+        stdout = (r.stdout or "") + (r.stderr or "")
+        sols = sorted((x for f in outdir.iterdir() if (x := parse_solution_name(f.name, outdir)) is not None),
+                      key=lambda x: x.index)
+        return SolverRun(args, r.returncode, time.monotonic() - start, stdout,
+                         parse_events(stdout), sols, timed_out)
+
+    run_solver._remote = True
+    run_solver._local = local
+    batch.run_solver = run_solver

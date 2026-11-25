@@ -171,6 +171,8 @@ def _one_draw(args):
     deck_path, hand, targets, label, solve_ms, seed, threads = args
     from ygorl.engine.duel import default_cards
     from ygorl.solver import HandJob, Workdir, find_solver
+    from . import remote
+    remote.route_ygorl()     # the job's device (a no-op on the server)
     from ygorl.solver.batch import solve_hand
     from ygorl.solver.blocking import board_interruptions
 

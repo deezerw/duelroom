@@ -65,10 +65,19 @@ def _chrome():
     try:
         c = conn()
         return {"active_deck": db.get_meta(c, "active_deck"),
-                "banlist_note": _banlist_note(c)}
+                "banlist_note": _banlist_note(c),
+                "run_devices": [(d.name, d.label or d.name) for d in remote.DEVICES.values()]}
     except Exception:
         # The chrome must never be the reason a page fails to render.
         return {"active_deck": None, "banlist_note": None}
+
+
+def _form_device():
+    """The "run on" choice of a start form: {} for the server, else {"device": name}."""
+    device = request.form.get("device") or "server"
+    if device not in remote.DEVICES:
+        abort(400)
+    return {} if device == "server" else {"device": device}
 
 
 def _banlist_note(c):
@@ -529,6 +538,7 @@ def train_start(name):
     if enemy in _enemy_decks(name):
         params["enemy"] = enemy
         params["second"] = request.form.get("side") == "second"
+    params.update(_form_device())
     job_id = jobs.enqueue(c, "train", deck=name, **params)
     flash(f"Training queued as job {job_id}.")
     return redirect(url_for("views.train_view", name=name))
@@ -959,7 +969,8 @@ def starters_start(name):
     hours = min(max(request.form.get("hours", type=float) or 8, 0.25), 200)
     seconds = min(max(request.form.get("seconds", type=int) or trainer.STARTER_MS // 1000, 15), 900)
     skip = sorted({int(x) for x in request.form.getlist("skip") if x.isdigit()})
-    jid = jobs.enqueue(c, "starters", name, size=k, hours=hours, seconds=seconds, skip=skip)
+    jid = jobs.enqueue(c, "starters", name, size=k, hours=hours, seconds=seconds, skip=skip,
+                       **_form_device())
     flash(f"Starter test queued (job {jid}).")
     return redirect(url_for("views.starters_view", name=name, k=k))
 
@@ -1502,7 +1513,7 @@ def pilot(name):
             c, "pilot", deck=name,
             cards=",".join(str(x) for x in codes),
             solve_s=solve_s, fire_s=fire_s, traps=traps or "none",
-            lines=lines, report=str(report))
+            lines=lines, report=str(report), **_form_device())
         return redirect(url_for("views.job_detail", job_id=job_id))
 
     # ?deal=1 deals a hand into the picker rather than straight into the

@@ -17,7 +17,7 @@ from pathlib import Path
 from skills import (breaking, card_db, carddb, config, db, drill, engine,
                     gate, gauntlet, handlab, images, importer,
                     meta_scrape as ms, optimizer, report, scenarios,
-                    stats, sweep, trainer, game)
+                    remote, stats, sweep, trainer, game)
 from skills.deck import Deck
 
 ROOT = Path(__file__).resolve().parent
@@ -2617,13 +2617,27 @@ def main():
         run(conn, cmd, args)
 
 
+# Commands whose solves can run on another device (`DUELROOM_DEVICE`, set by
+# the worker from a job's `device`): their ygorl solves go through
+# remote.route_ygorl. `games` picks its device itself (--device).
+ROUTED = ("train", "starters", "pilot")
+
+
 def run(conn, cmd, args):
     fn = COMMANDS.get(cmd)
     if not fn:
         print(f"unknown command: {cmd} (try `help`)")
         return
     try:
+        dev = remote.current()
+        if dev.remote and cmd in ROUTED:
+            print(f"solving on {dev.name}")
+            remote.prepare(dev)
         fn(conn, args)
+    except remote.DeviceDown as e:
+        # SystemExit, not a traceback: the worker queues the job again (resumable)
+        print(f"device went away: {e}")
+        raise SystemExit(remote.EXIT_DOWN)
     except Exception:
         traceback.print_exc()
 

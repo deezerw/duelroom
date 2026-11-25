@@ -852,6 +852,8 @@ def solve_for_hand(job, hand, pieces=4, pair=True, cards=None, scripts=None,
     from ygorl.solver.blocking import (_score_demo, blocking_plan,
                                        solve_blocking as _upstream)
 
+    from . import remote
+    remote.route_ygorl()     # the job's device (a no-op on the server)
     say = say or (lambda m: None)
     cards = cards if cards is not None else default_cards()
     deck = load_ydk(job.deck_path)
