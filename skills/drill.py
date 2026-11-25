@@ -121,7 +121,24 @@ NEEDS_ON_FIELD = {7436169: 56099748}      # Trivikarma -> Visas Starfrost
 # negates only "If you control a 'Tearlaments' monster or 'Visas Starfrost'", and
 # was counted live on any board (a set Sulliek beside Desirae + Dragostapelia
 # negates nothing). A face-down monster has no name, so it enables nothing.
-NEEDS_ANY_ON_FIELD = {74920585: ("Tearlaments", 56099748)}   # Tearlaments Sulliek
+NEEDS_ANY_ON_FIELD = {74920585: ("Tearlaments", 56099748),   # Tearlaments Sulliek
+                      6767771: ("Tearlaments", 56099748),    # Tearlaments Scream (same clause)
+                      # Angelechy Disturbance "gives control of 1 'Angelechy' monster you
+                      # control": with none in its Monster Zone it does nothing
+                      54171327: ("Angelechy",)}
+
+# Pieces whose effect on the OPPONENT's turn needs another card of yours to set it
+# off. Tearlaments Kaleido-Heart triggers when Special Summoned or "if an Aqua
+# monster is sent to your GY by card effect while this card is on the field": on
+# their turn something must send one. Swept 2026-11-21 (user: "look for other cards
+# like that"): on 64 of our going-first boards it was counted an interruption and
+# fired 0 times -- none held an enabler. Enablers: (zone, code), each LIVE itself
+# (a Sulliek / Scream with no face-up Tearlaments enables nothing).
+NEEDS_ENABLER = {28226490: (("szone", 74920585),     # Sulliek: sends 1 monster you control
+                            ("szone", 6767771),      # Scream: mills 3 on a summon
+                            ("mzone", 84330567),     # Rulkallos: sends a Tearlaments card
+                            ("hand", 37961969),      # Havnis: summons itself, mills 3
+                            ("hand", 4928565))}      # Kashtira: Main Phase summon, mills 3
 
 
 # Xyz interrupters whose Quick Effect costs detaching N materials: dead with
@@ -212,9 +229,15 @@ def dead_on_field(board, cards, player=0):
     mzone = {cards.canonical(c["code"]) for c in _me(board, player).get("mzone") or []}
     faceup = [c["code"] for c in _me(board, player).get("mzone") or []
               if c.get("code") and c.get("position", 0) & 0x5]
-    return (dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
+    dead = (dead | {c for c, need in NEEDS_ON_FIELD.items() if need not in mzone}
             | {c for c, need in NEEDS_ANY_ON_FIELD.items() if not _partner(faceup, need, cards)}
             | short_of_materials(board, cards, player))
+    me = _me(board, player)
+    held = {"mzone": mzone,
+            "szone": {cards.canonical(c["code"]) for c in me.get("szone") or [] if c.get("code")},
+            "hand": {cards.canonical(c) for c in me.get("hand") or [] if c}}
+    return dead | {c for c, ways in NEEDS_ENABLER.items()
+                   if not any(code in held[zone] and code not in dead for zone, code in ways)}
 
 
 def _partner(codes, need, cards):

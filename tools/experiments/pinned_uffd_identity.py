@@ -2,7 +2,10 @@
 
 Same search, faster? Deterministic mode (1 thread, fixed seed, fixed rollout count)
 on trained `imported` hands, three arms: the pinned binary, the uffd build with the
-tracker OFF, and ON. Pass = identical solution bytes and counters in all three.
+tracker OFF, and ON. Only the NRPA phase is count-bounded (the probe and the finisher
+run on wall time and differ run to run, measured 2026-11-25), so pass = identical
+NRPA counter lines in all three, and the tracker really on (strace: userfaultfd
+calls) in the ON arm.
 Then a throughput pass at the trainer's settings (wall budget): states per arm.
 Usage: pinned_uffd_identity.py [rollouts] [hands] [throughput_ms]
 """
@@ -10,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -28,9 +32,11 @@ def hands(n):
     conn = sqlite3.connect(ROOT / "data" / "duelroom.db")
     dh = conn.execute("SELECT deck_hash FROM trainer_hands GROUP BY deck_hash "
                       "ORDER BY COUNT(*) DESC LIMIT 1").fetchone()[0]
+    # hands the trainer solved in few actions: NRPA reaches the goal inside the count
     return conn.execute("SELECT hand_index, hand_seed, hand, best_goal FROM trainer_hands "
                         "WHERE deck_hash=? AND best_goal IS NOT NULL AND best_goal != '' "
-                        "ORDER BY hand_index LIMIT ?", (dh, n)).fetchall()
+                        "AND best_goal != '[]' ORDER BY length(best_goal), hand_index LIMIT ?",
+                        (dh, n)).fetchall()
 
 
 def solve(binary, uffd, h, rollouts, solve_ms):
@@ -50,11 +56,12 @@ def solve(binary, uffd, h, rollouts, solve_ms):
                   binary=binary, solver_seed=12345, max_rollouts=rollouts,
                   keep_files=True, timeout_s=solve_ms / 1000 + 600)
     demo = solve_hand(job, cards=default_cards()).to_json()
-    outs = sorted((scratch / "job" / "out").glob("*.yrp*"))
-    digest = hashlib.sha256(b"".join(p.read_bytes() for p in outs)).hexdigest()[:16]
-    out = json.dumps(demo.get("solver", {}))
-    states = [int(x) for x in re.findall(r'"states": (\d+)', out)]
-    return digest, len(outs), demo.get("status"), states, demo["solver"].get("wall_s")
+    log = (scratch / "job" / "solver.log").read_text(errors="replace")
+    nrpa = [ln.split(":", 1)[1].strip() for ln in log.splitlines()
+            if re.match(r"\s+NRPA\s+:", ln)]
+    digest = hashlib.sha256("\n".join(nrpa).encode()).hexdigest()[:16]
+    states = [int(x) for x in re.findall(r"(\d+) states", log)]
+    return digest, len(nrpa), demo.get("status"), states, demo["solver"].get("wall_s"), scratch
 
 
 def main():
@@ -67,12 +74,25 @@ def main():
         seen = {}
         for name, binary, uffd in ARMS:
             r = solve(binary, uffd, h, rollouts, 3_600_000)
-            seen[name] = r[:3]
-            print(f"h{h[0]} {name:<8} sha={r[0]} files={r[1]} {r[2]} states={r[3]} {r[4]}s",
+            seen[name] = r[:2]
+            shutil.rmtree(r[5], ignore_errors=True)
+            print(f"h{h[0]} {name:<8} nrpa={r[0]} lines={r[1]} {r[2]} states={r[3]} {r[4]}s",
                   flush=True)
         same = len(set(seen.values())) == 1
         ok &= same
         print("   IDENTICAL" if same else "   !! DIFFERENT", flush=True)
+    # the ON arm must really use the kernel tracker: count its syscalls once
+    import subprocess
+    wrap = Path(tempfile.mkdtemp(prefix="pinned-uffd-strace-"))
+    trace = wrap / "strace.txt"
+    (wrap / "combosolver").write_text(f'#!/bin/sh\nexec strace -f -c -o {trace} '
+                                      f'-e trace=userfaultfd,mprotect {UFFD} "$@"\n')
+    (wrap / "combosolver").chmod(0o755)
+    solve(wrap / "combosolver", "1", hands(1)[0], 50, 3_600_000)
+    calls = {ln.split()[-1]: int(ln.split()[3]) for ln in trace.read_text().splitlines()
+             if ln.strip().endswith(("userfaultfd", "mprotect")) and ln.split()[3].isdigit()}
+    print(f"tracker ON syscalls: {calls}", flush=True)
+    ok &= calls.get("userfaultfd", 0) > 0
     print("IDENTITY PASS" if ok else "IDENTITY FAIL", flush=True)
     if not ok or not tp_ms:
         return
@@ -82,6 +102,7 @@ def main():
             r = solve(binary, uffd, h, None, tp_ms)
             tot += sum(r[3])
             print(f"throughput h{h[0]} {name:<8} states={r[3]} {r[2]}", flush=True)
+            shutil.rmtree(r[5], ignore_errors=True)
         print(f"THROUGHPUT {name}: {tot} states over {n} hands at {tp_ms} ms", flush=True)
 
 

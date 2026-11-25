@@ -51,20 +51,20 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       0): one 4-byte write, same in BOTH trackers, so it does not block the port (the
       identity gate proves the port). A write the mirror never saw; if that page is later
       marked and restored, the value reverts to 0. Find what lives there (gdb watchpoint).
-- [ ] Repeatable `--fire`: PROBABLY NOT NEEDED (2026-11-25). The games' defender already
-      fires every hand trap it holds (rooted binary, `--opp-respond`), and STAGE13's side.py
-      runs on the games. Only the old pinned `--fire` path (funnel_eval / optimizer /
-      handtrap matrix) is one card, and RunFireTest is ~860 lines of C++ whose pair version
-      is a search per (window1, window2). Ask the user before building.
+- [x] Repeatable `--fire`: DROPPED (user, 2026-11-25). The games' defender fires every hand
+      trap it holds and STAGE13's side.py runs on the games; the old one-card pinned `--fire`
+      path (optimizer, handtrap matrix) stays one card.
 - [x] `--no-activate` for THEIR card: not needed -- the rooted defender plays only what its
       `--opp-respond` lists, so dropping a field piece from that list switches it off.
-- [ ] **Hidden-hand option** (user, 2026-11-25): a visible / hidden hand button. Today
-      every search sees your real hand -- even duel mode, whose copy is your real hand PLUS
-      one of each hand trap (patch 0010). Hidden = the search copy's hand is REPLACED
-      (your real hand removed, the decklist's hand traps assumed), a solver flag beside
-      `--opp-hand-root`. Wire it to: the games (a per-run choice, stored as its own label
-      so hidden and visible are never pooled; button on /games), the kill check, and duel
-      mode (default hidden there). Visible stays the default for the games.
+- [ ] **Hidden-hand option** (user, 2026-11-25: a visible / hidden hand button; chose FULL).
+      Today every search sees the other side's real hand -- even duel mode, whose copy is
+      the real hand PLUS one of each hand trap (patch 0010). Hidden, both sides, games and
+      duel mode: (1) solver flag `--opp-hand-hide` (patch 0016): at the root the opponent's
+      real hand is replaced by the assumed one (one of each hand trap of their list);
+      (2) game.py: each turn plans on that copy, the plan is played on the REAL duel, and a
+      deviation by the real defender re-plans from there (duel.py's plan/follow loop);
+      (3) stored under its own label, never pooled with visible; button on /games, duel
+      mode hidden by default. Expect ~2-4x a game's time.
 - [ ] QUICK_RESPOND on for Havnis / Kashtira, measured: `tools/experiments/quick_respond_ab.py`
       (game.kill_check at OTK_X, paired off/on, 102 stored going-first positions hold one;
       ~18-54 solver-hours: duelpc day).
