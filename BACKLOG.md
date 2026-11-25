@@ -23,42 +23,74 @@ Work queue for the autonomous loop. **Read this first every iteration.**
    Never block a whole turn waiting.
 6. If an item turns out to be a bad idea, say so in DONE and move on. Don't force it.
 
-## NOW
+## NOW -- the plan (user, 2026-11-25: "iron it out then begin")
 
-The stages (STAGE11/13/15/16.md) are the big work; these are the smaller ideas, all
-approved by the user 2026-11-25. Grouped, not ordered.
+Ordered. User decisions behind it (do not re-ask): no real-match log (too much hassle);
+one enemy deck is fine while the app is in development; **making the app as good as
+possible comes first**; compute hours are not a concern; `imported` is the deck the user
+plays in real life, so it is the target deck for every measurement. The STAGE files hold
+the big steps; this list orders them with the small ideas.
 
-### AI play
-- [ ] **Pick our turn-1 board by THEIR turn-2 kill check** (the "own-turn defences" idea):
-      no search looks past its own turn today (`--turns` = the current turn). Choosing per
-      position by the kill check measured 80% -> 90% boards surviving, at 3x the turn-1 +
-      kill-check cost. Overlaps STAGE15 step 2 / STAGE11 step 4 -- build it there.
-- [ ] QUICK_RESPOND for Havnis / Kashtira is still off: turn it on, measure, bump METHOD.
-- [ ] Untried solver levers: `--options` macros, a per-starter `--adapt` corpus, `--ctx-shrink`.
+### Phase 0 -- server, small
+- [ ] Re-scrape + `snapshot` (drift needs a second data point; last scrape a month old).
+- [x] `export` best-placing list -- already done (meta_scrape.best_list). Add the
+      tiebreak: among equal placings, the list closest to the archetype's core.
+- [x] Optimizer fires Imperm AND Ash -- the trial records carry `"fire": [10045474,
+      14558127]` (2026-10-24). Re-check on the next real optimize run.
 
-### Solver speed / correctness
-- [ ] Port patch 0003's arena half (uffd page tracker, 1.88x states) to the PINNED binary:
-      the trainer, sweep and every turn-1 solve still use the old tracker. Biggest saving left.
-- [ ] `R2V_ARENA_VERIFY=1` reports "barrier INCOMPLETE: page 1154" with both trackers:
-      pre-existing, unexplained.
-- [ ] Repeatable `--fire`, so two hand traps can be tested firing together (today only one;
-      `--opp-hand` holds the second without firing it).
-- [ ] Move `second`, `gauntlet.rank` and the old side plan onto the rooted binary (`--root`),
-      or delete them: they are UNSUPPORTED on the pinned one. (STAGE13 replaces the side plan.)
-- [ ] Budgets in work, not wall time: patch 0015 counts CPU time; a rollout count would also
-      make runs reproducible. Needs a ladder per deck.
+### Phase 1 -- one solver round, ONE METHOD bump (old era relabelled, hidden, never deleted)
+Every METHOD bump makes stored games "old data", so these land together, and duelpc's
+2026-11-25c `day.sh` queue waits for them (it would go stale at once).
+- [ ] Port patch 0003's arena half (uffd page tracker, 1.88x states) to the PINNED binary
+      (trainer, sweep, every turn-1 solve). First explain `R2V_ARENA_VERIFY=1` "barrier
+      INCOMPLETE: page 1154": a verify that already fails cannot prove the port. Gate:
+      same answers at equal states, more states per CPU-second.
+- [ ] Repeatable `--fire` (two hand traps firing together; unblocks "handtrap pairs").
+- [ ] `--no-activate <card[@zone]>` primitive (for field-piece ranking, Phase 3).
+- [ ] **Hidden-hand option** (user, 2026-11-25): a visible / hidden hand button. Today
+      every search sees your real hand -- even duel mode, whose copy is your real hand PLUS
+      one of each hand trap (patch 0010). Hidden = the search copy's hand is REPLACED
+      (your real hand removed, the decklist's hand traps assumed), a solver flag beside
+      `--opp-hand-root`. Wire it to: the games (a per-run choice, stored as its own label
+      so hidden and visible are never pooled; button on /games), the kill check, and duel
+      mode (default hidden there). Visible stays the default for the games.
+- [ ] QUICK_RESPOND on for Havnis / Kashtira, measured.
+- [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
 
-### Measurement / data
-- [ ] A DRAWS LADDER like `ladder`: four draws helped elfnote, not fiendsmith, so `DRAWS`
-      has no single right value. Per deck, quality/CPU over draws 1..4.
-- [ ] EXTEND board ranking to FIELD pieces (`rank_boards` only measures hand pieces);
-      candidate primitive `--no-activate <their card[@zone]>`.
-- [ ] RE-RUN the 40-hand board library with multi-draw (every stored board is a floor).
-- [ ] `export` picks the FIRST scraped list (`ORDER BY d.id LIMIT 1`): rank by placement /
-      closeness to the archetype's core (`branded.ydk` is a hybrid that drags the library).
-- [ ] VERIFY the optimizer fires Imperm AND Ash (a trial RECORD's `fire` keys, not the file).
-- [ ] Re-scrape on a later day and `snapshot` again -- drift needs a second data point.
-- [ ] Keep adding a regression test with every bug fix (`venv/bin/pytest tests/ -q`).
+### Phase 2 -- calibration (duelpc days)
+- [ ] Run `day.sh` on the new METHOD (going-first baseline, starters A/B, t3 plateau,
+      side gate, board data) -- plus one hidden-hand sample of the going-first baseline,
+      so the size of the "attacker sees your hand" effect is known.
+- [ ] A DRAWS axis on the existing `ladder` (draws 1..4 per deck, quality per CPU).
+- [ ] Budgets in rollouts (reproducible runs) off the same ladder runs; lands with the
+      NEXT METHOD bump, not a bump of its own.
+- [ ] More enemy hands: 10 trained enemy hands is a small pool for side advice; train
+      20 (`train Angelechy-Meta --vs imported`, ~8 h on the server) and check intervals
+      narrow.
+
+### Phase 3 -- re-measure
+- [ ] Re-run the 40-hand board library with each deck's DRAWS.
+- [ ] Extend `rank_boards` to field pieces (uses `--no-activate`).
+
+### Phase 4 -- stages, in parallel
+- [ ] STAGE16 (AlphaZero): next is arm (b), the net prior inside the C++ NRPA
+      (step 3(b)) -- the net found 2x the far kills in less time (2026-11-21).
+- [ ] STAGE13 side cards: needs repeatable `--fire` and the honest side gate passed.
+      When `side.py` covers sides: ASK the user before deleting `second`,
+      `gauntlet.rank` and the old side plan (unsupported on the pinned binary).
+- [ ] STAGE15 / STAGE11 step 4: pick our turn-1 board by THEIR turn-2 kill check
+      (measured 80% -> 90% surviving at 3x turn-1 cost). Re-measure under the new METHOD
+      first: on 2026-11-19 only 4 of 1063 boards survived a 16x kill check.
+
+### Phase 5 -- low
+- [ ] Untried solver levers: `--options` macros, a per-starter `--adapt` corpus,
+      `--ctx-shrink` (`--adapt` already measured useless at equal time).
+- [ ] Patch-stack upkeep: 15 patches on vendored combo-solver. A `tools/patches_check.sh`
+      that applies 0002..N to a clean upstream checkout and builds, run before any
+      upstream bump, so the stack's state is known rather than discovered.
+
+### Always
+- [ ] A regression test with every bug fix (`venv/bin/pytest tests/ -q`).
 
 ## BLOCKED / WON'T DO
 
