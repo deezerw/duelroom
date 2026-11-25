@@ -43,6 +43,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0014: --reseed (a fresh random future at the root: the search no longer knows the real
 # draws / mills) and --opp-set-root (the opponent's face-down cards become an assumed card).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0014-reseed-set-root.patch" >&2)
+# 0015: budgets count CPU work (thread / process CPU time), not wall time: a busy machine no
+# longer gives a search less work (user chose, 2026-11-25). An idle run is unchanged.
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0015-work-clock.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl

@@ -521,7 +521,10 @@ budgets and searched defences come before any side-card comparison.
   shuffled Decks); the duel AI plans your face-down cards as your most dangerous settable card
   (`duel.assumed_set_card`, `--opp-set-root`). Hands stay visible in the games (user chose A).
   Still clairvoyant inside each future and on our own turn 1 (its lines are solved knowing the
-  mills). Live solver = patches 0002-0014 (`combo-solver-rooted-pre0014` kept). Rollout budgets: next.
+  mills). **2026-11-25c:** + patch 0015, budgets count CPU WORK (per-thread CPU time in each search
+  phase, process CPU / workers in the driver), not wall time -- beside a full games run a 20 s search
+  did 19% more rollouts with it; an idle run is unchanged. `game._hard_limit` is 4x + 300 s.
+  Live solver = patches 0002-0015 (`combo-solver-rooted-pre0015` kept).
 - **Old data (not valid)** (user, 2026-11-21: flag, don't delete): every relabelled era in
   `web/views.OLD_SECTIONS` (kill1x, endgame-t1, brk1x, gift, m21b) shows only on
   `/games/<deck>/old`, never in the regular /games spot; kept for history and the AI log.

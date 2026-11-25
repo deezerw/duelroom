@@ -1,0 +1,205 @@
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-25 06:06:59.655277715 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-25 06:28:51.727241597 -0500
+@@ -63,7 +63,23 @@
+ std::string g_enum_line;        // digests, coverage and candidates
+ std::string g_width_line;       // effective width (IW atoms)
+ 
+-using Clock = std::chrono::steady_clock;
++// duelroom patch 0015: the driver's phase deadlines count WORK too -- the
++// process's CPU time over its worker count (an idle run: wall time, unchanged).
++unsigned g_work_threads = 1;
++struct WorkClock {
++	using duration = std::chrono::nanoseconds;
++	using rep = duration::rep;
++	using period = duration::period;
++	using time_point = std::chrono::time_point<WorkClock>;
++	static constexpr bool is_steady = true;
++	static time_point now() noexcept {
++		timespec ts{};
++		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
++		const rep ns = static_cast<rep>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
++		return time_point(duration(ns / static_cast<rep>(g_work_threads ? g_work_threads : 1)));
++	}
++};
++using Clock = WorkClock;
+ 
+ double MsSince(Clock::time_point t0) {
+ 	return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+@@ -11327,6 +11343,7 @@
+ 		Usage();
+ 		return opt.help ? 0 : 2;
+ 	}
++	g_work_threads = opt.threads ? opt.threads : (std::max)(1u, std::thread::hardware_concurrency());
+ 	g_verbose = opt.verbose;
+ 	g_json = opt.json;
+ 	// Before any thread is created: publication of the flag rides on the workers'
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-21 16:46:35.396680666 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-25 06:28:51.717241353 -0500
+@@ -326,7 +326,7 @@
+ 	if(cfg.max_rollouts && stats.rollout_count >= cfg.max_rollouts)
+ 		return true;
+ 	double ms = std::chrono::duration<double, std::milli>(
+-					std::chrono::steady_clock::now() - start).count();
++					ThreadWorkClock::now() - start).count();
+ 	return ms >= cfg.time_limit_ms;
+ }
+ 
+@@ -3261,7 +3261,7 @@
+ 	for(size_t i = 0; i < p.size(); ++i)
+ 		if(p[i].edge)
+ 			plan_index.emplace(p[i].edge, i);
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	novelty.Clear();
+@@ -3281,7 +3281,7 @@
+ 	arena.Pop();
+ 
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ 	stats.exhausted = false;   // a rollout never exhausts anything
+ 	stats.novelty_atoms = novelty.Size();
+@@ -4953,7 +4953,7 @@
+ 	for(size_t i = 0; i < p.size(); ++i)
+ 		if(p[i].edge)
+ 			plan_index.emplace(p[i].edge, i);
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	novelty.Clear();
+@@ -5029,7 +5029,7 @@
+ 	arena.Pop();
+ 
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ 	stats.exhausted = false;
+ 	stats.novelty_atoms = novelty.Size();
+@@ -5056,7 +5056,7 @@
+ 	for(size_t i = 0; i < p.size(); ++i)
+ 		if(p[i].edge)
+ 			plan_index.emplace(p[i].edge, i);
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	tt.clear();
+@@ -5691,7 +5691,7 @@
+ 	arena.Pop();
+ 
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	// Exhausted = the queue emptied: the space reachable under these bounds was
+ 	// ENTIRELY enumerated, the single-state finisher's proof of absence, but per
+ 	// root this time.
+@@ -5704,7 +5704,7 @@
+ 	InitSerialBase();
+ 	target = t;
+ 	plan = &p;
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	tt.clear();
+@@ -5716,7 +5716,7 @@
+ 			plan_index.emplace(p[i].edge, i);
+ 	DescendTransplant(0, 0, discrepancies, 0, 0, 0, 0);
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ 	stats.exhausted = !stats.hit_time_limit && !stats.hit_node_limit;
+ 	stats.novelty_atoms = novelty.Size();
+@@ -6711,7 +6711,7 @@
+ 	prof::Scope ps(prof::kSearch);
+ 	InitSerialBase();
+ 	target = t;
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	tt.clear();
+@@ -6719,7 +6719,7 @@
+ 	cfg_discrepancies = discrepancies;
+ 	DescendRepair(0, 0, 0, discrepancies, 0, 0, 0, 0);
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ 	stats.exhausted = !stats.hit_time_limit && !stats.hit_node_limit;
+ 	stats.novelty_atoms = novelty.Size();
+@@ -6729,14 +6729,14 @@
+ 	prof::Scope ps(prof::kSearch);
+ 	InitSerialBase();
+ 	target = t;
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	tt.clear();
+ 	DescendGuided(0, 0, cfg.initial_turns, cfg.initial_summons,
+ 				  cfg.initial_resolved);
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ 	stats.exhausted = !stats.hit_time_limit && !stats.hit_node_limit;
+ }
+@@ -6745,13 +6745,13 @@
+ 	prof::Scope ps(prof::kSearch);
+ 	InitSerialBase();
+ 	target = t;
+-	start = std::chrono::steady_clock::now();
++	start = ThreadWorkClock::now();
+ 	solutions.clear();
+ 	path.clear();
+ 	tt.clear();
+ 	Descend(0, 0);
+ 	stats.ms = std::chrono::duration<double, std::milli>(
+-				   std::chrono::steady_clock::now() - start).count();
++				   ThreadWorkClock::now() - start).count();
+ 	stats.exhausted = !stats.hit_time_limit && stats.nodes < cfg.max_nodes;
+ 	stats.hit_node_limit = stats.nodes >= cfg.max_nodes;
+ }
+--- combo-solver-rooted/solver-patched/search.h	2026-11-21 16:46:35.393680594 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-25 06:29:46.185191302 -0500
+@@ -7,6 +7,24 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <chrono>
++#include <ctime>
++// duelroom patch 0015: a search phase's budget counts the CPU WORK of its own
++// thread (CLOCK_THREAD_CPUTIME_ID), not wall time -- a busy machine used to give a
++// "60 s" search a fraction of 60 s of work, so results depended on what else ran.
++// On an idle machine the two advance together: an idle run is unchanged.
++struct ThreadWorkClock {
++	using duration = std::chrono::nanoseconds;
++	using rep = duration::rep;
++	using period = duration::period;
++	using time_point = std::chrono::time_point<ThreadWorkClock>;
++	static constexpr bool is_steady = true;
++	static time_point now() noexcept {
++		timespec ts{};
++		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
++		return time_point(duration(static_cast<rep>(ts.tv_sec) * 1000000000LL + ts.tv_nsec));
++	}
++};
+ #include <atomic>
+ #include <chrono>
+ #include <cstdint>
+@@ -3778,7 +3796,7 @@
+ 	// `mutable`: BudgetExhausted() is const and must be able to set the poisoned
+ 	// arena flag, which is a stop condition and not a statistic.
+ 	mutable SearchStats stats;
+-	std::chrono::steady_clock::time_point start;
++	ThreadWorkClock::time_point start;   // patch 0015: the phase's work clock
+ 
+ 	// --- anytime cost objective ---
+ 	// Cost of the last goal reached (GoalCheck), for the NRPA score.

@@ -5169,7 +5169,7 @@ def test_game_solve_hung_solver_is_killed_not_scored(tmp_path, monkeypatch):
     monkeypatch.setattr(game.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError, match="hung"):
         game._solve(tmp_path / "ref.yrpX", [], tmp_path, "t2", 60_000, 1)
-    assert seen["timeout"] == game._hard_limit(60_000) == 240
+    assert seen["timeout"] == game._hard_limit(60_000) == 540   # 4x + 300 since patch 0015
 
 
 def test_games_cli_workers_flag_is_checked(capsys):

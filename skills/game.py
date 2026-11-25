@@ -113,9 +113,10 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-25b"
-METHOD_SINCE = {False: "2026-11-25T17:30:00",    # 2026-11-25b: + a majority of futures
-                True: "2026-11-25T17:30:00"}     # (patch 0014 --reseed) for every kill / lethal verdict     # defence script (DEFENCES = (1,)), no hindsight.
+METHOD = "2026-11-25c"
+METHOD_SINCE = {False: "2026-11-25T18:30:00",    # 2026-11-25c: + patch 0015, budgets count
+                True: "2026-11-25T18:30:00"}     # CPU work (a loaded machine no longer searches less)
+# 2026-11-25b: a majority of futures; 25a: one committed defence script     # (patch 0014 --reseed) for every kill / lethal verdict     # defence script (DEFENCES = (1,)), no hindsight.
 # Before: 2026-11-21c (patches 0011-0013 live, every Trap set, Continuous Spells activated)     # (negates wait for a live target), 0012 (kill
 # keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
 # Continuous Spell activated at end of turn (Scream). Before: {False: "2026-11-20T22:14:00",    # going second: + free sets                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
@@ -373,9 +374,11 @@ _CRASH_RCS = (-11, 139, 255)
 
 
 def _hard_limit(ms):
-    """Seconds before a solver given `ms` counts as hung: its budget twice
-    over plus start-up, so a slow but working search is never cut off."""
-    return 2 * ms // 1000 + 120
+    """Seconds before a solver given `ms` counts as hung: its budget four times
+    over plus start-up, so a slow but working search is never cut off -- since
+    patch 0015 the budget is CPU WORK, which a loaded machine stretches in wall
+    time (20 s of work took 24.7 s beside a full games run, 2026-11-25)."""
+    return 4 * ms // 1000 + 300
 
 
 def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
