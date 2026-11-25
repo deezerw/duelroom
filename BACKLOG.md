@@ -42,11 +42,22 @@ the big steps; this list orders them with the small ideas.
 Every METHOD bump makes stored games "old data", so these land together, and duelpc's
 2026-11-25c `day.sh` queue waits for them (it would go stale at once).
 - [ ] Port patch 0003's arena half (uffd page tracker, 1.88x states) to the PINNED binary
-      (trainer, sweep, every turn-1 solve). First explain `R2V_ARENA_VERIFY=1` "barrier
-      INCOMPLETE: page 1154": a verify that already fails cannot prove the port. Gate:
-      same answers at equal states, more states per CPU-second.
-- [ ] Repeatable `--fire` (two hand traps firing together; unblocks "handtrap pairs").
-- [ ] `--no-activate <card[@zone]>` primitive (for field-piece ranking, Phase 3).
+      (trainer, sweep, every turn-1 solve). Built: `tools/build_pinned_uffd.sh` ->
+      build/combo-solver-uffd (arena.cpp/.h hunks only; tracker off = the pinned search).
+      Gate: `tools/experiments/pinned_uffd_identity.py` (pinned / uffd-off / uffd-on, byte-
+      identical lines at a fixed rollout count, then states at the trainer's wall budget).
+      Then engine.SOLVER_BIN -> it and R2V_ARENA_UFFD=1 in engine.env().
+- [ ] `R2V_ARENA_VERIFY=1` "barrier INCOMPLETE: page 1154" (+2050: `48 00 00 40`, mirror
+      0): one 4-byte write, same in BOTH trackers, so it does not block the port (the
+      identity gate proves the port). A write the mirror never saw; if that page is later
+      marked and restored, the value reverts to 0. Find what lives there (gdb watchpoint).
+- [ ] Repeatable `--fire`: PROBABLY NOT NEEDED (2026-11-25). The games' defender already
+      fires every hand trap it holds (rooted binary, `--opp-respond`), and STAGE13's side.py
+      runs on the games. Only the old pinned `--fire` path (funnel_eval / optimizer /
+      handtrap matrix) is one card, and RunFireTest is ~860 lines of C++ whose pair version
+      is a search per (window1, window2). Ask the user before building.
+- [x] `--no-activate` for THEIR card: not needed -- the rooted defender plays only what its
+      `--opp-respond` lists, so dropping a field piece from that list switches it off.
 - [ ] **Hidden-hand option** (user, 2026-11-25): a visible / hidden hand button. Today
       every search sees your real hand -- even duel mode, whose copy is your real hand PLUS
       one of each hand trap (patch 0010). Hidden = the search copy's hand is REPLACED
@@ -54,7 +65,9 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       `--opp-hand-root`. Wire it to: the games (a per-run choice, stored as its own label
       so hidden and visible are never pooled; button on /games), the kill check, and duel
       mode (default hidden there). Visible stays the default for the games.
-- [ ] QUICK_RESPOND on for Havnis / Kashtira, measured.
+- [ ] QUICK_RESPOND on for Havnis / Kashtira, measured: `tools/experiments/quick_respond_ab.py`
+      (game.kill_check at OTK_X, paired off/on, 102 stored going-first positions hold one;
+      ~18-54 solver-hours: duelpc day).
 - [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
 
 ### Phase 2 -- calibration (duelpc days)
