@@ -409,8 +409,7 @@ def run(dev, cmd, env, timeout_s, push_dirs=(), outdir=None):
 
 # --- ygorl's solves (trainer, starters, pilot) --------------------------------
 
-# shortcut: the pool keeps the server's worker count (engine.DEFAULT_WORKERS) on any
-# device; size it from Device.workers if duelpc should run more solves at once.
+# The pool size for the device is set by daemon.run (engine.DEFAULT_WORKERS).
 def route_ygorl():
     """Send ygorl's `solve_hand` solves to this process's device. Called in
     each pool child before `solve_hand`; a no-op on the server."""

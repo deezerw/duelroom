@@ -2631,7 +2631,10 @@ def run(conn, cmd, args):
     try:
         dev = remote.current()
         if dev.remote and cmd in ROUTED:
-            print(f"solving on {dev.name}")
+            # the whole device: its games run `workers` x 2 solver threads, and these
+            # pools run one single-thread solve per worker (handlab splits the same total)
+            engine.DEFAULT_WORKERS = dev.workers * 2
+            print(f"solving on {dev.name}, {engine.DEFAULT_WORKERS} at once")
             remote.prepare(dev)
         fn(conn, args)
     except remote.DeviceDown as e:
