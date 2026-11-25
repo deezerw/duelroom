@@ -32,16 +32,17 @@ plays in real life, so it is the target deck for every measurement. The STAGE fi
 the big steps; this list orders them with the small ideas.
 
 ### Phase 0 -- server, small
-- [ ] Re-scrape + `snapshot` (drift needs a second data point; last scrape a month old).
+- [x] Re-scrape + `snapshot` 2026-11-25 (129 new lists; `drift Angelechy 2026-10-18 2026-11-25`
+      works, but only 7 lists on one side: noise until more are scraped).
 - [x] `export` best-placing list -- already done (meta_scrape.best_list). Add the
-      tiebreak: among equal placings, the list closest to the archetype's core.
+      tiebreak: among equal placings, the list closest to the archetype's core. DONE 4a15836.
 - [x] Optimizer fires Imperm AND Ash -- the trial records carry `"fire": [10045474,
       14558127]` (2026-10-24). Re-check on the next real optimize run.
 
 ### Phase 1 -- one solver round, ONE METHOD bump (old era relabelled, hidden, never deleted)
 Every METHOD bump makes stored games "old data", so these land together, and duelpc's
 2026-11-25c `day.sh` queue waits for them (it would go stale at once).
-- [ ] Port patch 0003's arena half (uffd page tracker, 1.88x states) to the PINNED binary
+- [x] DONE 0d22697 (live): Port patch 0003's arena half (uffd page tracker, 1.6x states measured) to the PINNED binary
       (trainer, sweep, every turn-1 solve). Built: `tools/build_pinned_uffd.sh` ->
       build/combo-solver-uffd (arena.cpp/.h hunks only; tracker off = the pinned search).
       Gate: `tools/experiments/pinned_uffd_identity.py` (pinned / uffd-off / uffd-on, byte-
@@ -65,6 +66,19 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       deviation by the real defender re-plans from there (duel.py's plan/follow loop);
       (3) stored under its own label, never pooled with visible; button on /games, duel
       mode hidden by default. Expect ~2-4x a game's time.
+      Progress: (1) DONE 5a71336, patch 0016 built to combo-solver-0016, NOT live (goes
+      live with the METHOD bump; visible games do not pass the flag, so it changes
+      nothing for them). Next, (2): `game.play_hidden(template, responses, player, turn,
+      search_args)` -- a DuelSession on the real duel (duel.Live's shape, from a replay
+      instead of a DB row); at the searcher's prompts follow the plan (duel._plan_step:
+      steps over the copy's extra windows); at the defender's, duel.defend on the REAL
+      hand; no plan / off the plan -> re-plan from the current real position
+      (breaking.split_position, `--opp-hand-hide --opp-hand-root <their list's hand
+      traps> --opp-set-root` + `--reseed`, so it knows neither hand nor draws; cap
+      MAX_REPLANS, then close the turn passively). A kill / win is then the REAL playout,
+      not a verdict, so `majority` is not needed in hidden mode. Wire turn1 / turn2 /
+      turn3 / the break through it when `hidden`; a `hidden` label beside device; the
+      button on /games and duel mode (plan_args gains --opp-hand-hide).
 - [ ] QUICK_RESPOND on for Havnis / Kashtira, measured: `tools/experiments/quick_respond_ab.py`
       (game.kill_check at OTK_X, paired off/on, 102 stored going-first positions hold one;
       ~18-54 solver-hours: duelpc day).
