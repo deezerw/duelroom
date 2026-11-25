@@ -17,45 +17,31 @@ rsync -a tools/duelpc/boot-choice.sh tools/duelpc/boot-choice.service deezer@due
        && sudo -n systemctl daemon-reload && sudo -n systemctl enable boot-choice.service' >> $LOG 2>&1 \
   && echo "=== $(date) boot-choice installed ===" >> $LOG
 (
-  # Queue of 2026-11-23 (rewritten 2026-11-21 after METHOD 2026-11-21c went live; the old
-  # steps -- imitation training, the net-prior A/B, turn-1 budget, kill plateau -- are done).
-  # 0. (background, GPU + one core) does the learned net find wins the games' own solver
-  #    missed? 194 no-win lethal turns (tools/ml/net_lethal.py) -- decides Stage 16 step 3b
-  if [ -f results/ml/bc/policy.pt ] && [ -f results/ml/net_lethal/positions.jsonl ]; then (
-    rsync -a skills/__init__.py skills/mcts.py skills/net_prior.py deezer@duelpc.local:duelroom/skills/ \
-      && rsync -a tools/ml/net_lethal.py deezer@duelpc.local:duelroom/tools/ml/ \
-      && rsync -a results/ml/net_lethal/ deezer@duelpc.local:duelroom/results/ml/net_lethal/ \
-      && ssh deezer@duelpc.local 'cd ~/duelroom && YGORL_THIRD_PARTY=$HOME/duelroom/vendor/third_party_merged \
-           ~/duelroom-ml/bin/python tools/ml/net_lethal.py run results/ml/bc 800' >> results/ml/net_lethal.log 2>&1
-    rsync -a deezer@duelpc.local:duelroom/results/ml/net_lethal/results.jsonl results/ml/net_lethal/ 2>/dev/null
-    echo "=== $(date) net-lethal test: $(venv/bin/python tools/ml/net_lethal.py summary 2>&1 | tail -1) ===" >> $LOG
-  ) & fi
-  # 1. the honest going-first baseline on METHOD 2026-11-21c (the 21b games are 'm21b'):
-  #    smoke first (the full run's first slice), audited; the long run only if it is clean
+  # Queue rewritten 2026-11-25 for METHOD 2026-11-25c (one committed defence, a majority of
+  # futures, CPU-work budgets). Done on 2026-11-23 and not repeated: the net-lethal test (net
+  # found 0 of 194), the blunder checker (18 of 95). The four steps the PC went down for come back.
+  # 1. the honest going-first baseline on 2026-11-25c: smoke, audited, then the full run
   venv/bin/python daemon.py games imported Angelechy-Meta 1 2 --device duelpc \
       >> results/ml/duelpc_games_first.log 2>&1
   if venv/bin/python tools/experiments/play_audit.py Angelechy-Meta first duelpc --gate \
        >> results/ml/duelpc_audit.log 2>&1; then
-    echo "=== $(date) going-first smoke audit passed (2026-11-21c) ===" >> $LOG
+    echo "=== $(date) going-first smoke audit passed (2026-11-25c) ===" >> $LOG
     venv/bin/python daemon.py games imported Angelechy-Meta 2 10 --device duelpc \
         >> results/ml/duelpc_games_first.log 2>&1
-    echo "=== $(date) going-first games done (2026-11-21c) ===" >> $LOG
+    echo "=== $(date) going-first games done (2026-11-25c) ===" >> $LOG
   else
     echo "=== $(date) going-first smoke audit FAILED: long run skipped, see results/ml/duelpc_audit.log ===" >> $LOG
   fi
-  # 2. the blunder checker: which decision threw each lethal turn's win (every no-win game)
-  venv/bin/python tools/experiments/blunders.py lethal Angelechy-Meta >> results/experiments/blunders.log 2>&1
-  echo "=== $(date) blunder checker (lethal turns) done ===" >> $LOG
-  # 3. turn 1 falls back to remembered starter boards, picked by look-ahead (needs the tables)
+  # 2. turn 1 falls back to remembered starter boards, picked by look-ahead (tables exist now)
   venv/bin/python tools/experiments/t1_starters.py >> results/experiments/t1_starters.log 2>&1
-  echo "=== $(date) starter-fallback A/B done (or no tables yet) ===" >> $LOG
-  # 4. is our turn 3 converged at 4x (game.T3_X)? 87/89/94% at 1/2/4x
+  echo "=== $(date) starter-fallback A/B done ===" >> $LOG
+  # 3. is our turn 3 converged at 4x (game.T3_X)?
   venv/bin/python tools/experiments/budget_plateau.py --stages t3 --levels 8 >> results/experiments/plateau_t3_8.log 2>&1
   echo "=== $(date) plateau t3 8x done ===" >> $LOG
-  # 5. Stage 13's gate under the honest settings, before any side card is read
+  # 4. Stage 13's gate under the honest settings, before any side card is read
   venv/bin/python tools/experiments/side_gate.py >> results/experiments/side_gate_honest.log 2>&1
   echo "=== $(date) side gate done ===" >> $LOG
-  # 6. last and long, so the PC never idles before STOP (2026-11-21 it ran out at 14:37)
+  # 5. last and long, so the PC never idles before STOP
   venv/bin/python tools/ml/board_data.py 10 180 >> results/ml/boards_run.log 2>&1
   echo "=== $(date) board data done ===" >> $LOG
 ) &
