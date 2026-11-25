@@ -56,7 +56,7 @@ DEVICES = {
 _V = engine.VENDOR
 STATIC = (
     _V / "build" / "combo-solver-rooted" / "bin",
-    _V / "build" / "combo-solver" / "bin",     # the pinned one: trainer, starters, pilot
+    _V / "build" / "combo-solver-uffd" / "bin",   # the pinned one: trainer, starters, pilot
     engine.ROOT / "vendor" / "third_party_merged",
     engine.UPSTREAM_THIRD_PARTY / "CardScripts",
     engine.UPSTREAM_THIRD_PARTY / "BabelCDB",
@@ -436,7 +436,7 @@ def route_ygorl():
         # this child's own heat watch (remote.run waits while it reads hot);
         # only the pause / resume lines reach the job log
         heat_of(dev, log=lambda m: None if m.startswith("temps ") else print(m, flush=True))
-        env = {"YGORL_THIRD_PARTY": str(engine.THIRD_PARTY)}
+        env = {"YGORL_THIRD_PARTY": str(engine.THIRD_PARTY), **engine.ARENA_ENV}
         start = time.monotonic()
         try:
             try:

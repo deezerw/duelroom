@@ -44,7 +44,11 @@ UPSTREAM_THIRD_PARTY = VENDOR / "third_party"
 _SHADOW = ROOT / "vendor" / "third_party_merged"
 THIRD_PARTY = _SHADOW if (_SHADOW / "BabelCDB" / "cards.cdb").exists() \
     else UPSTREAM_THIRD_PARTY
-SOLVER_BIN = VENDOR / "build" / "combo-solver" / "bin" / "combosolver"
+# The pinned search + patch 0003's kernel page tracker (tools/build_pinned_uffd.sh):
+# byte-identical NRPA, 1.6x the states per wall second (pinned_uffd_identity.py,
+# 2026-11-25). The tracker is on only with R2V_ARENA_UFFD=1 (ARENA_ENV).
+SOLVER_BIN = VENDOR / "build" / "combo-solver-uffd" / "bin" / "combosolver"
+ARENA_ENV = {"R2V_ARENA_UFFD": "1"}
 PYTHON = ROOT / "venv" / "bin" / "python"
 # The console script, not `python -m ygorl.cli`: cli.py defines main()
 # but has no __main__ guard, so -m runs the module and exits silently.
@@ -103,6 +107,8 @@ def _export():
     """
     os.environ.setdefault("YGORL_THIRD_PARTY", str(THIRD_PARTY))
     os.environ.setdefault("YGORL_COMBO_SOLVER", str(SOLVER_BIN))
+    for k, v in ARENA_ENV.items():      # in-process ygorl solves inherit it
+        os.environ.setdefault(k, v)
 
 
 _export()
@@ -116,7 +122,7 @@ def env():
     # pointing it at the shadow tree also moves where it looks for the
     # binary. Name it explicitly.
     e["YGORL_COMBO_SOLVER"] = str(SOLVER_BIN)
-    return e
+    return {**e, **ARENA_ENV}
 
 
 def check():

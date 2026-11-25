@@ -135,7 +135,7 @@ STOP_ON_WIN = 4
 # At the games' settings it searches 1.88x the states in the same 60 s, 8/12
 # -> 9/12 wins, none lost (uffd_throughput.py, 2026-11-06). It falls back to
 # the old tracker by itself if userfaultfd is unavailable.
-ARENA_ENV = {"R2V_ARENA_UFFD": "1"}
+ARENA_ENV = engine.ARENA_ENV
 GAMES = Path(__file__).resolve().parent.parent / "results" / "games"
 # Patch 0007: cards whose single-target effect our searches may only point at
 # an OPPONENT's card. S:P Little Knight's summon banish, with nothing of theirs

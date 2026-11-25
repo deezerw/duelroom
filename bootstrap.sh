@@ -104,6 +104,10 @@ ok "ygorl installed"
 
 say "building the combo solver"
 ( cd "$VENDOR" && bash tools/build_combo_solver.sh )
+# the pinned search + the kernel page tracker (engine.SOLVER_BIN), and the rooted
+# solver the games, duels and going second run on (game.ROOTED_BIN)
+bash "$ROOT/tools/build_pinned_uffd.sh" >/dev/null
+bash "$ROOT/tools/build_rooted_solver.sh" >/dev/null
 ok "solver built"
 
 say "merging the card database"

@@ -7449,3 +7449,14 @@ def test_export_breaks_placement_ties_by_core_held():
     conn.executemany("INSERT INTO deck_cards VALUES (?,?,?)",
                      [(1, c, "main") for c in (10, 11, 12)] + [(2, 10, "main"), (2, 99, "main")])
     assert ms.best_list(conn, "a")["id"] == 1
+
+
+def test_pinned_solver_runs_with_the_kernel_page_tracker():
+    """The trainer, sweep and turn-1 solves ran the pinned binary on the old
+    SIGSEGV + mprotect tracker (1.6x fewer states per second than patch 0003's
+    uffd tracker, measured 2026-11-25). The tracker is env-gated, so both the
+    binary and the env var must reach every ygorl subprocess, local and remote."""
+    from skills import engine, game
+    assert engine.SOLVER_BIN.parent.parent.name == "combo-solver-uffd"
+    assert engine.env().get("R2V_ARENA_UFFD") == "1"
+    assert game.ARENA_ENV is engine.ARENA_ENV
