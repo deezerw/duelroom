@@ -45,6 +45,14 @@ _test_db = _db_dir / "duelroom.db"
 if _live_db.exists():
     _src, _dst = _sqlite3.connect(_live_db), _sqlite3.connect(_test_db)
     _src.backup(_dst)
+    # the snapshot's active deck may be one the pinned copies lack (the user made
+    # blue-eyes-maestro-primite-nov-26 on 2026-11-24 and pages for it then 404'd):
+    # fall back to a pinned deck, as a fresh install would
+    _row = _dst.execute("SELECT value FROM meta WHERE key='active_deck'").fetchone() \
+        if _dst.execute("SELECT name FROM sqlite_master WHERE name='meta'").fetchone() else None
+    if _row and not (_decks / f"{_row[0]}.ydk").exists():
+        _dst.execute("UPDATE meta SET value='imported' WHERE key='active_deck'")
+        _dst.commit()
     _dst.close()
     _src.close()
 os.environ["DUELROOM_DB"] = str(_test_db)

@@ -113,9 +113,9 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-25a"
-METHOD_SINCE = {False: "2026-11-25T12:00:00",    # 2026-11-25a, both sides: one committed
-                True: "2026-11-25T12:00:00"}     # defence script (DEFENCES = (1,)), no hindsight.
+METHOD = "2026-11-25b"
+METHOD_SINCE = {False: "2026-11-25T17:30:00",    # 2026-11-25b: + a majority of futures
+                True: "2026-11-25T17:30:00"}     # (patch 0014 --reseed) for every kill / lethal verdict     # defence script (DEFENCES = (1,)), no hindsight.
 # Before: 2026-11-21c (patches 0011-0013 live, every Trap set, Continuous Spells activated)     # (negates wait for a live target), 0012 (kill
 # keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
 # Continuous Spell activated at end of turn (Scream). Before: {False: "2026-11-20T22:14:00",    # going second: + free sets                 True: "2026-11-20T22:14:00"}     # going first: + T3_X, free sets
@@ -208,6 +208,43 @@ def _bin_has(flag):
         _bin_help[key] = subprocess.run([key, "--help"], capture_output=True,
                                         text=True).stdout if ROOTED_BIN.exists() else ""
     return flag in _bin_help[key]
+
+
+# Futures (patch 0014 --reseed; user chose, 2026-11-25, from the flaw audit "the AI
+# can see the future"): the engine is deterministic and the search restores
+# snapshots that hold the RNG, so every rollout saw the REAL draws, mills and
+# shuffles -- a kill that needed Purulia to draw the right card, a mill that
+# needed the right top 3, all "known". A kill check / lethal search now counts
+# only if a MAJORITY of futures agree: the real one, then reseeded ones (the
+# core's RNG reseeded and both Decks shuffled at the root) until FUTURES // 2 + 1
+# agree. Within each future the searcher still knows that future: this removes
+# lucky-future results, it does not make the search reason about chance. A
+# reseeded solution cannot be replayed in the real future: under --goal-win the
+# solver writes only verified wins, so its existence is the verdict.
+FUTURES = 3
+FUTURES_LIVE = None          # None: when ROOTED_BIN has --reseed
+
+
+def _futures_on():
+    return FUTURES > 1 and (FUTURES_LIVE if FUTURES_LIVE is not None else _bin_has("--reseed"))
+
+
+def majority(first_ok, solve_more):
+    """The verdict of a MAJORITY of futures: `first_ok` the real one's, then
+    `solve_more(i)` (a truthy result = yes) for reseeded future i = 1, 2, ...,
+    stopping as soon as FUTURES // 2 + 1 agree. Without futures: `first_ok`."""
+    if not _futures_on():
+        return bool(first_ok)
+    need = FUTURES // 2 + 1
+    votes, i = [bool(first_ok)], 0
+    while votes.count(True) < need and votes.count(False) < need and len(votes) < FUTURES:
+        i += 1
+        votes.append(bool(solve_more(i)))
+    return votes.count(True) >= need
+
+
+def reseed_args(seed, i):
+    return ["--reseed", str((int(seed) * 7919 + i) % (2 ** 63) or 1)]
 
 
 def _negate_live():
@@ -828,10 +865,11 @@ def kill_check(start, prefix, enemy_target, our_respond, enemy_deck, scratch, ms
     base = ["--start", str(start), "--root", str(prefix), "--no-ref",
             "--target", enemy_target, "--player", "1", "--turns", "2"] + own_turn_args(enemy_deck)
     for v in DEFENCES:
-        k = _solve(prefix, base + defence_args(our_respond, v)
-                   + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
-                   Path(scratch), f"look-h{v}", ms, seed)
-        if not (k["solution"] and _winner(k["solution"]) == 1):
+        kargs = base + defence_args(our_respond, v) + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)]
+        k = _solve(prefix, kargs, Path(scratch), f"look-h{v}", ms, seed)
+        real = bool(k["solution"] and _winner(k["solution"]) == 1)
+        if not majority(real, lambda i: _solve(prefix, kargs + reseed_args(seed, i), Path(scratch),
+                                               f"look-h{v}-f{i}", ms, seed + i)["solution"]):
             return False
     return True
 
@@ -959,11 +997,14 @@ def turn2(start, prefix, enemy_target, our_respond, scratch, ms, seed,
         best = None
         for v in defences:
             label = "t2-otk" if v == defences[0] else f"t2-otk-h{v}"
-            k = _solve(prefix, base + defence_args(our_respond, v) + gy_want_args(our_deck)
-                       + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)],
-                       scratch, label, otk_ms, seed)
-            if k["solution"] and _winner(k["solution"]) == 1:
-                first_kill = first_kill or str(k["solution"])
+            kargs = (base + defence_args(our_respond, v) + gy_want_args(our_deck)
+                     + ["--goal-win", "--stop-on-win", str(STOP_ON_WIN)])
+            k = _solve(prefix, kargs, scratch, label, otk_ms, seed)
+            real = bool(k["solution"] and _winner(k["solution"]) == 1)
+            if majority(real, lambda i: _solve(prefix, kargs + reseed_args(seed, i), scratch,
+                                               f"{label}-f{i}", otk_ms, seed + i)["solution"]):
+                if real:      # a kill only the reseeded futures found has no line here
+                    first_kill = first_kill or str(k["solution"])
                 continue
             taken = _damage(prefix, k["approach"], 1)
             if best is None or taken < best[0]:
@@ -1024,8 +1065,11 @@ def turn3(start, prefix, our_target, enemy_respond, scratch, ms, seed,
             + list(extra)
         r = _solve(prefix, args, scratch, label, ms, seed, binary=binary,
                    env_extra=env_extra)
-        if r["solution"] and _winner(r["solution"]) == player:
-            out = {"won": True, "damage": None, "line": str(r["solution"]),
+        real = bool(r["solution"] and _winner(r["solution"]) == player)
+        if majority(real, lambda i: _solve(prefix, args + reseed_args(seed, i), scratch, f"{label}-f{i}",
+                                           ms, seed + i, binary=binary, env_extra=env_extra)["solution"]):
+            # a win only the reseeded futures found has no line in the real one
+            out = {"won": True, "damage": None, "line": str(r["solution"]) if real else None,
                    "defence": v}
             continue
         return {"won": False, "damage": _damage(prefix, r["approach"], player),

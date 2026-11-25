@@ -5754,6 +5754,7 @@ def test_defence_family_their_turn_keeps_the_script_that_holds(monkeypatch, tmp_
             return {"solution": None, "approach": f"appr-vs-{until}", "log": "l"}
         return {"solution": None, "approach": None, "log": tmp_path / "x.log"}
 
+    monkeypatch.setattr(game, "FUTURES_LIVE", False)   # the family's mechanics, one future
     monkeypatch.setattr(game, "_solve", fake_solve)
     monkeypatch.setattr(game, "_winner", lambda path: 1 if "kill" in path else None)
     monkeypatch.setattr(game, "_damage", lambda prefix, approach, player:
@@ -7285,6 +7286,31 @@ def test_duel_respond_modes_none_and_select_cards():
     assert duel._auto_pass(row("select", [ash]), win(sp, ash)) is None, "Ash is"
     idle = NS(decision=NS(name="MSG_SELECT_IDLECMD"), actions=[NS(kind="pass", card=None)])
     assert duel._auto_pass(row("none"), idle) is None, "only response windows"
+
+
+def test_a_verdict_needs_a_majority_of_futures(monkeypatch):
+    """Patch 0014 (user chose, 2026-11-25: "the AI can see the future"): a kill
+    check / lethal search counts only if a majority of futures agree -- the real
+    one, then reseeded ones, stopping as soon as FUTURES // 2 + 1 agree."""
+    from skills import game
+
+    monkeypatch.setattr(game, "FUTURES_LIVE", True)
+    monkeypatch.setattr(game, "FUTURES", 3)
+    asked = []
+    def more(answers):
+        def f(i):
+            asked.append(i)
+            return answers[i - 1]
+        return f
+    assert game.majority(True, more([True])) is True and asked == [1], "two agree: stop"
+    asked.clear()
+    assert game.majority(True, more([False, False])) is False and asked == [1, 2], "a lucky real future"
+    asked.clear()
+    assert game.majority(False, more([True, True])) is True and asked == [1, 2]
+    monkeypatch.setattr(game, "FUTURES_LIVE", False)
+    asked.clear()
+    assert game.majority(True, more([False, False])) is True and asked == [], "off: the real future"
+    assert game.reseed_args(1000, 1)[0] == "--reseed" and game.reseed_args(1000, 1) != game.reseed_args(1000, 2)
 
 
 def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):

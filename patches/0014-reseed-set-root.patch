@@ -1,0 +1,145 @@
+--- combo-solver-rooted/solver-patched/duel.cpp	2026-11-20 19:20:32.794015698 -0500
++++ combo-solver-next/solver-patched/duel.cpp	2026-11-25 06:08:26.303390012 -0500
+@@ -1,4 +1,25 @@
+ #include "duel.h"
++// The core's own duel / field (patch 0014: reseed and set-card swap at the root).
++// Quoted relative includes resolve next to the including file, so these are
++// ocgcore's, never this directory's duel.h.
++#include "../ocgcore/duel.h"
++#include "../ocgcore/field.h"
++#include "../ocgcore/card.h"
++
++namespace {
++// duel::random is private and the core has no reseed: an explicit template
++// instantiation may name a private member (the standard "member pointer through
++// instantiation" rule), so the patch reaches it without editing the pinned core.
++template <typename Tag, typename Tag::type M> struct Rob {
++	friend typename Tag::type get(Tag) { return M; }
++};
++using CoreRng = RNG::Xoshiro256StarStar;
++struct DuelRandom {
++	using type = CoreRng duel::*;
++	friend type get(DuelRandom);
++};
++template struct Rob<DuelRandom, &duel::random>;
++}
+ 
+ #include <cstring>
+ 
+@@ -211,6 +232,40 @@
+ 			}
+ 		}
+ 	}
++	// patch 0014: the set cards the searcher assumes, then a fresh random future
++	if(yrp.root_set_card || yrp.root_reseed) {
++		ArenaScope scope(arena);
++		auto* pd = static_cast<::duel*>(handle);
++		auto* fld = pd->game_field;
++		if(yrp.root_set_card) {
++			const uint8_t t = yrp.root_hand_team;
++			for(uint8_t seq = 0; seq < 5; ++seq) {
++				card* c = fld->player[t].list_szone[seq];
++				if(!c || !(c->current.position & POS_FACEDOWN))
++					continue;
++				fld->remove_card(c);
++				if(!ExecLua("Debug.AddCard(" + std::to_string(yrp.root_set_card) + "," +
++							std::to_string(t) + "," + std::to_string(t) + ",LOCATION_SZONE," +
++							std::to_string(seq) + ",POS_FACEDOWN)", "opp_set_root")) {
++					error = "--opp-set-root: Debug.AddCard failed";
++					return false;
++				}
++			}
++		}
++		if(yrp.root_reseed) {
++			uint64_t z = yrp.root_reseed;
++			auto mix = [&z]() {                 // splitmix64: four words of state from one seed
++				z += 0x9E3779B97F4A7C15ULL;
++				uint64_t x = z;
++				x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
++				x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
++				return x ^ (x >> 31);
++			};
++			pd->*get(DuelRandom{}) = RNG::Xoshiro256StarStar({mix(), mix(), mix(), mix()});
++			for(uint8_t p = 0; p < 2; ++p)
++				fld->shuffle(p, LOCATION_DECK);
++		}
++	}
+ 	return true;
+ }
+ 
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-21 16:46:35.403680832 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-25 06:06:59.655277715 -0500
+@@ -1501,6 +1501,9 @@
+ 	std::vector<uint32_t> opp_key;
+ 	// --opp-gy-want <code|code...> (patch 0013).
+ 	std::vector<uint32_t> opp_gy_want;
++	// --reseed <n> / --opp-set-root <code> (patch 0014).
++	uint64_t reseed = 0;
++	uint32_t opp_set_root = 0;
+ 	// The domain in TURNS (--turns): 0/1 = one turn (historical), 2 = the line
+ 	// crosses the opponent's turn (quick windows only).
+ 	uint64_t turns = 0;
+@@ -2051,6 +2054,10 @@
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+ 				"                     defender's target pick takes one over any other (0012)\n"
++				"  --reseed <n>       once --root has replayed, reseed the core's RNG and shuffle\n"
++				"                     both Decks: the search does not know the real future (0014)\n"
++				"  --opp-set-root <c> once --root has replayed, each face-down card in the\n"
++				"                     OPPONENT's Spell & Trap Zone becomes this card, set (0014)\n"
+ 				"  --opp-gy-want <c>  the defender's cards that profit from the GY: given first\n"
+ 				"                     when it must send its own card to the GY (0013)\n"
+ 				"  --opp-branches <d> no search: replay the line (the positional replay,\n"
+@@ -2567,6 +2574,12 @@
+ 		} else if(a == "--guard-keep") {
+ 			const char* v = next("--guard-keep"); if(!v) return false;
+ 			o.guard_keep_specs.emplace_back(v);
++		} else if(a == "--reseed") {
++			const char* v = next("--reseed"); if(!v) return false;
++			o.reseed = std::strtoull(v, nullptr, 10);
++		} else if(a == "--opp-set-root") {
++			const char* v = next("--opp-set-root"); if(!v) return false;
++			o.opp_set_root = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
+ 		} else if(a == "--opp-hold-until") {
+ 			const char* v = next("--opp-hold-until"); if(!v) return false;
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+@@ -11410,6 +11423,22 @@
+ 			std::printf("  opp hand at root  : %zu card(s) added to player %d's hand "
+ 						"(--opp-hand-root)\n", sy->root_hand.size(), 1 - opt.target_player);
+ 		}
++		if(opt.reseed || opt.opp_set_root) {          // patch 0014
++			if(opt.root_file.empty()) {
++				std::printf("!! --reseed / --opp-set-root need --root\n");
++				return 1;
++			}
++			Replay* sy = const_cast<Replay*>(start_yrp);
++			sy->root_reseed = opt.reseed;
++			sy->root_set_card = opt.opp_set_root;
++			sy->root_hand_team = static_cast<uint8_t>(1 - opt.target_player);
++			if(opt.opp_set_root)
++				std::printf("  opp set at root   : player %d's face-down Spell/Traps -> %u "
++							"(--opp-set-root)\n", 1 - opt.target_player, opt.opp_set_root);
++			if(opt.reseed)
++				std::printf("  reseed at root    : RNG %llu, both Decks shuffled (--reseed)\n",
++							(unsigned long long)opt.reseed);
++		}
+ 		if(start_yrp->decks.size() <= static_cast<size_t>(opt.target_player)) {
+ 			std::printf("!! the starting replay carries no deck "
+ 									"for player %d.\n", opt.target_player);
+--- combo-solver-rooted/solver-patched/replay.h	2026-11-20 19:20:32.793015674 -0500
++++ combo-solver-next/solver-patched/replay.h	2026-11-25 06:06:43.271878276 -0500
+@@ -79,6 +79,14 @@
+ 	// your real hand). Every duel set up from this replay gets them.
+ 	std::vector<uint32_t> root_hand;
+ 	uint8_t root_hand_team{1};
++	// duelroom patch 0014, applied at the root after root_hand:
++	// root_reseed != 0 -- the core's RNG is reseeded and both Decks shuffled: the
++	// search no longer knows the duel's real future (its draws, mills, shuffles);
++	// root_set_card != 0 -- each face-down card in `root_hand_team`'s Spell & Trap
++	// Zone (columns 1-5) is replaced by this card, set face-down in the same zone:
++	// the card the searcher ASSUMES a set card is (duel mode: your most dangerous).
++	uint64_t root_reseed{};
++	uint32_t root_set_card{};
+ 
+ private:
+ 	std::unique_ptr<Replay> yrp;

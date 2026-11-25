@@ -515,6 +515,13 @@ budgets and searched defences come before any side-card comparison.
   turn (`free_sets`, Scream). Measured: 0011 3 saved / 0 lost of 49; 0012 0 / 0 of 60 (kept: it also
   makes the enemy hit OUR kill keys); 0013 unmeasured; QUICK_RESPOND (Havnis/Kashtira) still off.
   Both 2026-11-21b sections (going first duelpc, going second server) are relabelled `m21b`.
+- **METHOD 2026-11-25b (user chose all four fixes from the flaw audit, 2026-11-25):** one committed
+  defence script (`DEFENCES = (1,)`, no hindsight); every kill check / lethal verdict needs a
+  MAJORITY of futures (`game.majority`, patch 0014 `--reseed`: the real future, then reseeded RNG +
+  shuffled Decks); the duel AI plans your face-down cards as your most dangerous settable card
+  (`duel.assumed_set_card`, `--opp-set-root`). Hands stay visible in the games (user chose A).
+  Still clairvoyant inside each future and on our own turn 1 (its lines are solved knowing the
+  mills). Live solver = patches 0002-0014 (`combo-solver-rooted-pre0014` kept). Rollout budgets: next.
 - **Old data (not valid)** (user, 2026-11-21: flag, don't delete): every relabelled era in
   `web/views.OLD_SECTIONS` (kill1x, endgame-t1, brk1x, gift, m21b) shows only on
   `/games/<deck>/old`, never in the regular /games spot; kept for history and the AI log.

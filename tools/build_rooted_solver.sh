@@ -40,6 +40,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0013: --opp-gy-want, at a "send to the GY" selection of its own cards the defender gives
 # one that profits from it (Sulliek's cost sent Sequence over Reinoheart, 2026-11-21).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0013-gy-want.patch" >&2)
+# 0014: --reseed (a fresh random future at the root: the search no longer knows the real
+# draws / mills) and --opp-set-root (the opponent's face-down cards become an assumed card).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0014-reseed-set-root.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -56,4 +59,5 @@ grep -q -- "--opp-hand-root" <<<"$help" || { echo "built binary lacks --opp-hand
 grep -q -- "--opp-negate" <<<"$help" || { echo "built binary lacks --opp-negate" >&2; exit 1; }
 grep -q -- "--opp-key" <<<"$help" || { echo "built binary lacks --opp-key" >&2; exit 1; }
 grep -q -- "--opp-gy-want" <<<"$help" || { echo "built binary lacks --opp-gy-want" >&2; exit 1; }
+grep -q -- "--reseed" <<<"$help" || { echo "built binary lacks --reseed" >&2; exit 1; }
 echo "$dst/bin/combosolver"
