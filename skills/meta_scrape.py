@@ -695,10 +695,21 @@ def best_list(conn, tag, legal=None):
     ).fetchall()
     if not rows:
         return None
+    # Among equal placings, the list holding most of the core: a hybrid
+    # (branded.ydk) placed as well as a pure list is a worse stand-in.
+    core = {r[0] for r in conn.execute(
+        """SELECT card_id FROM inclusion WHERE archetype = ? AND format = ? AND section = 'main'
+              AND pct_lists >= ?""", (tag, DEFAULT_FORMAT, CORE_THRESHOLD))}
+
+    def core_held(deck_id):
+        return len(core & {r[0] for r in conn.execute(
+            "SELECT card_id FROM deck_cards WHERE deck_id = ? AND section = 'main'",
+            (deck_id,))}) if core else 0
+
     return sorted(
         rows,
         key=lambda r: (bool(legal) and not legal(r["id"]),
-                       placement_rank(r["placement"]),
+                       placement_rank(r["placement"]), -core_held(r["id"]),
                        -(_date_key(r["deck_date"])), r["id"]),
     )[0]
 

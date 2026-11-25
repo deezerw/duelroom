@@ -2347,6 +2347,9 @@ def test_export_ranks_by_placement_not_scrape_order():
         CREATE TABLE decks (id INTEGER PRIMARY KEY, title TEXT,
                             placement TEXT, deck_date TEXT);
         CREATE TABLE deck_tags (deck_id INTEGER, tag TEXT);
+        CREATE TABLE inclusion (archetype TEXT, format TEXT, card_id INTEGER,
+                                section TEXT, pct_lists REAL);
+        CREATE TABLE deck_cards (deck_id INTEGER, card_id INTEGER, section TEXT);
     """)
     rows = [(1, "scraped first, did badly", "Top 64", "2026-01-01"),
             (2, "the winner", "Winner", "2026-01-02"),
@@ -5082,6 +5085,9 @@ def test_export_prefers_a_legal_list_over_a_better_placing_banned_one():
         CREATE TABLE decks (id INTEGER PRIMARY KEY, title TEXT,
                             placement TEXT, deck_date TEXT);
         CREATE TABLE deck_tags (deck_id INTEGER, tag TEXT);
+        CREATE TABLE inclusion (archetype TEXT, format TEXT, card_id INTEGER,
+                                section TEXT, pct_lists REAL);
+        CREATE TABLE deck_cards (deck_id INTEGER, card_id INTEGER, section TEXT);
     """)
     conn.executemany("INSERT INTO decks VALUES (?,?,?,?)",
                      [(1, "banned winner", "Winner", "2026-01-02"),
@@ -7416,3 +7422,30 @@ def test_ygorl_solves_follow_the_jobs_device(monkeypatch, tmp_path):
     exe.chmod(0o755)
     run = batch.run_solver(Req(), WD(), out, binary=exe)
     assert seen == [("duelpc", out)] and run.returncode == 0 and run.solutions == []
+
+
+def test_export_breaks_placement_ties_by_core_held():
+    """Two Winners: the hybrid (holds 1 of the 3 core cards) must lose to the
+    pure list even though it is newer -- branded.ydk was such a hybrid."""
+    import sqlite3
+    from skills import meta_scrape as ms
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE decks (id INTEGER PRIMARY KEY, title TEXT,
+                            placement TEXT, deck_date TEXT);
+        CREATE TABLE deck_tags (deck_id INTEGER, tag TEXT);
+        CREATE TABLE inclusion (archetype TEXT, format TEXT, card_id INTEGER,
+                                section TEXT, pct_lists REAL);
+        CREATE TABLE deck_cards (deck_id INTEGER, card_id INTEGER, section TEXT);
+    """)
+    conn.executemany("INSERT INTO decks VALUES (?,?,?,?)",
+                     [(1, "pure", "Winner", "2026-01-01"),
+                      (2, "hybrid, newer", "Winner", "2026-02-01")])
+    conn.executemany("INSERT INTO deck_tags VALUES (?,?)", [(1, "a"), (2, "a")])
+    conn.executemany("INSERT INTO inclusion VALUES (?,?,?,?,?)",
+                     [("a", ms.DEFAULT_FORMAT, c, "main", 1.0) for c in (10, 11, 12)])
+    conn.executemany("INSERT INTO deck_cards VALUES (?,?,?)",
+                     [(1, c, "main") for c in (10, 11, 12)] + [(2, 10, "main"), (2, 99, "main")])
+    assert ms.best_list(conn, "a")["id"] == 1
