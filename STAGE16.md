@@ -51,6 +51,12 @@ that uses the net.
        states/s first -- one turn is ~150 decisions);
    (b) the net's policy as the starting weights of the C++ solver's NRPA rollouts (a solver
        patch; Stage 12's "move prior"), batched GPU inference across the 8 solver threads.
+       (Folded in from the old Stage 12, 2026-11-25: seed NRPA's root policy from the net
+       once per solve first, then the first N plies of each rollout; inference via ONNX
+       Runtime inside the solver as a patch like 0003-0005. Gate: paired, equal wall time,
+       the stored turn-1 positions -- goal reached and lost-on-turn-2; expert iteration
+       (solve with the prior, retrain on the better lines) only if round one gains.
+       Caution: `--adapt` was useless at equal time; the net must prove it generalises.)
    Keep whichever finds wins/boards faster. Success = the same converged result in less time
    (cheaper 16x kill checks and 8x breaks), or a better result at the same time.
 4. **Value net.** Train the critic on outcome labels only: kill-check outcome + effort (time

@@ -25,79 +25,40 @@ Work queue for the autonomous loop. **Read this first every iteration.**
 
 ## NOW
 
-- [ ] A DRAWS LADDER, the way `ladder` calibrates the budget. Measured: four draws
-      buy +0.10 mean interruptions on despia (2.50 -> 2.60) for 2.6x the solver time,
-      and one hand in ten improved -- but on an elfnote hand the same machinery went
-      from the library's 4 to 5 int / 4 neg. Two decks, opposite answers, so `DRAWS`
-      cannot have one right value. Report, per deck, the quality/CPU curve over
-      draws 1..4 and store it beside the budget ladder.
+The stages (STAGE11/13/15/16.md) are the big work; these are the smaller ideas, all
+approved by the user 2026-11-25. Grouped, not ordered.
 
+### AI play
+- [ ] **Pick our turn-1 board by THEIR turn-2 kill check** (the "own-turn defences" idea):
+      no search looks past its own turn today (`--turns` = the current turn). Choosing per
+      position by the kill check measured 80% -> 90% boards surviving, at 3x the turn-1 +
+      kill-check cost. Overlaps STAGE15 step 2 / STAGE11 step 4 -- build it there.
+- [ ] QUICK_RESPOND for Havnis / Kashtira is still off: turn it on, measure, bump METHOD.
+- [ ] Untried solver levers: `--options` macros, a per-starter `--adapt` corpus, `--ctx-shrink`.
 
-- [x] DONE 2026-10-26 — FIX the going-second formulation. Root cause found and it was
-      the harness, not the solver's seat logic: the start replay went in as the
-      POSITIONAL argument (a template), so the solver built a FRESH duel with both
-      fields empty, and `--deck`/`--hand` reach side a while `--player 1` searched
-      side b. Rebuilt on `--start`/`--approach` with `check_root` verifying the
-      position. The SEARCH from a resumed root is still the blocker and is now a
-      two-line repro (turn 1 player 0 solves; turn 2 player 1 and turn 3 player 0 do
-      not), so `second`/`rank` stay unsupported and say so. `gauntlet` now ranks with
-      `rank_boards` off the measured handtrap matrix. ISSUES.md #4 and #69.
+### Solver speed / correctness
+- [ ] Port patch 0003's arena half (uffd page tracker, 1.88x states) to the PINNED binary:
+      the trainer, sweep and every turn-1 solve still use the old tracker. Biggest saving left.
+- [ ] `R2V_ARENA_VERIFY=1` reports "barrier INCOMPLETE: page 1154" with both trackers:
+      pre-existing, unexplained.
+- [ ] Repeatable `--fire`, so two hand traps can be tested firing together (today only one;
+      `--opp-hand` holds the second without firing it).
+- [ ] Move `second`, `gauntlet.rank` and the old side plan onto the rooted binary (`--root`),
+      or delete them: they are UNSUPPORTED on the pinned one. (STAGE13 replaces the side plan.)
+- [ ] Budgets in work, not wall time: patch 0015 counts CPU time; a rollout count would also
+      make runs reproducible. Needs a ladder per deck.
 
-- [ ] EXTEND the board ranking to FIELD pieces. `rank_boards` only measures what a
-      board holds in HAND, because `--fire` plays a card from the opponent's hand —
-      so three candidate boards differing only in their field negates all scored
-      identically on the first run, and the command had to say it could not separate
-      them. The candidate primitive is `--no-activate <their card[@zone]>`: a negate
-      on your board is "the opponent loses one activation of your choosing", so
-      forbidding each activation of their line in turn measures which of their cards
-      are critical. That profile is per DECK, not per board, so it is computed once
-      and reused — and it is the same shape as the handtrap matrix. Cost is one solve
-      per (deck, hand, candidate activation); launch it as a background sweep.
-
-- [ ] `--max-rollouts` instead of a wall-clock budget. A 60 s budget does less work
-      when the box is busy, so two sweeps are not comparable unless the machine was
-      equally loaded -- and the sweep is now `nice 19`, which makes that worse, not
-      better. A rollout count is load-independent AND reproducible. Needs a ladder
-      run to calibrate the count per deck; do it when the CPU is free.
-
-
-- [ ] RE-RUN the 40-hand board library with the multi-draw ladder. Everything in
-      `results/boards*.jsonl` was built one draw per goal and capped at a pair, so
-      every stored board is a floor, not a best. Measured on one elfnote hand: the
-      library says 4 interruptions; 32 draws at a QUARTER of the budget found 10
-      distinct boards topping out at 5 int / 4 neg. `targets`, `threats`, `second`,
-      `matrix` and `optimize` all read this file.
-
-- [x] DROPPED 2026-10-26 — "point `gauntlet` at the real thing" assumed the
-      going-second path. It no longer uses one: `rank_boards` reads the measured
-      matrix, so the budget and the hand count that matter are the MATRIX's (40
-      hands per cell), not the gauntlet's. `branded.ydk` being a weak list still
-      matters there and is the `export` item below.
-
-- [ ] `export` picks whichever list was scraped FIRST (`ORDER BY d.id LIMIT 1`), not
-      a representative or best-placing one. That is how `branded.ydk` ended up a
-      Branded/Blitzclique hybrid with no Branded Fusion that averages 1.0
-      interruptions over 40 hands and drags the whole library down. Rank by placement,
-      or by distance from the archetype's inclusion profile.
-
-
-- [ ] VERIFY the running optimizer actually fires Imperm AND Ash — check a trial
-      RECORD's `fire` keys, not the targets file. The file lies; funnel_eval drops
-      every key but `targets`.
-
-
-
-- [ ] Keep adding a regression test whenever a bug is fixed. `venv/bin/pytest tests/ -q`
-      runs in under a second; there is no excuse for skipping it.
-
-- [ ] Nibiru count and Maxx "C" cost. NOT nearly free as STAGE3 claimed — the solver
-      prints summon counts to stdout but nothing lands in the JSONL (no 'summon' key
-      anywhere in a record). Exact counts need the line replayed through ygorl and
-      summon actions counted; a proxy from the end board would undercount materials
-      sent to GY, and a plausible-but-wrong number is the failure mode this project
-      keeps hitting. Do it properly when CPU is free.
-- [ ] Re-scrape on a later day and `snapshot` again — drift needs a second data point.
-      Baseline `baseline-2026-10-18` is stored (5599 rows).
+### Measurement / data
+- [ ] A DRAWS LADDER like `ladder`: four draws helped elfnote, not fiendsmith, so `DRAWS`
+      has no single right value. Per deck, quality/CPU over draws 1..4.
+- [ ] EXTEND board ranking to FIELD pieces (`rank_boards` only measures hand pieces);
+      candidate primitive `--no-activate <their card[@zone]>`.
+- [ ] RE-RUN the 40-hand board library with multi-draw (every stored board is a floor).
+- [ ] `export` picks the FIRST scraped list (`ORDER BY d.id LIMIT 1`): rank by placement /
+      closeness to the archetype's core (`branded.ydk` is a hybrid that drags the library).
+- [ ] VERIFY the optimizer fires Imperm AND Ash (a trial RECORD's `fire` keys, not the file).
+- [ ] Re-scrape on a later day and `snapshot` again -- drift needs a second data point.
+- [ ] Keep adding a regression test with every bug fix (`venv/bin/pytest tests/ -q`).
 
 ## BLOCKED / WON'T DO
 

@@ -404,25 +404,28 @@ fairness check; one row per game with `outcome` (`win` / `no_win` / `lost_t2` /
 
 ## Implementation Stages
 
-Work through these in order. Each stage is in its own file — delete the file once that
-stage is complete and verified.
+Each open stage is in its own file — delete the file once that stage is complete and
+verified. Smaller ideas that are not a stage live in `BACKLOG.md` "NOW".
 
-1. ~~Meta ingestion & card database~~ — **done** (card_db, meta_scrape, deck, stats, daemon)
-2. ~~Engine harness~~ — **done** (`engine.py` drives ygorl + ygo-combo-solver)
-3. ~~Validation gate, scale, storage~~ — **done** (`gate.py`; gate passed, board library built)
-4. ~~Scenario suite~~ — **done** (`scenarios.py`, `breaking.py`)
-5. ~~Optimizer~~ — **done** (`optimizer.py`; flex-slot hill climb + side plan)
-6. ~~Playmat line viewer~~ — **done** (`playback.py`, `/watch/...`; Watch buttons on pilot + drill)
-7. ~~Deck trainer~~ — **done** (`trainer.py`, `/train`; best-line trainer, see below)
-8. `STAGE8.md` — Matchup testing: top-3 boards per hand, impact score per card, shared enemy hands, 10 runs, locals weighting
-9. `STAGE9.md` — Finish the game: win rate by turn 3, duds — **gates passed, core built** (`game.py`, `/games`), impact score built; going-second left
-10. ~~Tests on another machine~~ — **done** (`remote.py`; duelpc runs games jobs, results keyed by device, Wake-on-LAN; see "Tests on another machine")
-11. `STAGE11.md` — Pick the turn-1 board that survives: away-day runs on duelpc, board data, a learned board choice, paired A/B (prerequisites done)
-12. `STAGE12.md` — A move prior for the search (GPU), only if Stage 11 pays off
-13. `STAGE13.md` — Side cards: paired in/out swaps on the games harness, going first and second, with intervals (replaces the broken `optimizer.side_plan`)
-14. `STAGE14.md` — A searched defender: best replies on the attacker's line, then the attacker re-plans (scripts proved readable)
-15. `STAGE15.md` — Turn 1 that adapts to disruption: several goals asked, the board with the most live interruptions kept, free cards played
-16. `STAGE16.md` — An AlphaZero-style player: imitation from our solver lines, the net as a search prior, a value net, then self-play (on ygorl's nets)
+**Open, in the user's priority order (cleanup 2026-11-25):**
+
+- `STAGE13.md` — **Side cards** (important): paired in/out swaps on the games harness,
+  going first and second, with intervals (replaces the broken `optimizer.side_plan`)
+- `STAGE15.md` — **Turn 1 that adapts to disruption** (important): several goals asked,
+  the board with the most live interruptions kept, free cards played
+- `STAGE16.md` — **An AlphaZero-style player** (important): imitation from our solver
+  lines, the net as a search prior (incl. the old Stage 12, the net inside the C++ NRPA),
+  a value net, then self-play (on ygorl's nets)
+- `STAGE11.md` — Pick the turn-1 board that survives: board data, a learned board
+  choice, paired A/B
+
+**Done or dropped:** 1-7 (meta + card db, engine harness, gate, scenarios, optimizer,
+playmat viewer, deck trainer); 9 finish the game (`game.py`, `/games`, both sides);
+10 tests on another machine (`remote.py`); 14 searched defender -- measured, saves
+nothing (both its kill check and our break: the scripted family is as good as a searched
+reply; `game.searched_defence` kept as a tool, our boards are simply breakable);
+**8 matchup testing DROPPED** (user, 2026-11-25: not important; the games harness
+answers it with real games); **12 move prior folded into STAGE16 step 3(b)** (same idea).
 
 **Direction (user, 2026-11-19):** make the AI as close to perfect as compute allows on BOTH
 sides -- the enemy must play like the user's real opponents ("extremely good and smart") --
