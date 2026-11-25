@@ -1,0 +1,86 @@
+diff -u combo-solver-rooted/solver-patched/duel.cpp combo-solver-next/solver-patched/duel.cpp
+--- combo-solver-rooted/solver-patched/duel.cpp	2026-11-25 06:29:46.304193364 -0500
++++ combo-solver-next/solver-patched/duel.cpp	2026-11-25 18:26:49.750105038 -0500
+@@ -221,8 +221,17 @@
+ 	}
+ 	// --opp-hand-root (patch 0010): the assumed hand, added at the root (its last
+ 	// answer is still pending; the cards land before the search's first Process).
+-	if(!yrp.root_hand.empty()) {
++	if(!yrp.root_hand.empty() || yrp.root_hand_hide) {
+ 		ArenaScope scope(arena);
++		if(yrp.root_hand_hide) {
++			// shortcut: the real hand leaves the game rather than going back into the
++			// Deck, so the search could infer "not in the Deck"; upgrade (shuffle them in)
++			// if hidden games show it exploiting that. Hand SIZE is not kept either.
++			auto* fld = static_cast<::duel*>(handle)->game_field;
++			auto& hand = fld->player[yrp.root_hand_team].list_hand;
++			while(!hand.empty())
++				fld->remove_card(hand.back());
++		}
+ 		for(uint32_t code : yrp.root_hand) {
+ 			const std::string t = std::to_string(yrp.root_hand_team);
+ 			if(!ExecLua("Debug.AddCard(" + std::to_string(code) + "," + t + "," + t +
+Common subdirectories: combo-solver-rooted/solver-patched/.github and combo-solver-next/solver-patched/.github
+diff -u combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-25 06:29:46.309193451 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-25 18:26:49.758105194 -0500
+@@ -1511,6 +1511,8 @@
+ 	std::vector<uint32_t> no_own_chain;
+ 	// --opp-hand-root <code|code...> (duelroom patch 0010).
+ 	std::vector<uint32_t> opp_hand_root;
++	// --opp-hand-hide (duelroom patch 0016).
++	bool opp_hand_hide = false;
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <code|code...> (patch 0011).
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// --opp-key <code|code...> (patch 0012).
+@@ -2057,6 +2059,8 @@
+ 				"  --opp-skip <r>     ... never fire it there (both repeatable, patch 0006)\n"
+ 				"  --no-self-target <c> codes (a|b|...): the searcher's single-pick target of\n"
+ 				"                     these cards' effects must be an opponent's card (0007)\n"
++				"  --opp-hand-hide    with --root: the opponent's REAL hand is removed from\n"
++				"                     the search's copy first; it knows only --opp-hand-root (0016)\n"
+ 				"  --opp-hand-root <c> codes (a|b|...): once --root has replayed, add these to\n"
+ 				"                     the OPPONENT's hand: a hand the search assumes (0010)\n"
+ 				"  --no-own-chain <c> codes (a|b|...): the searcher never chains these at its\n"
+@@ -2596,6 +2600,8 @@
+ 		} else if(a == "--opp-set-root") {
+ 			const char* v = next("--opp-set-root"); if(!v) return false;
+ 			o.opp_set_root = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
++		} else if(a == "--opp-hand-hide") {
++			o.opp_hand_hide = true;
+ 		} else if(a == "--opp-hold-until") {
+ 			const char* v = next("--opp-hold-until"); if(!v) return false;
+ 			o.opp_hold_until = static_cast<uint32_t>(std::atoi(v));
+@@ -11429,6 +11435,17 @@
+ 			std::printf("  root              : %zu answer(s) replayed before "
+ 						"every search (--root)\n", ry->responses.size());
+ 		}
++		if(opt.opp_hand_hide) {                   // patch 0016
++			if(opt.root_file.empty()) {
++				std::printf("!! --opp-hand-hide needs --root\n");
++				return 1;
++			}
++			Replay* sy = const_cast<Replay*>(start_yrp);
++			sy->root_hand_hide = true;
++			sy->root_hand_team = static_cast<uint8_t>(1 - opt.target_player);
++			std::printf("  opp hand hidden   : player %d's real hand removed from the "
++						"search's copy (--opp-hand-hide)\n", 1 - opt.target_player);
++		}
+ 		if(!opt.opp_hand_root.empty()) {
+ 			if(opt.root_file.empty()) {
+ 				std::printf("!! --opp-hand-root needs --root\n");
+diff -u combo-solver-rooted/solver-patched/replay.h combo-solver-next/solver-patched/replay.h
+--- combo-solver-rooted/solver-patched/replay.h	2026-11-25 06:29:46.306193399 -0500
++++ combo-solver-next/solver-patched/replay.h	2026-11-25 18:26:49.750105038 -0500
+@@ -79,6 +79,10 @@
+ 	// your real hand). Every duel set up from this replay gets them.
+ 	std::vector<uint32_t> root_hand;
+ 	uint8_t root_hand_team{1};
++	// --opp-hand-hide (duelroom patch 0016): before root_hand is added, the
++	// opponent's REAL hand leaves the planning copy, so the search knows only the
++	// assumed hand (hidden information, both sides; user chose 2026-11-25).
++	bool root_hand_hide{};
+ 	// duelroom patch 0014, applied at the root after root_hand:
+ 	// root_reseed != 0 -- the core's RNG is reseeded and both Decks shuffled: the
+ 	// search no longer knows the duel's real future (its draws, mills, shuffles);
+Common subdirectories: combo-solver-rooted/solver-patched/tools and combo-solver-next/solver-patched/tools

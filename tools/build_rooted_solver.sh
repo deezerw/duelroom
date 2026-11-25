@@ -46,6 +46,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0015: budgets count CPU work (thread / process CPU time), not wall time: a busy machine no
 # longer gives a search less work (user chose, 2026-11-25). An idle run is unchanged.
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0015-work-clock.patch" >&2)
+# 0016: --opp-hand-hide, the opponent's real hand leaves the search's copy at the root
+# (hidden hands: it knows only --opp-hand-root's assumed hand; user chose 2026-11-25).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0016-opp-hand-hide.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -58,6 +61,7 @@ grep -q -- "--opp-smart" <<<"$help" || { echo "built binary lacks --opp-smart" >
 grep -q -- "--opp-branches" <<<"$help" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
 grep -q -- "--no-self-target" <<<"$help" || { echo "built binary lacks --no-self-target" >&2; exit 1; }
 grep -q -- "--no-own-chain" <<<"$help" || { echo "built binary lacks --no-own-chain" >&2; exit 1; }
+grep -q -- "--opp-hand-hide" <<<"$help" || { echo "built binary lacks --opp-hand-hide" >&2; exit 1; }
 grep -q -- "--opp-hand-root" <<<"$help" || { echo "built binary lacks --opp-hand-root" >&2; exit 1; }
 grep -q -- "--opp-negate" <<<"$help" || { echo "built binary lacks --opp-negate" >&2; exit 1; }
 grep -q -- "--opp-key" <<<"$help" || { echo "built binary lacks --opp-key" >&2; exit 1; }
