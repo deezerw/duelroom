@@ -115,6 +115,14 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       (measured 80% -> 90% surviving at 3x turn-1 cost). Re-measure under the new METHOD
       first: on 2026-11-19 only 4 of 1063 boards survived a 16x kill check.
 
+### Pinned (user, 2026-11-26: "lets pin that for now") -- duel AI: smarter AND less think time
+- [ ] (3) Measure which of the AI turn's kill searches find kills (plain lethal vs "lethal
+      using answer X") on the 31 stored positions; if the answer variants add nothing, give
+      their cores to extra plain-lethal seeds (randomized search: more seeds = kill sooner).
+- [ ] (2) Ponder: after each of your moves, plan "your turn ends here" in the background,
+      dropped on your next move. Measure first how long you pause before ending a turn.
+- [ ] (1) = STAGE16 arm (b), the net prior inside the C++ NRPA (2x far kills in less time).
+
 ### Phase 5 -- low
 - [ ] Untried solver levers: `--options` macros, a per-starter `--adapt` corpus,
       `--ctx-shrink` (`--adapt` already measured useless at equal time).
