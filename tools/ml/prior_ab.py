@@ -24,14 +24,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools" / "ml"))
 
 OUT = ROOT / "results" / "ml" / "prior_ab"
 
 
-def group_of(raw):
-    """bc_train.py's group key of a demonstration (its deck hash or name, and hand)."""
+def group_of(raw, seat=1):
+    """bc_train's held-out group of a demonstration's `seat` decisions (bc_train.
+    seat_groups). The kill lines tested here are the ENEMY's (seat 1): held out by its hand."""
+    from bc_train import seat_groups
     solver, deck = raw.get("solver") or {}, raw.get("deck") or {}
-    return f"{solver.get('deck_hash') or deck.get('name')}:{raw.get('hand_index')}"
+    return seat_groups(solver, deck.get("name"), raw.get("hand_index"))[seat]
 
 
 def trained_raws(raws, report):
@@ -42,7 +45,8 @@ def trained_raws(raws, report):
 
 
 def heldout_groups(raws, report, seed=0, share=0.2):
-    groups = sorted({group_of(r) for r in raws})
+    from bc_train import demo_groups
+    groups = sorted(set().union(*(demo_groups(r) for r in raws)))
     want = report["groups"]["train"] + report["groups"]["heldout"]
     if len(groups) != want:
         raise SystemExit(f"{len(groups)} groups in the demos, bc_train saw {want}: "

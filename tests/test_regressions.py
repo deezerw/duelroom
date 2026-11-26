@@ -8035,3 +8035,28 @@ def test_end_of_turn_activates_a_field_spell_left_in_hand_only_into_a_free_zone(
     assert game._continuous_spell(perl) and game._field_spell(perl)
     assert not game._field_spell(6767771)                        # Scream: Continuous only
     assert perl in game.free_sets(engine.DECKS / "imported.ydk")
+
+
+def test_bc_holds_each_seat_out_by_its_own_hand(monkeypatch):
+    """tools/ml/bc_train.seat_groups: our decisions are held out by our hand, the
+    enemy's by ITS hand (enemy seed) -- with every decision grouped by our hand, the
+    10 enemy hands sat in both halves and the held-out enemy-kill accuracy was leaked.
+    prior_ab rebuilds the same groups from the demos."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent / "tools" / "ml"
+    monkeypatch.syspath_prepend(str(root))
+    spec = importlib.util.spec_from_file_location("bc_train", root / "bc_train.py")
+    bc = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "bc_train", bc)
+    spec.loader.exec_module(bc)
+    kill = {"kind": "kill", "deck_hash": "D", "eseed": 1003}
+    brk = {"kind": "break", "deck_hash": "D", "eseed": 1001}
+    board = {"kind": "board_kill", "tag": "h3-e1004-full-r0"}
+    assert bc.seat_groups(kill, "a", 5) == {0: "D:5", 1: "enemy:1003"}
+    assert bc.seat_groups(brk, "a", 5) == {1: "D:5", 0: "enemy:1001"}
+    assert bc.seat_groups(board, "imported", 3) == {0: "imported:3", 1: "enemy:1004"}
+    spec2 = importlib.util.spec_from_file_location("prior_ab", root / "prior_ab.py")
+    ab = importlib.util.module_from_spec(spec2)
+    spec2.loader.exec_module(ab)
+    raw = {"solver": kill, "deck": {"name": "a"}, "hand_index": 5}
+    assert ab.group_of(raw) == "enemy:1003" and bc.demo_groups(raw) == {"D:5", "enemy:1003"}

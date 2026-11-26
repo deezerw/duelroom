@@ -22,6 +22,7 @@ import hashlib
 import os
 import json
 import random
+import re
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -34,6 +35,26 @@ import numpy as np
 # 0009), gifts handed over -- i.e. the relabelled devices kill1x / endgame-t1 / brk1x / gift and
 # board_data's 2026-11-19 kill lines. The demos file keeps them; --eras all trains on them.
 SKIP_ERAS = ("kill1x", "endgame-t1", "brk1x", "gift", "board_kill")
+
+
+def seat_groups(solver, deck_name, hand_index):
+    """{seat: held-out group} of a demonstration's decisions. OUR seat's decisions are
+    grouped by our (deck, hand); the ENEMY seat's by its hand (the enemy seed). Grouping
+    every decision by our hand (before 2026-11-26) left the 10 enemy hands in both halves:
+    the held-out enemy-kill accuracy was measured on enemy hands the net trained on.
+    Ours is seat 1 going second ("break"), seat 0 otherwise (kill, board_kill)."""
+    ours = 1 if solver.get("kind") == "break" else 0
+    e = solver.get("eseed")
+    if e is None:                          # board_data: "h3-e1004-full-r0"
+        m = re.search(r"-e(\d+)-", solver.get("tag") or "")
+        e = m.group(1) if m else "?"
+    return {ours: f"{solver.get('deck_hash') or deck_name}:{hand_index}", 1 - ours: f"enemy:{e}"}
+
+
+def demo_groups(raw):
+    """Every held-out group a parsed demos.jsonl record can put samples in."""
+    return set(seat_groups(raw.get("solver") or {}, (raw.get("deck") or {}).get("name"),
+                           raw.get("hand_index")).values())
 
 
 def keep_demo(raw, skip=SKIP_ERAS):
@@ -123,6 +144,7 @@ def candidates(demo, vocab, cards, skipped):
                          + json.dumps(demo.start["decks"]).encode()).hexdigest()[:12]
     first = demo.start.get("first", 0) if isinstance(demo.start, dict) else 0
     by_player, turns = both_steps(demo, vocab, cards, first)
+    groups = seat_groups(demo.solver, demo.deck["name"], demo.hand_index)
     out = []
     for player in (0, 1):
         steps = by_player[player]
@@ -147,8 +169,7 @@ def candidates(demo, vocab, cards, skipped):
                 out.append((key, (st.obs, canonical_action(st.obs, st.action),
                             {"kind": demo.solver["kind"], "seat": player, "turn": turn,
                              "n_choices": int(np.count_nonzero(st.obs["action_mask"])),
-                             "group": f"{demo.solver.get('deck_hash') or demo.deck['name']}:"
-                                      f"{demo.hand_index}"})))
+                             "group": groups[player]})))
     return out
 
 
@@ -277,7 +298,9 @@ def main():
         rows = rng.sample(rows, args.max_samples)
     print(f"{len(rows)} samples from {len(demos)} lines; skipped {dict(skipped)}; failed {failed}",
           flush=True)
-    groups = sorted({r[2]["group"] for r in rows})
+    # every group the kept LINES can hold (not only those with samples), so prior_ab can
+    # rebuild exactly this split from the demos file
+    groups = sorted(set().union(*(demo_groups(json.loads(l)) for l in demos)))
     if len(groups) < 2:
         raise SystemExit("fewer than 2 (deck, hand) groups: nothing to hold out")
     rng.shuffle(groups)
