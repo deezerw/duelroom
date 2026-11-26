@@ -7586,6 +7586,7 @@ def test_duel_ai_reuses_its_plan_for_a_position_it_has_planned(tmp_path, monkeyp
     calls = []
     monkeypatch.setattr(duel, "deck_target", lambda conn, deck: ["1"])
     monkeypatch.setattr(duel, "hand_pieces", lambda conn, row, live: [])
+    monkeypatch.setattr(duel, "helper_device", lambda conn: None)
     monkeypatch.setattr(game, "_solve", lambda *a, **k: calls.append(a[3]) or {
         "solution": None, "solutions": [], "approach": None, "log": "l"})
     duel.plan(conn, did)
@@ -7593,3 +7594,51 @@ def test_duel_ai_reuses_its_plan_for_a_position_it_has_planned(tmp_path, monkeyp
     duel.plan(conn, did)
     assert calls == ["build"], "searched the same position twice"
     assert "same position" in duel.get(conn, did)["note"]
+
+
+def test_duel_borrows_the_pc_only_when_awake_idle_and_never_wakes_it(tmp_path, monkeypatch):
+    """helper_device (user, 2026-11-25: "use the gaming PC when it's on"): asleep
+    -> None without a Wake-on-LAN; running a job of its own -> None; awake and idle
+    -> the PC, its install synced first."""
+    from skills import db, duel, remote
+
+    conn = db.connect(tmp_path / "t.db")
+    woke = []
+    monkeypatch.setattr(remote, "wake", woke.append)
+    monkeypatch.setattr(remote, "ensure_up", woke.append)
+    monkeypatch.setattr(remote, "reachable", lambda dev, t: False)
+    assert duel.helper_device(conn) is None and not woke
+    monkeypatch.setattr(remote, "reachable", lambda dev, t: True)
+    monkeypatch.setattr(remote, "up", lambda dev: True)
+    synced = []
+    monkeypatch.setattr(remote, "sync", lambda dev, log: synced.append(dev.name))
+    conn.execute("INSERT INTO jobs (kind, deck, params, queued_at, state) VALUES "
+                 "('games', 'imported', '{\"device\": \"duelpc\"}', 'x', 'running')")
+    conn.commit()
+    assert duel.helper_device(conn) is None and not synced
+    conn.execute("UPDATE jobs SET state = 'done'")
+    conn.commit()
+    assert duel.helper_device(conn).name == "duelpc" and synced == ["duelpc"] and not woke
+
+
+def test_a_found_kill_stops_the_plans_other_searches(tmp_path):
+    """_stop_searches: once a kill is verified, this plan's other solvers (argv
+    naming <root>/wd-...) are killed; a solver of another plan is left alone."""
+    import subprocess
+    import sys
+    import time
+
+    from skills import duel
+
+    fake = tmp_path / "combosolver"
+    fake.write_text("import time\ntime.sleep(60)\n")
+    root, other = tmp_path / "plan-9", tmp_path / "plan-10"
+    mine = subprocess.Popen([sys.executable, str(fake), f"{root}/wd-lethal"])
+    theirs = subprocess.Popen([sys.executable, str(fake), f"{other}/wd-lethal"])
+    try:
+        time.sleep(0.3)
+        duel._stop_searches(root)
+        assert mine.wait(timeout=5) == -9
+        assert theirs.poll() is None
+    finally:
+        mine.kill(); theirs.kill()

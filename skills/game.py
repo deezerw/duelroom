@@ -382,10 +382,12 @@ def _hard_limit(ms):
 
 
 def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
-           env_extra=None):
+           env_extra=None, device=None):
     """One rooted-solver run. Returns {"solution", "approach", "log"} paths.
     `binary`: another build of it (an A/B arm); default ROOTED_BIN.
-    `env_extra`: environment overrides for this run only."""
+    `env_extra`: environment overrides for this run only.
+    `device`: run there instead of this process's device, and NEVER wake it:
+    a lost connection raises remote.DeviceDown (the duel's borrowed PC)."""
     from ygorl.solver.combo_solver import Workdir
 
     scratch = Path(scratch)
@@ -400,14 +402,14 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
     cmd += ["--solve-ms", str(ms), "--threads", str(threads),
             "--seed", str(seed), "--outdir", str(out)]
     from . import remote
-    dev = remote.current()
+    dev = device or remote.current()
     log = scratch / f"{label}.log"
     earlier = ""
     for attempt in range(1 + CRASH_RETRIES):
         try:
             if dev.remote:
                 r = _solve_remote(dev, cmd, {**ARENA_ENV, **(env_extra or {})},
-                                  _hard_limit(ms), wd.path, out)
+                                  _hard_limit(ms), wd.path, out, wake=device is None)
             else:
                 r = subprocess.run(cmd, capture_output=True, text=True,
                                    env={**engine.env(), **ARENA_ENV, **(env_extra or {})},
@@ -467,7 +469,7 @@ def solve_stats(log):
     return out
 
 
-def _solve_remote(dev, cmd, env, limit_s, workdir, outdir):
+def _solve_remote(dev, cmd, env, limit_s, workdir, outdir, wake=True):
     """One solve on another machine (skills/remote.py). A lost connection
     wakes the device and retries ONCE; a second loss ends the job rather
     than marking every remaining game failed one by one."""
@@ -476,6 +478,8 @@ def _solve_remote(dev, cmd, env, limit_s, workdir, outdir):
     try:
         return remote.run(dev, cmd, env, limit_s, push_dirs=[workdir], outdir=outdir)
     except remote.DeviceDown:
+        if not wake:
+            raise
         remote.ensure_up(dev)
         return remote.run(dev, cmd, env, limit_s, push_dirs=[workdir], outdir=outdir)
 

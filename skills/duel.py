@@ -30,8 +30,10 @@ import hashlib
 import json
 import random
 import re
+import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,10 @@ DUELS = ROOT / "results" / "duels"
 # its searches IN PARALLEL (plain lethal + ANSWER_PLANS answer plans), each this long.
 THINK_MS = 90_000
 ANSWER_PLANS = 3             # "lethal, using answer X" searches beside the plain one
+# The gaming PC runs the AI's searches when it is ALREADY on and idle (user, 2026-11-25:
+# "use the gaming PC when it's on"): 16 threads hold all five 2-thread searches at
+# once, so a plan waits ~think_ms instead of the server's CPU-bound ~1.6x. Never woken.
+HELPER = "duelpc"
 _REMOVE = re.compile(r"\b(banish|destroy|negate|send|return|shuffle|take control|change control)", re.I)
 _HITS_MON = re.compile(r"(monsters?|cards?) (your )?opponent controls|opponent's monster|monsters? on the field|"
                        r"cards? on the field|monster in (another|this card's|an adjacent) column|adjacent column", re.I)
@@ -742,6 +748,59 @@ def _winner_note(res, lp, you):
     return f"winner: {'you' if w == you else 'the AI'} ({res.reason})"
 
 
+def helper_device(conn):
+    """The HELPER device when it is already awake, runs no job of its own and has
+    this solver install; else None (search here). Never wakes it: it is loud,
+    and never on at night (user)."""
+    from . import remote
+    dev = remote.DEVICES.get(HELPER)
+    if dev is None or not remote.reachable(dev, 2.0):
+        return None
+    try:
+        busy = any(json.loads(r[0] or "{}").get("device") == HELPER
+                   for r in conn.execute("SELECT params FROM jobs WHERE state = 'running'"))
+    except sqlite3.Error:
+        busy = False
+    if busy:
+        return None
+    try:
+        if not remote.up(dev):
+            return None
+        remote.sync(dev, log=lambda m: print(m, flush=True))
+    except Exception as e:  # noqa: BLE001 -- a borrowed machine: any trouble, search here
+        print(f"{HELPER}: not used ({e})", flush=True)
+        return None
+    return dev
+
+
+def _stop_searches(root, dev=None):
+    """Kill this plan's solvers still running (their argv names `root`/wd-...):
+    here by /proc, on `dev` by pkill (the [x] keeps pkill off its own shell)."""
+    import os
+    import shlex
+    import signal
+    mark = f"{root}/wd-".encode()
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            cmd = (d / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if mark in cmd and b"combosolver" in cmd:
+            try:
+                os.kill(int(d.name), signal.SIGKILL)
+            except OSError:
+                pass
+    if dev is not None:
+        from . import remote
+        pat = f"[{str(root)[0]}]{str(root)[1:]}/wd-"
+        try:
+            remote.ssh(dev, f"pkill -KILL -f {shlex.quote(pat)}", timeout=20)
+        except Exception:  # noqa: BLE001 -- they end within their budget anyway
+            pass
+
+
 class _Reuse(Exception):
     """plan(): this position was planned before."""
 
@@ -772,6 +831,17 @@ def plan(conn, did):
                                                 live.responses, root)
         cards = live.cards
         base = ["--start", str(start), "--root", str(prefix)] + plan_args(row, cards, turn)
+        dev, stopped = helper_device(conn), threading.Event()
+
+        def solve(*a):
+            if dev is not None:
+                try:
+                    return game._solve(*a, device=dev)
+                except Exception as e:  # noqa: BLE001 -- the PC went away: search here
+                    if stopped.is_set():
+                        raise
+                    print(f"{dev.name}: {e}; searching here instead", flush=True)
+            return game._solve(*a)
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
         t0 = time.time()
         r = building = None
@@ -784,7 +854,7 @@ def plan(conn, did):
         build = targets + [a for t in hand_pieces(conn, row, live) for a in ("--target", t)]
 
         def build_board():
-            return game._solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
+            return solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
         user_deck = engine.DECKS / f"{row['user_deck']}.ydk"
         if turn > 1:
             # Its turn, searched several ways AT ONCE: plain lethal (no build target:
@@ -792,7 +862,7 @@ def plan(conn, did):
             # built and never attacked, 2026-11-21), and "lethal using answer X" for
             # the cards of its deck that beat what you have out (answer_cards).
             # Under --goal-win a solution IS a win the solver verified.
-            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             from .deck import Deck
             # --no-ref needs a --target, and the best approach ranks target OVERLAP
             # before win progress (search.cpp). A BOARD target nothing can match -- one
@@ -808,16 +878,26 @@ def plan(conn, did):
                                            for c in answer_cards(row, live, cards)]
             def one(kv):
                 k, (label, extra) = kv
-                return label, game._solve(prefix, base + neutral + extra + ["--goal-win", "--stop-on-win",
-                                                                  str(game.STOP_ON_WIN)],
-                                          root, label, row["think_ms"], int(t0) + k)
+                return k, label, solve(prefix, base + neutral + extra + ["--goal-win", "--stop-on-win",
+                                                                 str(game.STOP_ON_WIN)],
+                                       root, label, row["think_ms"], int(t0) + k)
             # the build search runs BESIDE the kill searches, not after them: it is
             # needed whenever no kill turns up (every plan of duel 7), and budgets are
             # CPU work (patch 0015), so running at once searches exactly as much and
             # saves a whole think_ms of waiting (~160 s -> ~100 s at 90 s)
-            with ThreadPoolExecutor(len(variants) + 1) as ex:
-                building = ex.submit(build_board)
-                tried = list(ex.map(one, enumerate(variants)))
+            # the first VERIFIED kill is played at once and the other searches stopped:
+            # any lethal wins the duel, so waiting for the rest changes nothing
+            ex = ThreadPoolExecutor(len(variants) + 1)
+            building = ex.submit(build_board)
+            tried = []
+            for f in as_completed([ex.submit(one, kv) for kv in enumerate(variants)]):
+                tried.append(f.result())
+                if tried[-1][2]["solution"]:
+                    stopped.set()
+                    _stop_searches(root, dev)
+                    break
+            ex.shutdown(wait=False, cancel_futures=True)
+            tried = [(lab, x) for _k, lab, x in sorted(tried, key=lambda t: t[0])]
             won = [(lab, x) for lab, x in tried if x["solution"]]
             if won:
                 r = won[0][1]
