@@ -16,7 +16,7 @@ that turn are the scripted defender's. Each record says so in
 `solver["expert"] = "turn_player"`: the sample builder keeps a step only when
 its player is the player whose turn it is.
 
-    venv/bin/python tools/ml/demos.py [workers]      # resumable
+    venv/bin/python tools/ml/demos.py [workers]      # resumable; labels new games first (game_kills)
     venv/bin/python tools/ml/demos.py summary
 -> results/ml/demos/demos.jsonl (+ rejected.jsonl: lines that did not replay)
 """
@@ -89,7 +89,13 @@ def _key(src):
     return hashlib.sha1(src[1].encode()).hexdigest()[:16]
 
 
-def main(workers=4):
+def main(workers=None):
+    workers = int(workers or os.cpu_count() or 1)
+    # the kill lines come from game_kills.jsonl: label the games played since its
+    # nightly run (cron 05:40) first, or tonight's games wait a day for training
+    sys.path.insert(0, str(ROOT / "tools" / "ml"))
+    import game_kills
+    game_kills.main(workers)
     OUT.mkdir(parents=True, exist_ok=True)
     out, rej = OUT / "demos.jsonl", OUT / "rejected.jsonl"
     done = set()

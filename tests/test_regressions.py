@@ -7942,3 +7942,31 @@ def test_bc_trains_only_on_lines_from_after_the_own_turn_fixes(monkeypatch):
     assert all(bc.keep_demo(r, ()) for r in raws)
     assert ab.trained_raws(raws, {"skip_eras": list(bc.SKIP_ERAS)}) == kept
     assert ab.trained_raws(raws, {}) == raws          # an older net's report: every line
+
+
+def test_kill_labeller_skips_reseeded_futures_and_survives_a_bad_game(tmp_path, monkeypatch):
+    """tools/ml/game_kills.label: the majority check's reseeded futures (t2-otk-f1.log)
+    are not defences and their lines do not replay in the real future -- skipped (they
+    crashed the whole nightly run); a game that still fails is recorded ok=0."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent / "tools" / "ml"
+    monkeypatch.syspath_prepend(str(root))
+    spec = importlib.util.spec_from_file_location("game_kills", root / "game_kills.py")
+    gk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gk)
+    import board_data
+    from skills import game
+    run = tmp_path / "imported" / "E" / "h0" / "e1000" / "run0"
+    for tag in ("", "-f1", "-f2"):
+        (run / f"out-t2-otk{tag}").mkdir(parents=True)
+        (run / f"t2-otk{tag}.log").write_text("x")
+    monkeypatch.setattr(game, "GAMES", tmp_path)
+    seen = []
+    monkeypatch.setattr(board_data, "kill_detail", lambda k, p, d, lost, keep=None: seen.append(k["log"].name) or {"lost": lost})
+    g = {"deck_hash": "d", "deck": "imported", "enemy": "E", "hand_index": 0, "board": 0, "enemy_seed": 1000,
+         "device": "server", "run": 0, "outcome": "win", "created": "t", "prefix": "p"}
+    out = gk.label(g)
+    assert seen == ["t2-otk.log"] and out["ok"] == 1
+    monkeypatch.setattr(board_data, "kill_detail", lambda *a, **kw: 1 / 0)
+    bad = gk.label(g)
+    assert bad["ok"] == 0 and "ZeroDivisionError" in bad["error"]

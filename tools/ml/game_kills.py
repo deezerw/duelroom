@@ -44,6 +44,14 @@ def games(conn):
 
 
 def label(g):
+    try:
+        return _label(g)
+    except Exception as exc:  # noqa: BLE001 -- one unreadable game must not stop the run
+        return {k: g[k] for k in KEY} | {"outcome": g["outcome"], "created": g["created"],
+                                          "kill": [], "ok": 0, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _label(g):
     import board_data
 
     run = (game.games_dir(g["deck"], g["enemy"], True, g["device"])
@@ -52,6 +60,11 @@ def label(g):
     kills = []
     for log in sorted(run.glob("t2-otk*.log")):
         tag = log.stem[len("t2-otk"):]          # "" = the first defence, "-h2" ...
+        if "-f" in tag:
+            # a reseeded future of the majority check (game.majority): its line was won
+            # in ANOTHER future and does not replay in this one (it crashed the labeller
+            # on every game since 2026-11-25b)
+            continue
         d = run / f"out-t2-otk{tag}"
         sols = sorted(d.glob("solution_*.yrp"))
         appr = sorted(d.glob("best_approach*.yrp"))
