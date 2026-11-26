@@ -7460,3 +7460,41 @@ def test_pinned_solver_runs_with_the_kernel_page_tracker():
     assert engine.SOLVER_BIN.parent.parent.name == "combo-solver-uffd"
     assert engine.env().get("R2V_ARENA_UFFD") == "1"
     assert game.ARENA_ENV is engine.ARENA_ENV
+
+
+def test_duel_log_never_names_the_ais_draws_or_sets_and_piles_hide_order(tmp_path, monkeypatch):
+    """The duel page's feed and pile viewer (user, 2026-11-25: "more obvious how
+    the flow of the game is going", "see into different piles"). The session is
+    omniscient, so the log must not name the AI's draws or Sets; your Deck is
+    shown sorted (its cards, never its order), the AI's Deck not at all."""
+    from types import SimpleNamespace as N
+    from skills import db, duel
+
+    log = []
+    add = lambda pl, txt, code=None: log.append((pl, txt, code))  # noqa: E731
+    nm = lambda c: f"card{c}"  # noqa: E731
+    live = duel.Live.__new__(duel.Live)
+    L = lambda loc, con=1, pos=0: N(location=loc, controller=con, position=pos)  # noqa: E731
+    for you_too in (1, 0):        # the AI is player 1; the same moves made by you name the card
+        log.clear()
+        live._move(N(code=7, previous=L(0x1, you_too), current=L(0x2, you_too), reason=0x2000000), 1, nm, add)
+        live._move(N(code=8, previous=L(0x2, you_too), current=L(0x8, you_too, 0xA), reason=0), 1, nm, add)
+        live._move(N(code=9, previous=L(0x4, you_too, 0x1), current=L(0x20, you_too, 0xA), reason=0x40), 1, nm, add)
+        live._move(N(code=5, previous=L(0x2, you_too), current=L(0x10, you_too, 0x1), reason=0x4000), 1, nm, add)
+        texts = [t for _p, t, _c in log]
+        if you_too:
+            assert texts[:3] == ["draws a card", "sets a card", "~card is banished face-down"], texts
+            assert [c for *_x, c in log[:3]] == [None, None, None]
+        else:
+            assert texts[:2] == ["draws card7", "sets card8"], texts
+        assert texts[3] == "~card5 is discarded"       # a discard is public
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    v = duel.view(conn, did)
+    me = v["board"]["players"][v["you"]]
+    assert v["my_deck"] == sorted(v["my_deck"]) and len(v["my_deck"]) == me["deck_count"]
+    assert len(v["my_extra"]) == me["extra_count"]
+    assert v["log_total"] >= len(v["log"]) and all("own" in x and "code" in x for x in v["log"])
+    assert not any(k.startswith("ai_deck_") or k == "ai_deck_list" for k in v)

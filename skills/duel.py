@@ -209,24 +209,59 @@ class Live:
         self._seen = p
         t = self.session.tracker.turn
         nm = lambda c: (self.cards.get(c).name if c and self.cards.get(c) is not None else "a card")  # noqa: E731
+        ai = 1 - self.row["user_seat"]
+        add = lambda pl, txt, code=None: self.log.append((t, pl, txt, code))  # noqa: E731
         for e in p.events or ():
             k = type(e).__name__
             if k == "Chaining":
                 del self.chain[e.chain_count - 1:]
                 self.chain.append((e.code, e.loc.controller))
-                self.log.append((t, e.loc.controller, f"activates {nm(e.code)}"))
+                add(e.loc.controller, f"activates {nm(e.code)}", e.code)
             elif k == "ChainEnd":
                 self.chain.clear()
             elif k in ("Summoning", "SpSummoning", "FlipSummoning"):
-                self.log.append((t, e.loc.controller, f"summons {nm(e.code)}"))
+                add(e.loc.controller, f"summons {nm(e.code)}", e.code)
             elif k in ("ChainNegated", "ChainDisabled"):
-                self.log.append((t, None, f"chain link {e.chain_count} is negated"))
+                add(None, f"chain link {e.chain_count} is negated")
             elif k == "Attack":
-                self.log.append((t, None, "attacks"))
+                add(None, "attacks")
             elif k == "Damage":
-                self.log.append((t, e.player, f"takes {e.amount} damage"))
+                add(e.player, f"takes {e.amount} damage")
             elif k == "NewTurn":
-                self.log.append((t, e.player, "--- new turn ---"))
+                add(e.player, "--- new turn ---")
+            elif k == "Move":
+                self._move(e, ai, nm, add)
+
+    def _move(self, e, ai, nm, add):
+        """Cards changing place, as a table sees them: what reaches the GY, the
+        banished pile or a hand, and Sets. `who` is the card's controller, not
+        whoever moved it, so the text is passive and starts with "~": the page
+        reads it as "your X ..." / "AI's X ...". The AI's draws and face-down
+        cards are never named -- the session sees everything, the page must not."""
+        src, dst, who = e.previous.location, e.current.location, e.current.controller
+        up = e.current.position & 0x5           # POS_FACEUP
+        if dst == 0x10:                          # GY
+            # from the field, a summon's material or a resolved Spell: only the notable ones
+            if src in (0x2, 0x1, 0x40) or e.reason & 0x4000:
+                add(who, "~" + f"{nm(e.code)} is " + ("discarded" if e.reason & 0x4000 else "sent to the GY"), e.code)
+            elif src in (0x4, 0x8):              # off the field
+                add(who, f"~{nm(e.code)} goes to the GY", e.code)
+        elif dst == 0x20:                        # banished
+            add(who, f"~{nm(e.code)} is banished" if up else "~card is banished face-down", e.code if up else None)
+        elif dst == 0x2 and src != 0x2:          # to a hand
+            if e.reason & 0x2000000:             # REASON_DRAW
+                if who == ai:
+                    add(who, "draws a card")
+                else:
+                    add(who, f"draws {nm(e.code)}", e.code)
+            else:
+                # a search is revealed at a real table; from the field or GY it is public anyway
+                add(who, f"~{nm(e.code)} is added to the hand", e.code)
+        elif dst == 0x8 and not up and src == 0x2:   # a Spell/Trap Set from the hand
+            if who == ai:
+                add(who, "sets a card")
+            else:
+                add(who, f"sets {nm(e.code)}", e.code)
 
     def act(self, idx):
         self.session.act(int(idx))
@@ -244,6 +279,12 @@ class Live:
         from ygorl.solver.targets import board_summary
         t = self.session.tracker
         return board_summary(self.session.core, t.turn, (t.lp[0], t.lp[1]))
+
+    def codes(self, player, loc):
+        from ygorl.solver.targets import _BOARD_FLAGS, parse_query_location
+        core = self.session.core
+        return [c["code"] for c in parse_query_location(core.query_location(_BOARD_FLAGS, player, loc))
+                if c is not None and c.get("code")]
 
     def close(self):
         self.session.close()
@@ -857,7 +898,12 @@ def view(conn, did):
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)
                 "log": [{"turn": t, "who": "you" if pl == you else ("AI" if pl == ai else ""),
-                         "text": txt} for t, pl, txt in live.log[-14:]],
+                         "text": txt.lstrip("~"), "own": txt.startswith("~"), "code": code}
+                        for t, pl, txt, code in live.log[-60:]],
+                "log_total": len(live.log),        # which entries are new since the page last looked
+                # your own Deck (sorted: you know its cards, never its order) and whole
+                # Extra Deck; the AI's stay a count and its face-up Extra cards
+                "my_deck": sorted(live.codes(you, 0x1)), "my_extra": live.codes(you, 0x40),
                 "prompt": p.decision.name if mine else None,
                 "actions": [_act(i, a, live.cards, you, hidden)
                             for i, a in enumerate(p.actions)] if mine else []}

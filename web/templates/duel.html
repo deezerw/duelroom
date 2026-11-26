@@ -69,7 +69,7 @@
   .sheet .in{background:var(--bg);border:1px solid var(--line);border-radius:16px 16px 0 0;width:min(560px,100%);
              max-height:88vh;overflow-y:auto;padding:14px 16px calc(14px + env(safe-area-inset-bottom))}
   .sheet .head{display:flex;gap:12px;align-items:flex-start}
-  .sheet .head img{width:min(34vw,140px);border-radius:6px;flex:0 0 auto}
+  .sheet .head .big{width:min(34vw,140px);aspect-ratio:1/1.46;border-radius:6px;flex:0 0 auto;background:#2a2f45 center/cover no-repeat}
   .sheet h4{margin:0 0 6px;font-size:16px}
   .sheet p{white-space:pre-line;font-size:13px;line-height:1.42;margin:0;color:var(--dim)}
   .sheet .moves{display:grid;gap:8px;margin-top:12px}
@@ -82,6 +82,36 @@
   .sheet .grid div.off{opacity:.62}
   .sheet .grid div span{position:absolute;bottom:0;left:0;right:0;font-size:9.5px;line-height:1.15;
     background:#000b;color:#fff;padding:2px 3px;border-radius:0 0 5px 5px;max-height:2.4em;overflow:hidden}
+  .sheet .grid div.glow,.sheet .grid div.pick{outline-offset:1px}
+  .sheet .note{font-size:12px;color:var(--faint);margin-top:6px}
+  /* whose turn it is, at a glance: the HUD's edge and a chip take that side's colour */
+  .hud.t-you{box-shadow:inset 0 3px 0 #9ece6a}
+  .hud.t-ai{box-shadow:inset 0 3px 0 #f7768e}
+  .turn{font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;margin-left:6px;white-space:nowrap}
+  .turn.you{background:#9ece6a;color:#111}
+  .turn.ai{background:#f7768e;color:#111}
+  .chainrow{display:flex;gap:4px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  .chainrow .lk{width:30px;height:44px;border-radius:3px;background:#2a2f45 center/cover no-repeat;position:relative;cursor:pointer}
+  .chainrow .lk b{position:absolute;top:-5px;left:-5px;font-size:9.5px;line-height:14px;padding:0 4px;border-radius:999px;color:#111}
+  .chainrow .lk.you b{background:#9ece6a}
+  .chainrow .lk.ai b{background:#f7768e}
+  .chainrow .arrow{color:var(--faint);font-size:11px}
+  .feed{margin:4px 0 0;font-size:12px;line-height:1.25;cursor:pointer}
+  .feed div{display:flex;align-items:center;gap:6px;min-height:22px;color:var(--dim)}
+  .feed i{width:15px;height:22px;border-radius:2px;background:#2a2f45 center/cover no-repeat;flex:0 0 auto}
+  .feed i.none{background:transparent}
+  .feed .you b{color:#9ece6a}
+  .feed .ai b{color:#f7768e}
+  .feed .new{color:var(--ink);animation:flash 1.6s ease-out}
+  .feed .sep{color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.03em}
+  @keyframes flash{from{background:#7aa2f733}to{background:transparent}}
+  .recent{box-shadow:0 0 0 3px #7aa2f7,0 0 14px #7aa2f7aa !important;z-index:2}
+  #log .t{color:var(--ink);font-weight:700;margin-top:6px}
+  #log .you{color:#9ece6a}
+  #log .ai{color:#f7768e}
+  .toast{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:60;padding:12px 22px;border-radius:12px;
+         font-size:18px;font-weight:800;color:#111;pointer-events:none;opacity:0;transition:opacity .25s}
+  .toast.on{opacity:.95}
   .back{font-size:12px;margin-right:6px}
   /* a phone shows the table only: the site header gives way (a back link sits in the HUD) */
   @media (max-width:760px){.page-head{display:none} body > header{display:none} main{padding-top:0}}
@@ -104,6 +134,7 @@
       <button class="undo" id="flag" style="margin-right:auto;margin-left:-4px" title="Flag this position as unoptimal (your note becomes a test case)">⚑</button>
       <span class="resp">respond <span class="seg" id="modes"><button data-m="auto">Auto</button><button data-m="manual">Manual</button><button data-m="none">None</button><button data-m="select">Cards</button></span></span></div>
   </div>
+  <div class="feed" id="feed" title="What just happened (tap for the whole log)"></div>
   <div class="aihand" id="aihand"></div>
   <div class="side" id="ai-st"></div>
   <div class="side" id="ai-m"></div>
@@ -112,16 +143,55 @@
   <div class="side" id="you-st"></div>
   <div class="hand" id="hand"></div>
   <div class="bar" id="bar"></div>
-  <details class="log"><summary>What happened · <a href="{{ url_for('views.duel_list') }}">all duels</a></summary>
+  <details class="log" id="logbox"><summary>What happened · <a href="{{ url_for('views.duel_list') }}">all duels</a></summary>
     <div id="log"></div></details>
 </div>
 
 <div class="sheet" id="sheet" onclick="if(event.target===this)closeSheet()"><div class="in" id="sheet-in"></div></div>
+<div class="toast" id="toast"></div>
 
 <script>
 let S = {{ state|tojson }};
 const base = `{{ url_for('views.index') }}img`;
 const img = (c, size) => `${base}/${size || 'small'}/${c}.jpg`;
+// Card art, fetched ONCE per page and kept as a blob. Every render rebuilds the mat, and a
+// browser that does not trust the local CA keeps no HTTP cache, so plain url()s re-downloaded
+// every picture on every move/poll and often lost the race (blank cards). Failures retry.
+const ART = new Map(), WANT = [], BUSY = new Set();
+let running = 0;
+function bg(code, size) {          // the attributes that put a card's art on an element
+  if (code === null || code === undefined || code === '') return '';
+  const u = ART.get(img(code, size));
+  return ` data-art="${code}"${size ? ` data-size="${size}"` : ''}${u ? ` style="background-image:url(${u})"` : ''}`;
+}
+function put(el, u) { if (el.tagName === 'IMG') { if (el.src !== u) el.src = u; } else el.style.backgroundImage = `url(${u})`; }
+function paint(root) {
+  (root || document).querySelectorAll('[data-art]').forEach(el => {
+    const u = ART.get(img(el.dataset.art, el.dataset.size));
+    if (u) put(el, u); else load(el.dataset.art, el.dataset.size, 0, true);
+  });
+}
+function load(code, size, tries, urgent) {
+  const u = img(code, size);
+  if (ART.has(u) || BUSY.has(u)) return;
+  BUSY.add(u);
+  WANT[urgent ? 'unshift' : 'push']({u, code: String(code), size: size || '', tries: tries || 0});
+  pump();
+}
+function pump() {
+  while (running < 6 && WANT.length) {
+    const j = WANT.shift(); running++;
+    fetch(j.u, {credentials: 'same-origin'}).then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(b => {
+        ART.set(j.u, URL.createObjectURL(b));
+        document.querySelectorAll(`[data-art="${j.code}"]`).forEach(el => {
+          if ((el.dataset.size || '') === j.size) put(el, ART.get(j.u)); });
+      })
+      .catch(() => { if (j.tries < 5) setTimeout(() => { BUSY.delete(j.u); load(j.code, j.size, j.tries + 1, true); },
+                                                  800 * 2 ** j.tries); else BUSY.delete(j.u); })
+      .finally(() => { if (ART.has(j.u)) BUSY.delete(j.u); running--; pump(); });
+  }
+}
 const name = c => (S.names[String(c)] || ('#' + c));
 const text = c => (S.texts && S.texts[String(c)]) || '';
 const esc = t => String(t).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
@@ -156,8 +226,7 @@ function cardEl(code, pos, k, mats) {
   // (position 0xA) but stands upright (it was drawn sideways, 2026-11-21)
   const def = /-m-/.test(k) && pos && (pos & 0xC);
   const n = mats && mats.length ? `<b class="mat-n">${mats.length}</b>` : '';
-  return `<div class="c${back ? ' back' : ''}${def ? ' def' : ''}${cls(k)}" data-k="${k}" data-code="${back ? '' : code}"
-    style="${back ? '' : `background-image:url(${img(code)})`}">${n}</div>`;
+  return `<div class="c${back ? ' back' : ''}${def ? ' def' : ''}${cls(k)}" data-k="${k}" data-code="${back ? '' : code}"${back ? '' : bg(code)}>${n}</div>`;
 }
 function zoneCell(p, loc, seq, list, label) {
   const k = key(p, loc, seq);
@@ -170,7 +239,7 @@ function pileCell(p, z, cards, count) {
   const pk = `${p}-${z}`, top = cards && cards.length ? cards[cards.length - 1] : null;
   const n = count !== undefined ? count : (cards || []).length;
   const g = PILES[pk] ? (isPick() ? ' pick' : ' glow') : '';
-  return `<div class="cell pile${g}" data-pile="${pk}">${top ? `<div class="c" style="background-image:url(${img(top)})"></div>`
+  return `<div class="cell pile${g}" data-pile="${pk}">${top ? `<div class="c" data-code="${top}"${bg(top)}></div>`
     : (z === 'd' || z === 'x') && n ? '<div class="c back"></div>' : ''}<span class="cnt">${n}</span><span class="tag">${PILE[z]}</span></div>`;
 }
 function row(p, loc, mirror, left, right) {
@@ -184,7 +253,8 @@ function render() {
   const ph = {1: 'DP', 2: 'SP', 4: 'M1', 8: 'BP', 16: 'BP', 32: 'BP', 64: 'BP', 128: 'BP', 256: 'M2', 512: 'EP'}[S.phase];
   document.getElementById('phases').innerHTML = ['DP', 'SP', 'M1', 'BP', 'M2', 'EP'].map(x =>
     `<b class="${x === ph ? 'on' : ''}">${x}</b>`).join('') +
-    `<span style="font-size:11px;color:var(--dim);margin-left:4px">T${S.turn} ${S.turn_player === you ? 'you' : 'AI'}</span>`;
+    `<span class="turn ${S.turn_player === you ? 'you' : 'ai'}">T${S.turn} · ${S.turn_player === you ? 'YOUR TURN' : "AI'S TURN"}</span>`;
+  document.querySelector('.hud').className = 'hud ' + (S.turn_player === you ? 't-you' : 't-ai');
   const lp = (who, v) => `<span><small>${who}</small> <span class="${v <= 2000 ? 'low' : ''}">${v}</span></span>`;
   document.getElementById('lps').innerHTML = lp('AI', PA.lp) + lp('you', PY.lp);
   // the board: the AI mirrored on top, you below
@@ -202,7 +272,7 @@ function render() {
                                                      pileCell(you, 'd', null, PY.deck_count));
   document.getElementById('hand').innerHTML = (PY.hand || []).map((c, i) => {
     const k = key(you, 2, i);
-    return `<div class="h${cls(k)}" data-k="${k}" data-code="${c}" style="background-image:url(${img(c)})"></div>`; }).join('');
+    return `<div class="h${cls(k)}" data-k="${k}" data-code="${c}"${bg(c)}></div>`; }).join('');
   banner();
   bar();
   const u = document.getElementById('undo');
@@ -212,17 +282,58 @@ function render() {
   document.querySelectorAll('#modes button').forEach(b => {
     b.classList.toggle('on', b.dataset.m === (S.respond || 'auto'));
     b.onclick = () => setMode(b.dataset.m); });
-  document.getElementById('log').innerHTML = (S.log || []).slice().reverse().map(x =>
-    `T${x.turn} ${x.who ? '<b>' + esc(x.who) + '</b> ' : ''}${esc(x.text)}`).join('<br>');
+  logs();
   wire();
+  paint();
+}
+const who = x => x.who === 'you' ? 'you' : x.who === 'AI' ? 'ai' : '';
+// "you activates" but "your Havnis is discarded": a passive entry names the card's owner
+const line = x => (x.who ? `<b>${esc(x.own ? (x.who === 'you' ? 'your' : "AI's") : x.who)}</b> ` : '') + esc(x.text);
+let SEEN = null, TURN = null;     // the log entries and the turn the page last showed
+function logs() {
+  const L = S.log || [], first = (S.log_total || L.length) - L.length;   // global index of L[0]
+  const fresh = i => SEEN !== null && first + i >= SEEN;
+  // the whole log, newest turn first, a heading per turn
+  let html = '', t = null;
+  L.map((x, i) => [x, i]).reverse().forEach(([x, i]) => {
+    if (x.text.startsWith('---')) return;
+    if (x.turn !== t) { t = x.turn; html += `<div class="t">Turn ${t}</div>`; }
+    html += `<div class="${who(x)}">${line(x)}</div>`; });
+  document.getElementById('log').innerHTML = html;
+  // the feed: the last few things that happened, new ones flashed, the turn they began marked
+  const rows = [];
+  const lim = Math.min(8, Math.max(4, L.filter((x, i) => fresh(i)).length));
+  for (let i = L.length - 1; i >= 0 && rows.length < lim; i--) {
+    const x = L[i];
+    rows.push(x.text.startsWith('---')
+      ? `<div class="sep${fresh(i) ? ' new' : ''}">── Turn ${x.turn}: ${x.who === 'you' ? 'your turn' : "the AI's turn"} ──</div>`
+      : `<div class="${who(x)}${fresh(i) ? ' new' : ''}"><i class="${x.code ? '' : 'none'}"${bg(x.code)}></i>
+         <span>${line(x)}</span></div>`);
+  }
+  const feed = document.getElementById('feed');
+  feed.innerHTML = rows.join('');
+  feed.onclick = () => { const d = document.getElementById('logbox'); d.open = true; d.scrollIntoView({behavior: 'smooth'}); };
+  // ring the cards the newest entries name, so you see WHERE it happened
+  const named = L.filter((x, i) => fresh(i) && x.code).map(x => String(x.code));
+  const ring = new Set(named.length ? named.slice(-3) : []);
+  document.querySelectorAll('.mat [data-code]').forEach(el => {
+    if (ring.has(el.dataset.code) && !el.classList.contains('glow') && !el.classList.contains('pick')) el.classList.add('recent'); });
+  if (TURN !== null && S.turn !== TURN) toast(S.turn_player === S.you ? `Turn ${S.turn} — your turn` : `Turn ${S.turn} — the AI's turn`,
+                                               S.turn_player === S.you ? '#9ece6a' : '#f7768e');
+  SEEN = S.log_total || L.length; TURN = S.turn;
+}
+function toast(msg, colour) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.background = colour; t.classList.add('on');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 1800);
 }
 function banner() {
   const b = document.getElementById('banner');
   const top = S.chain.length ? S.chain[S.chain.length - 1] : null;
-  const last = (S.log || []).slice(-1)[0];
-  const chainTxt = S.chain.length ? `<span class="last"><b>Chain</b>: ${S.chain.map(([c, p]) =>
-    `${p === S.you ? 'you' : 'AI'} ${esc(name(c))}`).join(' → ')}</span>` : '';
-  const lastTxt = chainTxt + (last ? `<span class="last">${last.who ? esc(last.who) + ': ' : ''}${esc(last.text)}</span>` : '');
+  // the chain as its cards, link 1 first: tap one to read it
+  const lastTxt = S.chain.length ? `<div class="chainrow"><small>Chain:</small>${S.chain.map(([c, p], j) =>
+    `${j ? '<span class="arrow">→</span>' : ''}<div class="lk ${p === S.you ? 'you' : 'ai'}" data-code="${c}" title="${esc(name(c))}"${bg(c)}
+      onclick="openCard('${c}', null)"><b>${j + 1}</b></div>`).join('')}</div>` : '';
   if (S.status === 'thinking') { b.className = 'banner wait'; b.innerHTML = 'The AI is thinking…' + lastTxt; return; }
   if (S.status === 'over') { b.className = 'banner wait'; b.innerHTML = esc(S.note || 'The duel is over.'); return; }
   if (!(S.actions || []).length) { b.className = 'banner wait'; b.innerHTML = 'Waiting for the AI…' + lastTxt; return; }
@@ -277,33 +388,51 @@ function openCard(code, k) {
   const mats = (k && MATS[k]) || [];
   if (!mats.length && acts.length === 1 && ['select', 'unselect'].includes(acts[0].kind)) return act(acts[0].i);
   const known = code !== '' && code !== undefined && code !== null;
-  document.getElementById('sheet-in').innerHTML = `<div class="head">${known ? `<img src="${img(code, 'full')}" alt="">` : ''}
+  document.getElementById('sheet-in').innerHTML = `<div class="head">${known ? `<div class="big"${bg(code, 'full')}></div>` : ''}
     <div><h4>${known ? esc(name(code)) : 'Face-down card'}</h4><p>${known ? esc(text(code)) : ''}</p></div></div>
     ${acts.length ? `<div class="moves">${verbs(acts).map((v, j) =>
       `<button class="${j === 0 ? 'main' : ''}" onclick="closeSheet();act(${v.a.i})">${esc(v.label)}</button>`).join('')}</div>` : ''}
     ${mats.length ? `<h4 style="margin-top:12px">Its materials — tap one to ${mats[0].kind === 'unselect' ? 'unchoose' : 'choose'} it</h4>
-      <div class="grid">${mats.map(a => `<div class="pick" onclick="closeSheet();act(${a.i})" title="${esc(name(a.code))}"
-        style="${a.code ? `background-image:url(${img(a.code)})` : ''}"></div>`).join('')}</div>` : ''}
+      <div class="grid">${mats.map(a => `<div class="pick" onclick="closeSheet();act(${a.i})" title="${esc(name(a.code))}"${bg(a.code)}></div>`).join('')}</div>` : ''}
     <button class="close" onclick="closeSheet()">Close</button>`;
-  document.getElementById('sheet').classList.add('on');
+  openSheet();
 }
 function openPile(pk) {
-  const [p, z] = pk.split('-');
-  const P = S.board.players[+p];
+  // every pile can be looked through at any time, prompt or not; the cards a move can use
+  // glow in place (user, 2026-11-25: "see into different piles ... even if there is an effect there")
+  const [p, z] = pk.split('-'), pl = +p, mine = pl === S.you, P = S.board.players[pl];
+  const loc = {d: 1, g: 16, b: 32, x: 64}[z];
   const acts = PILES[pk] || [];
-  const list = {g: P.grave, b: P.banished, x: P.extra_faceup}[z] || [];
-  // a pile you choose from shows the cards you may choose; else what it holds
-  const shown = acts.length ? acts.map(a => ({code: a.code, k: key(a.at.con, a.at.loc, a.at.seq)}))
-                            : list.map(c => ({code: c, k: null}));
-  document.getElementById('sheet-in').innerHTML = `<h4>${+p === S.you ? 'Your' : "The AI's"} ${PILE[z]} (${shown.length})</h4>
-    ${acts.length ? '<p>Tap a card to use or choose it.</p>' : ''}
-    <div class="grid">${shown.map(s => `<div class="${s.k ? (isPick() ? 'pick' : 'glow') : ''}" data-k="${s.k || ''}"
-      data-code="${s.code || ''}" style="${s.code ? `background-image:url(${img(s.code)})` : ''}"></div>`).join('')
-      || '<span class="muted">empty</span>'}</div>
-    <button class="close" onclick="closeSheet()">Close</button>`;
-  document.getElementById('sheet').classList.add('on');
+  let list, ordered = true, note = '';
+  if (z === 'd') {
+    list = mine ? S.my_deck || [] : []; ordered = false;
+    note = mine ? 'Sorted by card — the order stays hidden, as at a real table.' : `${P.deck_count} face-down cards. You cannot look at the AI's Deck.`;
+  } else if (z === 'x') {
+    list = mine ? S.my_extra || [] : P.extra_faceup || []; ordered = mine;
+    if (!mine) note = `${P.extra_count - list.length} face-down, ${list.length} face-up.`;
+  } else list = {g: P.grave, b: P.banished}[z] || [];
+  // in its real order a card keeps its key, so a move on it glows on it; GY / banished top first
+  let cells = list.map((c, i) => ({code: c, k: ordered ? key(pl, loc, i) : null}));
+  if (z === 'g' || z === 'b') cells = cells.reverse();
+  const on = new Set(cells.filter(c => c.k && BY[c.k]).map(c => c.k));
+  const choose = acts.map(a => ({code: a.code, k: key(a.at.con, a.at.loc, a.at.seq)})).filter(c => !on.has(c.k));
+  const cell = c => `<div class="${c.k && BY[c.k] ? (isPick() ? 'pick' : 'glow') : ''}" data-k="${c.k && BY[c.k] ? c.k : ''}"
+      data-code="${c.code || ''}" title="${c.code ? esc(name(c.code)) : ''}"${bg(c.code)}></div>`;
+  openSheet(`<h4>${mine ? 'Your' : "The AI's"} ${PILE[z]} (${z === 'd' ? P.deck_count : z === 'x' ? P.extra_count : list.length})</h4>
+    ${acts.length ? '<p>Glowing cards can be used or chosen — tap one. Tap any card to read it.</p>' : '<p>Tap a card to read it.</p>'}
+    ${choose.length ? `<div class="grid">${choose.map(cell).join('')}</div>` : ''}
+    ${cells.length ? `<div class="grid">${cells.map(cell).join('')}</div>` : choose.length ? '' : '<p class="note">empty</p>'}
+    ${note ? `<p class="note">${esc(note)}</p>` : ''}
+    <button class="close" onclick="closeSheet()">Close</button>`);
   document.querySelectorAll('#sheet-in .grid div').forEach(el => el.onclick = () => {
     const k = el.dataset.k; closeSheet(); openCard(el.dataset.code, k || null); });
+}
+function openSheet(html) {
+  const box = document.getElementById('sheet-in');
+  if (html !== undefined) box.innerHTML = html;
+  document.getElementById('sheet').classList.add('on');
+  box.scrollTop = 0;
+  paint(box);
 }
 function wire() {
   document.querySelectorAll('.mat [data-k]').forEach(el => {
@@ -335,8 +464,7 @@ function pickCards() {      // Cards mode: tick the cards the duel should stop f
   box.innerHTML = `<h4>Stop to respond only for these cards</h4>
     <p>Tap to tick or untick (<b id="pick-n">${want.size}</b> selected). The duel passes every other
       chance to respond for you.</p>
-    <div class="grid">${(S.respond_choices || []).map(c => `<div class="${want.has(c.code) ? 'on' : 'off'}" data-code="${c.code}"
-      style="background-image:url(${img(c.code)})"><span>${esc(c.name)}</span></div>`).join('')}</div>
+    <div class="grid">${(S.respond_choices || []).map(c => `<div class="${want.has(c.code) ? 'on' : 'off'}" data-code="${c.code}"${bg(c.code)}><span>${esc(c.name)}</span></div>`).join('')}</div>
     <div class="moves"><button class="main" id="pick-save">Save</button></div>
     <button class="close" onclick="closeSheet()">Cancel</button>`;
   box.querySelectorAll('.grid div').forEach(el => el.onclick = () => {
@@ -345,7 +473,7 @@ function pickCards() {      // Cards mode: tick the cards the duel should stop f
     el.className = want.has(c) ? 'on' : 'off';
     document.getElementById('pick-n').textContent = want.size; });
   document.getElementById('pick-save').onclick = () => { closeSheet(); setMode('select', [...want], true); };
-  document.getElementById('sheet').classList.add('on');
+  openSheet();
 }
 async function setMode(m, cards, force) {
   if (m === 'select' && cards === undefined) return pickCards();
@@ -361,12 +489,20 @@ function closeSheet() { document.getElementById('sheet').classList.remove('on');
 async function act(i) {
   document.getElementById('bar').innerHTML = '';
   document.getElementById('banner').innerHTML = '…';
-  const r = await fetch(`{{ url_for('views.duel_act', did=state.id) }}`, {method: 'POST', credentials: 'same-origin',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'i=' + i});
-  const j = await r.json();
-  if (j.error) { alert(j.error); } else S = j;
+  try {
+    const r = await fetch(`{{ url_for('views.duel_act', did=state.id) }}`, {method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'i=' + i});
+    const j = await r.json();
+    if (j.error) { alert(j.error); } else S = j;
+  } catch (e) {     // the connection dropped: show where the duel really is
+    try { const r = await fetch(`{{ url_for('views.duel_state', did=state.id) }}`, {credentials: 'same-origin'});
+          if (r.ok) S = await r.json(); } catch (e2) { alert('Lost the connection — reload the page.'); }
+  }
   render();
 }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+// everything either deck can show, fetched in the background so a tap never waits
+[...new Set([...Object.keys(S.names), ...(S.respond_choices || []).map(c => c.code)])].forEach(c => load(c));
 setInterval(async () => {
   if (S.status !== 'thinking') return;
   const r = await fetch(`{{ url_for('views.duel_state', did=state.id) }}`, {credentials: 'same-origin'});

@@ -58,7 +58,9 @@ def create_app(config=None):
 # come from another origin. That is the machine-checked version of "card
 # art is served from here, never hotlinked from YGOPRODeck", which their
 # terms require and which is otherwise only a promise in a comment.
-CSP = ("default-src 'self'; img-src 'self' data:; "
+# blob: is this page's own copies of art it fetched from here (the duel's image cache):
+# a blob URL can only be made by this origin's script, so nothing is hotlinked.
+CSP = ("default-src 'self'; img-src 'self' data: blob:; "
        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
        "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
        "base-uri 'none'")

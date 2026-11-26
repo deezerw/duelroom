@@ -1601,6 +1601,7 @@ def _duel_state(did):
         for z in ("hand", "grave", "banished", "extra_faceup"):
             codes |= {x for x in p.get(z) or [] if x}
     codes |= {code for code, _p in v["chain"]}
+    codes |= set(v["my_deck"]) | set(v["my_extra"]) | {x["code"] for x in v["log"] if x["code"]}
     names, texts = {}, {}
     for code in codes:
         r = card_db.resolve(c, code)
