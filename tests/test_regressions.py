@@ -8060,3 +8060,21 @@ def test_bc_holds_each_seat_out_by_its_own_hand(monkeypatch):
     spec2.loader.exec_module(ab)
     raw = {"solver": kill, "deck": {"name": "a"}, "hand_index": 5}
     assert ab.group_of(raw) == "enemy:1003" and bc.demo_groups(raw) == {"D:5", "enemy:1003"}
+
+
+def test_duel_ai_plans_no_hand_traps_and_no_discard_card_when_your_hand_is_empty():
+    """duel.plan_args(your_hand=0): your hand size is public; with no card you can hold
+    no hand trap (no --opp-hand-root) and a set Super Polymerization cannot pay its
+    discard, so your face-down cards are assumed to be the next most dangerous one."""
+    import os
+    from skills import duel, engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+    cards = default_cards()
+    row = {"user_deck": "imported", "ai_deck": "Angelechy-Meta", "user_seat": 0}
+    full = duel.plan_args(row, cards, 2, your_hand=3)
+    empty = duel.plan_args(row, cards, 2, your_hand=0)
+    assert "--opp-hand-root" in full and "--opp-hand-root" not in empty
+    if game._bin_has("--opp-set-root"):
+        setc = lambda a: a[a.index("--opp-set-root") + 1]  # noqa: E731
+        assert setc(full) == "48130397" and setc(empty) not in ("48130397", None)

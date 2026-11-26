@@ -844,7 +844,7 @@ def opp_hand(user_deck, cards):
     return sorted(c for c in main if game.is_hand_trap(c, cards))
 
 
-def assumed_set_card(user_deck, cards):
+def assumed_set_card(user_deck, cards, skip=()):
     """What the AI assumes each of your face-down Spell/Traps is when it plans
     (user chose, 2026-11-25, from the flaw audit: it planned as if they were
     blanks, and a set Super Polymerization wrecked it): your most dangerous card
@@ -859,23 +859,28 @@ def assumed_set_card(user_deck, cards):
                           (cards.get(c).type & 0x2 and cards.get(c).type & 0x10000)))
     marked = [int(c) for c in trainer.prefs(_db.connect(), user_deck)["interrupters"]]
     read = [c for c in game.respond_codes(path, cards) if c not in marked]
-    return next((c for c in marked + read if c in main and settable(c)), None)
+    return next((c for c in marked + read if c in main and settable(c) and c not in skip), None)
 
 
-def plan_args(row, cards, turn):
+def plan_args(row, cards, turn, your_hand=None):
     """The solver flags for the AI's turn: its own deck's own-turn rules, you
     answering with every hand trap of your list (added to your hand), the
-    smart defender. No card of your real hand is named."""
-    from . import engine, game
+    smart defender. No card of your real hand is named. `your_hand`: how many
+    cards you hold (public) -- with none, you can hold no hand trap and your set
+    cards cannot pay a discard (2026-11-26: it planned around an Ash and a Super
+    Polymerization you could not have)."""
+    from . import drill, engine, game
 
     ai = 1 - row["user_seat"]
     args = ["--player", str(ai), "--turns", str(turn), "--no-ref"]
     if PLAY_AROUND:
-        traps = opp_hand(row["user_deck"], cards)
+        empty = your_hand == 0
+        traps = [] if empty else opp_hand(row["user_deck"], cards)
         if traps:
             args += ["--opp-hand-root", "|".join(map(str, traps))]
         # your face-down Spell/Traps are planned around as your most dangerous one
-        setc = assumed_set_card(row["user_deck"], cards) if game._bin_has("--opp-set-root") else None
+        setc = (assumed_set_card(row["user_deck"], cards, skip=drill.NEEDS_HAND if empty else ())
+                if game._bin_has("--opp-set-root") else None)
         if setc:
             args += ["--opp-set-root", str(setc)]
         respond = list(traps) + ([setc] if setc and setc not in traps else [])
@@ -1120,7 +1125,8 @@ def plan(conn, did):
         start, prefix = breaking.split_position(Replay.from_yrp(Path(row["template"])),
                                                 live.responses, root)
         cards = live.cards
-        base = ["--start", str(start), "--root", str(prefix)] + plan_args(row, cards, turn)
+        base = ["--start", str(start), "--root", str(prefix)] + plan_args(
+            row, cards, turn, your_hand=len(live.board()["players"][row["user_seat"]].get("hand") or []))
         solve = _solver(conn)
         dev, stopped = solve.dev, solve.stopped
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
