@@ -464,6 +464,18 @@ def _assembled(r, n_targets):
     return int(m.group(1)) if m else 0
 
 
+def split_drawers(opts, passing, code_of, draw):
+    """(the options to search, the draw cards' options): see decide."""
+    draw = set(draw)
+    drawers = [o for o in opts if o != passing and code_of(o) in draw]
+    return [o for o in opts if o not in drawers], drawers
+
+
+def with_drawer(best, passing, drawers):
+    """The searched answer, or -- where the search passes -- the first draw card."""
+    return drawers[0] if best == passing and drawers else best
+
+
 def pick(opts, got):
     """(the option leaving you the fewest pieces on average, {option: mean}) from
     [(option, pieces)]; `opts` lists pass first, so a tie keeps the card."""
@@ -497,10 +509,21 @@ def decide(conn, did):
                 codes.add(p.actions[i].card.code)
                 opts.append(i)
         names = {o: "pass" if o == passing else cards.get(p.actions[o].card.code).name for o in opts}
+        # "draw each time you Special Summon" cards (Mulcharmies, Maxx "C"): your rest of turn
+        # scores your PIECES, which a draw never changes, so the search always tied them with
+        # a pass and the AI never fired one (2026-11-26). Not searched: played whenever the
+        # search would pass, as a real player drops one at your first summon.
+        opts, drawers = split_drawers(opts, passing, lambda o: p.actions[o].card.code,
+                                      game.own_turn_dead(engine.DECKS / f"{row['ai_deck']}.ydk"))
         hand_n = len(live.board()["players"][you].get("hand") or [])
         pool = unseen_pool(row, live)
     finally:
         live.close()
+    if drawers and opts == [passing]:
+        # nothing else to weigh: the draw card, no search
+        (tpl.parent / "defends.json").write_text(json.dumps({**_decided(row), key: drawers[0]}))
+        _save(conn, did, note=f"answered with {names[drawers[0]]} (a draw card: played at once)")
+        return advance(conn, did)
     rng = Random(int(key[:12], 16))       # the same window draws the same hands
     samples = [rng.sample(pool, min(hand_n, len(pool))) for _ in range(DEFEND_SAMPLES)]
     pieces = user_targets(conn, row["user_deck"])
@@ -530,10 +553,12 @@ def decide(conn, did):
     with ThreadPoolExecutor(len(jobs)) as ex:
         got = list(ex.map(one, jobs))
     best, mean = pick(opts, got)
+    best = with_drawer(best, passing, drawers)
     f = tpl.parent / "defends.json"
     f.write_text(json.dumps({**_decided(row), key: best}))
     _save(conn, did, note="answered by search (" + ", ".join(
-        f"{names[o]} {mean[o]:.1f}" for o in opts) + f" of {len(pieces)} pieces left you) in {time.time() - t0:.0f} s")
+        f"{names[o]} {mean[o]:.1f}" for o in opts) + f" of {len(pieces)} pieces left you"
+        + (f"; then {names[best]}, a draw card" if best in drawers else "") + f") in {time.time() - t0:.0f} s")
     return advance(conn, did)
 
 

@@ -8008,3 +8008,19 @@ def test_a_set_super_poly_with_an_empty_hand_is_dead():
     assert poly not in drill.dead_on_field(board([14558127]), cards)
     assert poly not in game._pieces(board([]), 0, cards, [poly])
     assert poly in game._pieces(board([14558127]), 0, cards, [poly])
+
+
+def test_ai_drops_its_draw_card_where_the_search_would_pass():
+    """duel.decide: a "draw each time you summon" card (Mulcharmy, Maxx "C") never
+    changes your pieces, so the searched answer always tied it with a pass and the
+    AI never fired one. It is not searched; it is played where the search passes,
+    and a searched answer that does better still wins."""
+    from skills import duel, engine, game
+    fuwalos, ash = 42141493, 14558127
+    assert fuwalos in game.own_turn_dead(engine.DECKS / "Angelechy-Meta.ydk")
+    code = {0: None, 1: ash, 2: fuwalos}.get
+    opts, drawers = duel.split_drawers([0, 1, 2], 0, code, [fuwalos])
+    assert opts == [0, 1] and drawers == [2]
+    assert duel.with_drawer(0, 0, drawers) == 2          # the search passes: Fuwalos
+    assert duel.with_drawer(1, 0, drawers) == 1          # Ash does better: Ash (Fuwalos stays)
+    assert duel.with_drawer(0, 0, []) == 0
