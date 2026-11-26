@@ -88,6 +88,16 @@ Every METHOD bump makes stored games "old data", so these land together, and due
 - [ ] QUICK_RESPOND on for Havnis / Kashtira, measured: `tools/experiments/quick_respond_ab.py`
       (game.kill_check at OTK_X, paired off/on, 102 stored going-first positions hold one;
       ~18-54 solver-hours: duelpc day).
+- [ ] **"Better than me" (user, 2026-11-26: "i dont want it to just copy my boards i want it to
+      be better than me"; chose all three):** (a) `game.RESPOND_ALL` (ce0a0d6, OFF): every card
+      of the deck may answer the opponent's turn -- Mind Shuffle, Perlereino's destroy and the
+      Tearlaments' GY Fusions were never listed. A/B `respond_all_ab.py`. (b) `game.T1_PICK_ALWAYS`
+      (7efac41, OFF, needs T1_FALLBACKS > 0): every turn 1 picked by the look-ahead kill check,
+      candidates + breadth shapes (`game.t1_candidates`). A/B `t1_starters.py ... always`.
+      (c) LIVE (8954742): each duel you play going first compares your turn 1 with the solver's on
+      the same hand through the kill check (duel page + tally). Runs: results/experiments/
+      better_than_me{,2}.log (Angelechy, then a going-first Blue-Eyes smoke batch: no going-first
+      Blue-Eyes positions existed). (a)/(b) go live with this round's METHOD bump if they help.
 - [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
 
 ### Phase 2 -- calibration (duelpc days)
