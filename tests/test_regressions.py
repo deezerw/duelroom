@@ -8120,3 +8120,25 @@ def test_turn1_pick_solves_a_candidate_only_after_every_board_before_it_died(mon
     alive = {"g2"}
     assert game.turn1_fallbacks(full, ["g1", "g2", "g3"], n=3, **kw)["prefix"] == "g2"
     assert solved == ["g1", "g2"]
+
+
+def test_duel_ai_plans_with_your_face_up_board_answering():
+    """duel.plan_args(your_board=): your face-up pieces (Desirae with its Sequence, a
+    marked Dragostapelia) are in the planning copy's --opp-respond -- only the assumed
+    hand traps and set card were, so its plans had your board never fire."""
+    import os
+    from skills import duel, engine
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+    cards = default_cards()
+    drago = 69946549
+    board = {"turn": 2, "players": [
+        {"mzone": [{"code": drago, "position": 1, "sequence": 2, "overlay": []}], "szone": [],
+         "hand": [14558127], "grave": [], "banished": []},
+        {"mzone": [], "szone": [], "hand": [], "grave": [], "banished": []}]}
+    row = {"user_deck": "imported", "ai_deck": "Angelechy-Meta", "user_seat": 0}
+    def responded(args):
+        i = args.index("--opp-respond")
+        return {int(c) for c in args[i + 1].split("|")}
+    assert drago not in responded(duel.plan_args(row, cards, 2, your_hand=1))
+    assert drago in responded(duel.plan_args(row, cards, 2, your_hand=1, your_board=board))

@@ -862,7 +862,7 @@ def assumed_set_card(user_deck, cards, skip=()):
     return next((c for c in marked + read if c in main and settable(c) and c not in skip), None)
 
 
-def plan_args(row, cards, turn, your_hand=None):
+def plan_args(row, cards, turn, your_hand=None, your_board=None):
     """The solver flags for the AI's turn: its own deck's own-turn rules, you
     answering with every hand trap of your list (added to your hand), the
     smart defender. No card of your real hand is named. `your_hand`: how many
@@ -884,6 +884,18 @@ def plan_args(row, cards, turn, your_hand=None):
         if setc:
             args += ["--opp-set-root", str(setc)]
         respond = list(traps) + ([setc] if setc and setc not in traps else [])
+        # your FACE-UP board answers too (public; 2026-11-26: only the assumed hand traps and
+        # set card were listed, so its plans had your Desirae / Lars / S:P never fire and walked
+        # into them), as the games' defender lists the board's pieces; with game.RESPOND_ALL
+        # every card of your list may answer where the engine allows it
+        if your_board is not None:
+            from . import db as _db, trainer
+            marked = trainer.prefs(_db.connect(), row["user_deck"])["interrupters"]
+            respond += [c for c in game._pieces(your_board, row["user_seat"], cards, marked)
+                        if c not in respond]
+        if game.RESPOND_ALL:
+            respond += [c for c in game.respond_codes(engine.DECKS / f"{row['user_deck']}.ydk", cards)
+                        if c not in respond]
         if respond:
             args += game.defender_args(respond, cards)
     args += game.own_turn_args(engine.DECKS / f"{row['ai_deck']}.ydk")
@@ -1125,8 +1137,10 @@ def plan(conn, did):
         start, prefix = breaking.split_position(Replay.from_yrp(Path(row["template"])),
                                                 live.responses, root)
         cards = live.cards
+        board_now = live.board()
         base = ["--start", str(start), "--root", str(prefix)] + plan_args(
-            row, cards, turn, your_hand=len(live.board()["players"][row["user_seat"]].get("hand") or []))
+            row, cards, turn, your_hand=len(board_now["players"][row["user_seat"]].get("hand") or []),
+            your_board=board_now)
         solve = _solver(conn)
         dev, stopped = solve.dev, solve.stopped
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
