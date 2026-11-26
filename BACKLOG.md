@@ -104,9 +104,12 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       Requiem 9 of 11 no stop (Requiem tributes itself to activate: nothing left to destroy),
       Bystial Magnamhut -> Requiem 3 / 3; negating the ACTIVATION is fine (Dominus Impulse /
       Songs / Ash -> Requiem 0 of 80 wasted). Veiler / Imperm open-window (72) and Veiler onto
-      Spells / Traps are what patch 0017 fixed. Next bump: Ghost Ogre (and Bystial) into
-      game.ON_MONSTER_ACTIVATION's "the activating card must still be on the field" rule (patch
-      0017 reads the list), then the kill-check A/B; re-run the table on the new games.
+      Spells / Traps are what patch 0017 fixed. Next bump: Ghost Ogre needs a VARIANT of
+      0017's rule, not the list -- it also answers a face-up Spell / Trap's effect ("destroy that
+      card on the field": Perlereino, Scream are real stops), which 0017's monster-only check
+      would forbid. Patch 0019: "the activating card is still on the field" for Ogre (monster or
+      face-up S/T), duel._monster_link's Python twin likewise, then the kill-check A/B. Bystial
+      -> Requiem is NOT this (it banishes from the GY, which the table cannot score as a stop).
 - [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
       Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full
       + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
