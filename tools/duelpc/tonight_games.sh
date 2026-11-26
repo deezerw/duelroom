@@ -12,12 +12,12 @@ LEFT=$(( $(date -d "$STOP" +%s) - $(date +%s) ))
 say() { echo "=== $(date '+%F %T') $*"; }
 [ "$LEFT" -gt 600 ] || { say "less than 10 minutes before $STOP: nothing started"; exit 0; }
 say "smoke: imported vs Angelechy-Meta going first, 2 enemy hands, on duelpc (stop $STOP)"
-timeout -s INT "$LEFT" $P daemon.py games imported Angelechy-Meta 1 2 --device duelpc
+timeout -s INT "$LEFT" $P daemon.py games imported Angelechy-Meta 1 2 --device duelpc --workers 10
 if $P tools/experiments/play_audit.py Angelechy-Meta first duelpc --gate; then
   LEFT=$(( $(date -d "$STOP" +%s) - $(date +%s) ))
   if [ "$LEFT" -gt 600 ]; then
     say "audit clean: the long run (10 enemy hands) until $STOP"
-    timeout -s INT "$LEFT" $P daemon.py games imported Angelechy-Meta 1 10 --device duelpc
+    timeout -s INT "$LEFT" $P daemon.py games imported Angelechy-Meta 1 10 --device duelpc --workers 10
   fi
 else
   say "smoke audit FAILED: long run skipped (fix first)"
