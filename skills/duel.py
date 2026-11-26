@@ -394,7 +394,13 @@ def _monster_link(live, ai):
 # build (`user_targets`). The answer that leaves you the fewest of them is played;
 # a tie is a pass -- the card is kept for a better moment. Same samples and seeds for
 # every option (paired).
-DEFEND_SAMPLES = 3
+DEFEND_SAMPLES = 4
+# Measured 2026-11-26 on the four answerable windows of duels 7-8: 3 s searches chose
+# what 20 s ones did (the one split was a tie at 3 s); the spread comes from the
+# sampled hands, so time goes to more hands rather than longer searches. One thread
+# each: the budget is CPU work per thread, so two threads doubled the CPU per search.
+DEFEND_MS = 3_000
+DEFEND_THREADS = 1
 DEFEND_BIN = ROOT / "vendor" / "ygorl" / "build" / "combo-solver-0018" / "bin" / "combosolver"
 
 
@@ -509,7 +515,7 @@ def decide(conn, did):
         finally:
             lv.close()
     solve = _solver(conn, binary=DEFEND_BIN)
-    ms = max(row["think_ms"] // 4, 10_000)
+    ms = DEFEND_MS
 
     def one(job):
         o, k, hand = job
@@ -517,7 +523,8 @@ def decide(conn, did):
         args = ["--start", str(start), "--root", str(prefix), "--player", str(you), "--turns", "1",
                 "--no-ref", *targets, *rules, "--self-hand-root", "|".join(map(str, hand)) or "-",
                 "--reseed", str(k + 1)]
-        return o, _assembled(solve(prefix, args, root / f"opt-{o}", f"h{k}", ms, k + 1), len(pieces))
+        return o, _assembled(solve(prefix, args, root / f"opt-{o}", f"h{k}", ms, k + 1,
+                                   threads=DEFEND_THREADS), len(pieces))
     t0 = time.time()
     jobs = [(o, k, h) for o in opts for k, h in enumerate(samples)]
     with ThreadPoolExecutor(len(jobs)) as ex:
@@ -557,15 +564,16 @@ def _solver(conn, binary=None):
     dev, stopped = helper_device(conn), threading.Event()
     kw = {"binary": binary} if binary else {}
 
-    def solve(*a):
+    def solve(*a, **more):
+        opts = {**kw, **more}
         if dev is not None:
             try:
-                return game._solve(*a, device=dev, **kw)
+                return game._solve(*a, device=dev, **opts)
             except Exception as e:  # noqa: BLE001 -- the PC went away: search here
                 if stopped.is_set():
                     raise
                 print(f"{dev.name}: {e}; searching here instead", flush=True)
-        return game._solve(*a, **kw)
+        return game._solve(*a, **opts)
     solve.dev, solve.stopped = dev, stopped
     return solve
 
@@ -636,6 +644,18 @@ def _plan_step(live, plan):
             del plan[0]
             return [next((i for i, a in enumerate(p.actions) if a.kind == "pass"),
                          len(p.actions) - 1)]
+        # answers YOU gave in the copy at windows the real duel never opens (duel 4: a
+        # "no" for your side before its first move -- every plan stuck on step one):
+        # skip ahead to its next planned move that fits here, as game.replay(lenient)
+        from . import game
+        for m in range(1, min(game.LENIENT_SKIP, len(plan))):
+            try:
+                steps = actions_for_response(p.state, canonical_response(p.decision, bytes.fromhex(plan[m])))
+            except Exception:  # noqa: BLE001
+                steps = None
+            if steps:
+                del plan[:m]
+                return list(steps)
         return None
     return None
 
@@ -974,8 +994,21 @@ def helper_device(conn):
     and never on at night (user)."""
     from . import remote
     dev = remote.DEVICES.get(HELPER)
-    if dev is None or not remote.reachable(dev, 2.0):
+    if dev is None:
         return None
+    # an asleep PC costs the 2.5 s probe timeout: the answer is kept for a minute
+    memo = DUELS / ".helper-up"
+    try:
+        up_at = memo.stat().st_mtime if memo.read_text() == "down" else None
+    except OSError:
+        up_at = None
+    if up_at is not None and time.time() - up_at < 60:
+        return None
+    if not remote.reachable(dev, 2.0):
+        DUELS.mkdir(parents=True, exist_ok=True)
+        memo.write_text("down")
+        return None
+    memo.unlink(missing_ok=True)
     try:
         busy = any(json.loads(r[0] or "{}").get("device") == HELPER
                    for r in conn.execute("SELECT params FROM jobs WHERE state = 'running'"))
@@ -1042,7 +1075,9 @@ def plan(conn, did):
         cache = Path(row["template"]).parent / "plans.json"
         known = json.loads(cache.read_text()) if cache.exists() else {}
         key = hashlib.sha1(f"{row['think_ms']}|".encode() + b"".join(live.responses)).hexdigest()
-        if key in known:
+        # only while its first step fits here: a stored line that does not fit sent the
+        # duel round plan -> advance -> plan forever (duel 4, a plan a second for hours)
+        if key in known and (not known[key] or _plan_step(live, list(known[key])) is not None):
             line, t0 = known[key], time.time()
             raise _Reuse
         turn = live.session.tracker.turn
@@ -1134,6 +1169,11 @@ def plan(conn, did):
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []
+        if line and _plan_step(live, list(line)) is None:
+            # a fresh line that does not fit its own first step would re-plan forever:
+            # the AI closes the turn passively instead (plan [])
+            print(f"plan: first step does not fit here; passing the turn", flush=True)
+            line = []
         cache.write_text(json.dumps({**known, key: line}))
         note = f"planned {len(line)} step(s) in {time.time() - t0:.0f} s"
     except _Reuse:

@@ -7606,12 +7606,16 @@ def test_duel_borrows_the_pc_only_when_awake_idle_and_never_wakes_it(tmp_path, m
     from skills import db, duel, remote
 
     conn = db.connect(tmp_path / "t.db")
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
     woke = []
     monkeypatch.setattr(remote, "wake", woke.append)
     monkeypatch.setattr(remote, "ensure_up", woke.append)
     monkeypatch.setattr(remote, "reachable", lambda dev, t: False)
     assert duel.helper_device(conn) is None and not woke
-    monkeypatch.setattr(remote, "reachable", lambda dev, t: True)
+    probes = []
+    monkeypatch.setattr(remote, "reachable", lambda dev, t: probes.append(1) or True)
+    assert duel.helper_device(conn) is None and not probes, "an asleep PC is remembered a minute"
+    (tmp_path / "duels" / ".helper-up").unlink()
     monkeypatch.setattr(remote, "up", lambda dev: True)
     synced = []
     monkeypatch.setattr(remote, "sync", lambda dev, log: synced.append(dev.name))
@@ -7749,3 +7753,48 @@ def test_ai_answers_are_searched_over_hands_you_could_hold(tmp_path, monkeypatch
            for lab, extra in (("with", ["--self-hand-root", str(trap)]), ("without", []))}
     live.close()
     assert got == {"with": True, "without": False}, got
+
+
+def test_ai_follows_a_plan_that_opens_with_answers_only_the_copy_had(tmp_path, monkeypatch):
+    """Duel 4 (AI first): its plan opened with YOUR answers at windows only the
+    planning copy had (your assumed hand traps), so step one never fit; the AI
+    re-planned, and with the plan cache got the same plan back -- a plan a second
+    for hours. The follower skips ahead to its next move that fits; a reused or
+    fresh plan whose first step still does not fit is never played round again."""
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace as N
+
+    from skills import db, duel, engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import DuelSession
+    from ygorl.engine.replay import Replay
+
+    line = Path(__file__).parent / "fixtures" / "lines" / "duel_plan_leading_copy_answers.yrp"
+    rep = Replay.from_yrp(line)
+    s = DuelSession(rep.duel())
+    plan = [r.hex() for r in rep.responses]
+    try:
+        assert duel._plan_step(N(point=s.point), plan) is not None
+        assert len(plan) < len(rep.responses)            # the copy-only answers were dropped
+    finally:
+        s.close()
+    # the cache: a stored line that does not fit is not reused
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    import hashlib
+    import json
+    row = duel.get(conn, did)
+    live = duel.Live(row)
+    k = hashlib.sha1(f"{row['think_ms']}|".encode() + b"".join(live.responses)).hexdigest()
+    live.close()
+    (Path(row["template"]).parent / "plans.json").write_text(json.dumps({k: ["deadbeef"]}))
+    calls = []
+    monkeypatch.setattr(duel, "deck_target", lambda conn, deck: ["1"])
+    monkeypatch.setattr(duel, "hand_pieces", lambda conn, row, live: [])
+    monkeypatch.setattr(duel, "helper_device", lambda conn: None)
+    monkeypatch.setattr(game, "_solve", lambda *a, **kw: calls.append(a[3]) or {
+        "solution": None, "solutions": [], "approach": None, "log": "l"})
+    duel.plan(conn, did)
+    assert calls == ["build"], "a stored line that does not fit was reused"
