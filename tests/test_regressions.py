@@ -6778,11 +6778,11 @@ def test_enemy_plays_the_goal_line_that_gives_us_the_fewest_monsters(monkeypatch
     ours = {1, 2}
     monkeypatch.setattr(impact, "deck_codes", lambda p: ours)
     fields = {"a": [{"code": 9}], "b": [{"code": 1}], "c": [{"code": 9}, {"code": 8}], "d": []}
-    monkeypatch.setattr(game, "replay", lambda s, until_turn=None: NS(board={"players": [
+    monkeypatch.setattr(game, "replay", lambda s, until_turn=None, lenient=False: NS(board={"players": [
         {"mzone": fields[s] if until_turn == 3 else []},
         {"mzone": fields[s] if until_turn == 2 else []}]}))
     usable = {"a": 1, "c": 1}            # gifts we could use (Bastion-like)
-    monkeypatch.setattr(game, "usable_gifts", lambda s, p, d, t: usable.get(s, 0))
+    monkeypatch.setattr(game, "usable_gifts", lambda s, p, d, t, lenient=False: usable.get(s, 0))
     assert game.fewest_gifts(["a", "b", "c"], "deck") == "b"       # our own card: no gift
     assert game.fewest_gifts(["a", "c", "d", "b"], "deck") == "d"
     assert game.fewest_gifts(["c"], "deck") == "c" and game.fewest_gifts([], "deck") is None
