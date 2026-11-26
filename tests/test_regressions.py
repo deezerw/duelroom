@@ -7554,7 +7554,7 @@ def test_a_crashed_duel_planner_passes_the_turn_instead_of_hanging(tmp_path, mon
 
 def test_a_duel_whose_planner_died_plans_again_once(tmp_path, monkeypatch):
     """revive: "thinking" older than twice the solver's hard limit and a minute
-    (a planner killed by a reboot) plans again -- once, however many polls see it."""
+    (a planner killed by a reboot) thinks again -- once, however many polls see it."""
     from datetime import datetime, timedelta, timezone
 
     from skills import db, duel
@@ -7563,7 +7563,8 @@ def test_a_duel_whose_planner_died_plans_again_once(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "t.db")
     did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
     spawned = []
-    monkeypatch.setattr(duel, "_spawn_plan", spawned.append)
+    # advance starts whichever job the position needs (a plan, or a searched answer)
+    monkeypatch.setattr(duel, "advance", lambda conn, d: spawned.append(d))
     duel._save(conn, did, status="thinking")
     assert not duel.revive(conn, did) and not spawned           # just started thinking
     old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
@@ -7700,3 +7701,51 @@ def test_veiler_waits_for_a_monster_activation_in_the_solvers_defender_too(monke
     monkeypatch.setattr(game, "_bin_has", lambda flag: True)
     args = game.defender_args([97268402, 10045474, 14558127], cards)
     assert args[args.index("--opp-on-activation") + 1] == "10045474|97268402"
+
+
+def test_ai_answers_are_searched_over_hands_you_could_hold(tmp_path, monkeypatch):
+    from pathlib import Path
+    """User chose (2026-11-26) "search each window" for the AI's hand traps: each
+    answer and pass is played out over sampled hands. The pool is your list minus
+    what it has SEEN (never your real hand: a face-down card is not seen); a tie
+    is a pass (the card kept); patch 0018 really seats the sample."""
+    import os
+    from types import SimpleNamespace as N
+
+    import pytest
+
+    from skills import breaking, db, duel, engine, game
+    from ygorl.engine.replay import Replay
+
+    # the pick: fewest pieces on average, pass on a tie
+    assert duel.pick([9, 3, 4], [(9, 4), (3, 2), (4, 2), (9, 4), (3, 3), (4, 1)])[0] == 4
+    assert duel.pick([9, 3], [(9, 2), (3, 2)])[0] == 9
+    # the pool: seen cards out, one copy each; a SET card is not seen
+    ASH, POLY = 14558127, 48130397
+    row = {"user_deck": "imported", "user_seat": 0}
+    board = {"players": [{"mzone": [], "szone": [{"code": POLY, "position": 0xA}],
+                          "grave": [ASH], "banished": []}, {}]}
+    pool = duel.unseen_pool(row, N(board=lambda: board))
+    from skills.deck import Deck
+    main = Deck.from_ydk(engine.DECKS / "imported.ydk").main
+    assert pool.count(ASH) == main.count(ASH) - 1 and pool.count(POLY) == main.count(POLY)
+    # patch 0018: "Ash in hand" solves at once with an Ash-holding sample, never without
+    if not duel.DEFEND_BIN.exists():
+        pytest.skip("no 0018 build")
+    os.environ.update(engine.env())
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    r = duel.get(conn, did)
+    live = duel.Live(r)
+    hand = live.board()["players"][0]["hand"]
+    start, prefix = breaking.split_position(Replay.from_yrp(Path(r["template"])), live.responses, tmp_path / "p")
+    # a hand trap of your list not dealt here (nothing searches one into the hand)
+    trap = next(c for c in main if c not in hand and game.is_hand_trap(c, live.cards))
+    base = ["--start", str(start), "--root", str(prefix), "--player", "0", "--turns", "1", "--no-ref",
+            "--target", f"{trap}@hand", "--reseed", "3"]
+    got = {lab: bool(game._solve(prefix, base + extra, tmp_path / "s", lab, 3000, 1,
+                                 binary=duel.DEFEND_BIN)["solution"])
+           for lab, extra in (("with", ["--self-hand-root", str(trap)]), ("without", []))}
+    live.close()
+    assert got == {"with": True, "without": False}, got

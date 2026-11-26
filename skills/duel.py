@@ -328,33 +328,26 @@ def _negate_live(board, player, kind, dead):
                for z in zones for c in board["players"][player].get(z) or [])
 
 
-def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
-    """The AI's answer on YOUR turn (the games' smart defender in Python):
-    the eligible piece ranked first in `respond` (hand traps, then negates,
-    then the rest), board pieces held until you control a monster, never
-    onto its own chain link; else pass. Your hand is never read."""
+def answers(live, ai, respond, cards, wasted=(), dead=()):
+    """At the AI's chain window on YOUR turn: (pass index, [the chain options it
+    may sensibly use]) -- every piece of `respond` that is not ruled out: never
+    onto its own link, nothing onto your own-turn-dead card, board pieces held
+    until you control a monster, a negate-only piece only with a live target,
+    Veiler / Impermanence only onto your monster's activation on the field."""
     from . import game
     p = live.point
-    kinds = [a.kind for a in p.actions]
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
-    if p.decision.name != "MSG_SELECT_CHAIN":
-        return _follow_up(live, ai, cards, dead, keys)
     if live.chain and live.chain[-1][1] == ai:
-        return passing
+        return passing, []
     # your own-turn-dead card on your own turn (Mulcharmy Fuwalos on your turn
     # draws only off the AI's summons): answering it spends a hand trap on
     # nothing -- the AI Ashed one in its first test duel (2026-11-20)
     if live.chain and live.chain[-1][0] in wasted:
-        return passing
-    # board pieces wait until you control a monster; hand traps fire at once.
-    # Making the hand traps wait too ("all1") was a wash over 79 positions of
-    # t1_enemy_script.py (killed 82% vs 80%, +6 / -4), so the duel plays the games'
-    # timing (2026-11-21).
+        return passing, []
     held = _monsters(live.board(), 1 - ai) < 1
-    rank = {c: i for i, c in enumerate(respond)}
-    best, best_r = passing, len(rank) + 1
+    out = []
     for i, a in enumerate(p.actions):
-        if a.kind != "chain" or not a.card or a.card.code not in rank:
+        if a.kind != "chain" or not a.card or a.card.code not in respond:
             continue
         if held and not game.is_hand_trap(a.card.code, cards):
             continue
@@ -366,9 +359,20 @@ def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
         # Veiler / Impermanence answer your monster's effect activated on the field
         if a.card.code in game.ON_MONSTER_ACTIVATION and not _monster_link(live, ai):
             continue
-        if rank[a.card.code] < best_r:
-            best, best_r = i, rank[a.card.code]
-    return best if "chain" in kinds else passing
+        out.append(i)
+    return passing, out
+
+
+def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
+    """The AI's answer on YOUR turn by rule (the games' smart defender in
+    Python): of `answers`, the piece ranked first in `respond`; else pass. Used
+    where no searched decision (`decide`) is stored. Your hand is never read."""
+    p = live.point
+    if p.decision.name != "MSG_SELECT_CHAIN":
+        return _follow_up(live, ai, cards, dead, keys)
+    passing, ok = answers(live, ai, respond, cards, wasted, dead)
+    rank = {c: i for i, c in enumerate(respond)}
+    return min(ok, key=lambda i: rank[p.actions[i].card.code], default=passing)
 
 
 def _monster_link(live, ai):
@@ -379,6 +383,191 @@ def _monster_link(live, ai):
     code = live.chain[-1][0]
     return any(m["code"] == code and m.get("position", 0) & 0x5
                for m in live.board()["players"][1 - ai].get("mzone") or [])
+
+
+# --- its answers on YOUR turn, searched (user chose 2026-11-26: "search each window") ---
+#
+# At a window where it could answer you (`answers`), each usable piece and "pass" is
+# played out: the rest of your turn searched from there, your hand a SAMPLE of what
+# you could hold (patch 0018 --self-hand-root, your Deck reshuffled by --reseed: never
+# your real hand, nor your Deck's order), aimed at the board pieces your trained hands
+# build (`user_targets`). The answer that leaves you the fewest of them is played;
+# a tie is a pass -- the card is kept for a better moment. Same samples and seeds for
+# every option (paired).
+DEFEND_SAMPLES = 3
+DEFEND_BIN = ROOT / "vendor" / "ygorl" / "build" / "combo-solver-0018" / "bin" / "combosolver"
+
+
+def defence_ctx(row, cards):
+    """(respond, wasted, dead, keys): what the AI answers with, in rank order, and
+    your deck's own-turn-dead cards, field-dead bodies and kill keys."""
+    from . import engine, game
+    ud = engine.DECKS / f"{row['user_deck']}.ydk"
+    respond = game.respond_order(game.respond_codes(engine.DECKS / f"{row['ai_deck']}.ydk", cards), cards)
+    return respond, set(game.own_turn_dead(ud)), set(game.field_dead(ud)), game.kill_keys(ud)
+
+
+def _key(live):
+    return hashlib.sha1(b"".join(live.responses)).hexdigest()
+
+
+def _decided(row):
+    f = Path(row["template"]).parent / "defends.json"
+    return json.loads(f.read_text()) if f.exists() else {}
+
+
+def unseen_pool(row, live):
+    """Your main deck minus every card of yours the AI has SEEN -- face-up on the
+    field, in the GY, banished: what your hand may hold, one entry per copy.
+    shortcut: a card it saw added to your hand is not pinned there; upgrade (track
+    public adds still unaccounted for) if its answers misjudge searched hands."""
+    from collections import Counter
+
+    from . import engine
+    from .deck import Deck
+    pool = Counter(Deck.from_ydk(engine.DECKS / f"{row['user_deck']}.ydk").main)
+    P = live.board()["players"][row["user_seat"]]
+    seen = [m["code"] for z in ("mzone", "szone") for m in P.get(z) or []
+            if m and m.get("position", 0) & 0x5]
+    for c in seen + list(P.get("grave") or []) + list(P.get("banished") or []):
+        if pool[c] > 0:
+            pool[c] -= 1
+    return sorted(pool.elements())
+
+
+def user_targets(conn, deck):
+    """The board pieces in at least a quarter of your trained hands' best boards
+    (cards kept in hand left out): the board an answer should keep you from."""
+    from collections import Counter
+
+    from . import engine, game, trainer
+    path = engine.DECKS / f"{deck}.ydk"
+    goals = [game.live_goal(json.loads(r[0]), path) for r in conn.execute(
+        "SELECT best_goal FROM trainer_hands WHERE deck_hash=? AND best_goal IS NOT NULL",
+        (trainer.deck_hash(path),))]
+    n = Counter(x for g in goals for x in set(trainer.split_goal(g)[0]))
+    out = [x for x, k in n.most_common() if 4 * k >= len(goals) and "@hand" not in str(x)]
+    return out or deck_target(conn, deck)
+
+
+def _assembled(r, n_targets):
+    """How many of the target pieces a search's best line placed."""
+    if r["solution"]:
+        return n_targets
+    m = re.search(r"Best approach: (\d+) of the", Path(r["log"]).read_text(errors="replace"))
+    return int(m.group(1)) if m else 0
+
+
+def pick(opts, got):
+    """(the option leaving you the fewest pieces on average, {option: mean}) from
+    [(option, pieces)]; `opts` lists pass first, so a tie keeps the card."""
+    mean = {o: sum(v for x, v in got if x == o) / max(1, sum(x == o for x, _v in got)) for o in opts}
+    return min(opts, key=lambda o: mean[o]), mean
+
+
+def decide(conn, did):
+    """Search the AI's answer at this window of your turn and store it, then play
+    on (see DEFEND_SAMPLES above)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from random import Random
+
+    from ygorl.engine.replay import Replay
+
+    from . import breaking, engine, game
+
+    row = get(conn, did)
+    tpl = Path(row["template"])
+    acts = json.loads(row["actions"])
+    live = Live(row)
+    try:
+        ai, you = 1 - row["user_seat"], row["user_seat"]
+        cards = live.cards
+        respond, wasted, dead, _keys = defence_ctx(row, cards)
+        passing, ok = answers(live, ai, respond, cards, wasted, dead)
+        key, p = _key(live), live.point
+        opts, codes = [passing], set()
+        for i in ok:                      # one per card: two copies are one choice
+            if p.actions[i].card.code not in codes:
+                codes.add(p.actions[i].card.code)
+                opts.append(i)
+        names = {o: "pass" if o == passing else cards.get(p.actions[o].card.code).name for o in opts}
+        hand_n = len(live.board()["players"][you].get("hand") or [])
+        pool = unseen_pool(row, live)
+    finally:
+        live.close()
+    rng = Random(int(key[:12], 16))       # the same window draws the same hands
+    samples = [rng.sample(pool, min(hand_n, len(pool))) for _ in range(DEFEND_SAMPLES)]
+    pieces = user_targets(conn, row["user_deck"])
+    targets = [a for t in pieces for a in ("--target", t)]
+    rules = game.defender_args(respond, cards) + game.own_turn_args(engine.DECKS / f"{row['user_deck']}.ydk")
+    root = tpl.parent / f"defend-{len(acts)}"
+    positions = {}
+    for o in opts:
+        lv = Live({**row, "actions": json.dumps(acts + [o])})
+        try:
+            positions[o] = breaking.split_position(Replay.from_yrp(tpl), lv.responses, root / f"opt-{o}")
+        finally:
+            lv.close()
+    solve = _solver(conn, binary=DEFEND_BIN)
+    ms = max(row["think_ms"] // 4, 10_000)
+
+    def one(job):
+        o, k, hand = job
+        start, prefix = positions[o]
+        args = ["--start", str(start), "--root", str(prefix), "--player", str(you), "--turns", "1",
+                "--no-ref", *targets, *rules, "--self-hand-root", "|".join(map(str, hand)) or "-",
+                "--reseed", str(k + 1)]
+        return o, _assembled(solve(prefix, args, root / f"opt-{o}", f"h{k}", ms, k + 1), len(pieces))
+    t0 = time.time()
+    jobs = [(o, k, h) for o in opts for k, h in enumerate(samples)]
+    with ThreadPoolExecutor(len(jobs)) as ex:
+        got = list(ex.map(one, jobs))
+    best, mean = pick(opts, got)
+    f = tpl.parent / "defends.json"
+    f.write_text(json.dumps({**_decided(row), key: best}))
+    _save(conn, did, note="answered by search (" + ", ".join(
+        f"{names[o]} {mean[o]:.1f}" for o in opts) + f" of {len(pieces)} pieces left you) in {time.time() - t0:.0f} s")
+    return advance(conn, did)
+
+
+def decide_or_rule(conn, did):
+    """`decide`, but a failed search never stalls the duel: the rule's answer is
+    stored for this window and play goes on."""
+    try:
+        return decide(conn, did)
+    except Exception:  # noqa: BLE001 -- the duel must go on
+        import traceback
+        traceback.print_exc()
+        row = get(conn, did)
+        live = Live(row)
+        try:
+            respond, wasted, dead, keys = defence_ctx(row, live.cards)
+            pick, key = defend(live, 1 - row["user_seat"], respond, live.cards, wasted, dead, keys), _key(live)
+        finally:
+            live.close()
+        (Path(row["template"]).parent / "defends.json").write_text(json.dumps({**_decided(row), key: pick}))
+        _save(conn, did, note="its answer search failed (see plan.log); it answered by rule")
+        return advance(conn, did)
+
+
+def _solver(conn, binary=None):
+    """A solve function on the borrowed PC when it is up (helper_device), else
+    here; `.dev` and `.stopped` (set it before killing searches on purpose)."""
+    from . import game
+    dev, stopped = helper_device(conn), threading.Event()
+    kw = {"binary": binary} if binary else {}
+
+    def solve(*a):
+        if dev is not None:
+            try:
+                return game._solve(*a, device=dev, **kw)
+            except Exception as e:  # noqa: BLE001 -- the PC went away: search here
+                if stopped.is_set():
+                    raise
+                print(f"{dev.name}: {e}; searching here instead", flush=True)
+        return game._solve(*a, **kw)
+    solve.dev, solve.stopped = dev, stopped
+    return solve
 
 
 def _follow_up(live, ai, cards, dead=(), keys=()):
@@ -465,11 +654,7 @@ def advance(conn, did, spawn=True):
     try:
         ai = 1 - row["user_seat"]
         cards = live.cards
-        respond = game.respond_order(game.respond_codes(engine.DECKS / f"{row['ai_deck']}.ydk", cards),
-                                     cards)
-        wasted = set(game.own_turn_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
-        dead = set(game.field_dead(engine.DECKS / f"{row['user_deck']}.ydk"))
-        keys = game.kill_keys(engine.DECKS / f"{row['user_deck']}.ydk")
+        respond, wasted, dead, keys = defence_ctx(row, cards)
         plan = json.loads(row["plan"]) if row["plan"] else None
         acts = json.loads(row["actions"])
         for _ in range(2000):
@@ -494,6 +679,18 @@ def advance(conn, did, spawn=True):
                 return "your move"
             if live.session.tracker.turn_player != ai:
                 idxs = [defend(live, ai, respond, cards, wasted, dead, keys)]
+                if p.decision.name == "MSG_SELECT_CHAIN" and DEFEND_BIN.exists():
+                    # a window it could answer: the searched choice (`decide`), thought
+                    # out in the background like its turn; stored, so an undo is instant
+                    passing, ok = answers(live, ai, respond, cards, wasted, dead)
+                    got = _decided(row).get(_key(live)) if ok else passing
+                    if got is None:
+                        _save(conn, did, actions=json.dumps(acts), status="thinking",
+                              plan=json.dumps(plan) if plan is not None else None,
+                              note="weighing whether to answer your play")
+                        _spawn_plan(did, "defend")
+                        return "thinking"
+                    idxs = [got]
             else:
                 idxs = _plan_step(live, plan)
                 if idxs is None:
@@ -710,14 +907,14 @@ def revive(conn, did):
                          "AND updated=?", (_now(), "the AI's planner had stopped; thinking again",
                                            int(did), row["updated"])).rowcount
     if n:
-        _spawn_plan(did)
+        advance(conn, did)       # spawns what the position needs: a plan, or a searched answer
     return bool(n)
 
 
-def _spawn_plan(did):
+def _spawn_plan(did, kind="plan"):
     from . import db
     folder = Path(get(db.connect(), did)["template"]).parent
-    subprocess.Popen([sys.executable, "-m", "skills.duel", "plan", str(did)], cwd=str(ROOT),
+    subprocess.Popen([sys.executable, "-m", "skills.duel", kind, str(did)], cwd=str(ROOT),
                      stdout=open(folder / "plan.log", "a"), stderr=subprocess.STDOUT,
                      start_new_session=True)
 
@@ -854,17 +1051,8 @@ def plan(conn, did):
                                                 live.responses, root)
         cards = live.cards
         base = ["--start", str(start), "--root", str(prefix)] + plan_args(row, cards, turn)
-        dev, stopped = helper_device(conn), threading.Event()
-
-        def solve(*a):
-            if dev is not None:
-                try:
-                    return game._solve(*a, device=dev)
-                except Exception as e:  # noqa: BLE001 -- the PC went away: search here
-                    if stopped.is_set():
-                        raise
-                    print(f"{dev.name}: {e}; searching here instead", flush=True)
-            return game._solve(*a)
+        solve = _solver(conn)
+        dev, stopped = solve.dev, solve.stopped
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
         t0 = time.time()
         r = building = None
@@ -1085,3 +1273,5 @@ if __name__ == "__main__":
     from . import db
     if sys.argv[1:2] == ["plan"]:
         plan_or_pass(db.connect(), int(sys.argv[2]))
+    elif sys.argv[1:2] == ["defend"]:
+        decide_or_rule(db.connect(), int(sys.argv[2]))
