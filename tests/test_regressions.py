@@ -8219,3 +8219,15 @@ def test_tree_search_observer_clone_is_exactly_the_deepcopy():
             s.close()
         return list(t.root.n), h.hexdigest()
     assert run(True) == run(False)
+
+
+def test_turn1_rows_record_which_board_the_survival_pick_kept(tmp_path):
+    """db: game_turn1.fallback (0 = the full goal's board, k = candidate k, NULL = no pick)
+    so the games can show which candidates ever save a board (BACKLOG: cap at 2?)."""
+    from skills import db
+    conn = db.connect(tmp_path / "t.db")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(game_turn1)")}
+    assert "fallback" in cols
+    import inspect
+    from skills import game
+    assert 'fallback=t1.get("fallback")' in inspect.getsource(game)

@@ -1699,7 +1699,7 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             ehand = (_hand(replay(t1["start"]).board, 1) if first
                      else t1["enemy_hand"])
             rec.update(start=str(t1["start"]), prefix=str(t1["prefix"]),
-                       reached=int(t1["reached"]),
+                       reached=int(t1["reached"]), fallback=t1.get("fallback"),
                        pieces=json.dumps(_pieces(t1["board"], 0, cards,
                                                  ours_extra if first else ())),  # turn 1's player
                        enemy_hand=json.dumps(sorted(ehand)))
@@ -1707,10 +1707,10 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
             conn.execute(
                 "INSERT OR REPLACE INTO game_turn1 (deck_hash, enemy, "
                 "hand_index, board, enemy_seed, first, device, ok, start, prefix, reached, "
-                "pieces, enemy_hand, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "pieces, enemy_hand, created, fallback) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dh, enemy_name, rec["hand_index"], 0, eseed, first, device, rec["ok"],
                  rec.get("start"), rec.get("prefix"), rec.get("reached"),
-                 rec.get("pieces"), rec.get("enemy_hand"), _now()))
+                 rec.get("pieces"), rec.get("enemy_hand"), _now(), rec.get("fallback")))
         return rec
 
     failed = []

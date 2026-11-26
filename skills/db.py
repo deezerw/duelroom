@@ -377,6 +377,9 @@ def connect(path=None):
     _migrate_game_device(conn)
     conn.executescript(SCHEMA)
     _add_column(conn, "game_results", "method", "TEXT")
+    # which board turn 1's survival pick kept (game.turn1_fallbacks): 0 = the full goal's,
+    # k = candidate k, NULL = no pick ran -- to read which candidates ever save a board
+    _add_column(conn, "game_turn1", "fallback", "INTEGER")
     return conn
 
 
