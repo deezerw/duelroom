@@ -8098,3 +8098,25 @@ def test_value_split_never_shares_a_hand_or_enemy_hand_between_halves(monkeypatc
     assert not any(r["group"] in held or str(r["eseed"]) in held_e for r in train)
     assert all(r["group"] in held or str(r["eseed"]) in held_e for r in test)
     assert len(train) + len(test) == len(rows)
+
+
+def test_turn1_pick_solves_a_candidate_only_after_every_board_before_it_died(monkeypatch, tmp_path):
+    """game.turn1_fallbacks is lazy: a surviving full goal costs no candidate search at
+    all; otherwise candidates are solved one at a time, up to the first that lives."""
+    from skills import game
+    solved = []
+    monkeypatch.setattr(game, "turn1_vs_scripts", lambda *a, **kw: solved.append(a[3]) or
+                        {"board": a[3], "start": "s", "prefix": a[3], "reached": True})
+    monkeypatch.setattr(game, "live_goal", lambda g, d: g)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c, *x: [])
+    alive = {"full"}
+    monkeypatch.setattr(game, "kill_check", lambda start, prefix, *a, **kw: prefix not in alive)
+    monkeypatch.setattr(game, "T1_PICK_ALWAYS", True)
+    full = {"board": "full", "start": "s", "prefix": "full", "reached": True}
+    kw = dict(our_deck="d", enemy_deck="e", hand=[], enemy_seed=1000, scratch=tmp_path, ms=1,
+              seed=1000, enemy_respond=[], enemy_target="t", our_respond=[], cards=object())
+    assert game.turn1_fallbacks(full, ["g1", "g2", "g3"], n=3, **kw)["prefix"] == "full"
+    assert solved == []
+    alive = {"g2"}
+    assert game.turn1_fallbacks(full, ["g1", "g2", "g3"], n=3, **kw)["prefix"] == "g2"
+    assert solved == ["g1", "g2"]

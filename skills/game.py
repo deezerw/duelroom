@@ -1011,16 +1011,20 @@ def turn1_fallbacks(t1, goals, our_deck, enemy_deck, hand, enemy_seed, scratch, 
         from ygorl.engine.duel import default_cards
         cards = default_cards()
     scratch = Path(scratch)
-    cands = [(0, t1)]
-    for k, g in enumerate(goals[:n], 1):
-        t = turn1_vs_scripts(our_deck, enemy_deck, hand, live_goal(g, our_deck), enemy_seed,
-                             scratch / f"fb{k}", ms, seed, enemy_respond, start=start,
-                             sets=sets, cards=cards)
-        if t is not None:
-            cands.append((k, t))
-    if len(cands) == 1:
-        return t1
-    for k, t in cands:
+
+    def candidates():
+        # LAZILY, in order: candidate k is solved only once every board before it died
+        # (all were solved up front: with T1_PICK_ALWAYS a surviving full goal -- ~40% of
+        # turn 1s vs Blue-Eyes -- wasted n turn-1 searches). Same order, seeds, pick.
+        yield 0, t1
+        for k, g in enumerate(goals[:n], 1):
+            t = turn1_vs_scripts(our_deck, enemy_deck, hand, live_goal(g, our_deck), enemy_seed,
+                                 scratch / f"fb{k}", ms, seed, enemy_respond, start=start,
+                                 sets=sets, cards=cards)
+            if t is not None:
+                yield k, t
+
+    for k, t in candidates():
         ours = set(_pieces(t["board"], 0, cards)) | set(our_respond)
         if not kill_check(t["start"], t["prefix"], enemy_target, ours, enemy_deck,
                           scratch / f"look{k}", OTK_MS * FALLBACK_PICK_X,
