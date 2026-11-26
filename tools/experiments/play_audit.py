@@ -83,6 +83,7 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
     who = lambda p: "us" if p == me else "them"  # noqa: E731
     c_waste, c_selfneg, c_free, c_disc = Counter(), Counter(), Counter(), Counter()
     gifts = usable = avoidable = 0
+    marked = trainer.prefs(conn, DECK if first else enemy)["interrupters"]
     counted, fired = Counter(), Counter()
     outcomes = Counter(g["outcome"] for g in games)
     for g in games:
@@ -95,7 +96,8 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
             continue
         start = game.replay(t1["prefix"], until_turn=2).board
         opp = 0 if first else 0     # the board facing turn 2's attacker: player 0's in both layouts
-        pieces = set(game._pieces(start, opp, cards))
+        # the board owner's own "counts as an interruption" cards count too (as game.run's)
+        pieces = set(game._pieces(start, opp, cards, marked))
         counted.update(pieces)
         if not first:
             n = game.gifts(start, 1, deck)
