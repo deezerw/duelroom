@@ -22,6 +22,7 @@ boards of ONE situation?).
 import argparse
 import json
 import random
+import os
 import sys
 import time
 from pathlib import Path
@@ -68,6 +69,45 @@ def encode_position(prior, prefix, cards):
         session.close()
 
 
+class _Spec:
+    """What a PointObserver needs of the net (Prior.observer), without the net: a
+    forked worker never touches torch's CUDA state."""
+
+    def __init__(self, prior):
+        self.vocab, self.event_length = prior.vocab, prior.event_length
+        self.net = type("N", (), {"cfg": prior.net.cfg})()
+
+    def observer(self, cards=None):
+        from skills.net_prior import Prior
+        return Prior.observer(self, cards)
+
+
+_W = {}
+
+
+def _encode_one(prefix):
+    try:
+        return encode_position(_W["spec"], prefix, _W["cards"]), None
+    except Exception as exc:  # noqa: BLE001 -- an unreadable position is skipped, counted
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def encode_all(spec, prefixes, cards, workers, log=print):
+    """encode_position over `prefixes`, in order, on `workers` processes (fork: the
+    replays are CPU work, one position at a time on one core before)."""
+    import multiprocessing as mp
+    _W["spec"], _W["cards"] = spec, cards
+    if workers > 1:
+        with mp.get_context("fork").Pool(workers) as pool:
+            got = pool.map(_encode_one, prefixes, chunksize=4)
+    else:
+        got = [_encode_one(p) for p in prefixes]
+    for p, (o, err) in zip(prefixes, got):
+        if err:
+            log(f"  {p}: {err}")
+    return [o for o, _e in got]
+
+
 def spearman(xs, ys):
     from scipy.stats import spearmanr
     return float(spearmanr(xs, ys).statistic) if len(xs) > 2 else float("nan")
@@ -84,6 +124,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--features", default="context+globals+history",
                     help="trunk outputs fed to the head: context, or context+globals+history")
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
+                    help="processes replaying the positions (same result for any count)")
     args = ap.parse_args()
 
     import numpy as np
@@ -102,16 +144,18 @@ def main():
     otk = args.otk_ms or budgets.most_common(1)[0][0]
     rows = [r for r in rows if r["otk_ms"] == otk and Path(r["prefix"]).exists()]
     print(f"budgets {dict(budgets)}; using {otk // 1000} s: {len(rows)} positions", flush=True)
-    prior = net_prior.Prior(str(Path(args.bc_dir) / "policy.pt"))
+    # on the CPU first: the encoding workers are forked before CUDA is touched
+    prior = net_prior.Prior(str(Path(args.bc_dir) / "policy.pt"), device="cpu")
     cards = default_cards()
     t0 = time.time()
+    encoded = encode_all(_Spec(prior), [r["prefix"] for r in rows], cards, args.workers,
+                         log=lambda m: print(m, flush=True))
+    print(f"  encoded {len(rows)} positions on {args.workers} worker(s) ({time.time() - t0:.0f} s)",
+          flush=True)
+    prior.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    prior.net.to(prior.device)
     feats, keep = [], []
-    for i, r in enumerate(rows):
-        try:
-            o = encode_position(prior, r["prefix"], cards)
-        except Exception as exc:  # noqa: BLE001 -- an unreadable position is skipped, counted
-            print(f"  {r['prefix']}: {type(exc).__name__}: {exc}", flush=True)
-            o = None
+    for i, (r, o) in enumerate(zip(rows, encoded)):
         if o is None:
             continue
         with torch.no_grad():
@@ -119,8 +163,6 @@ def main():
         feats.append(torch.cat([getattr(f, k)[0].float().cpu()
                                 for k in args.features.split("+")]))
         keep.append(r)
-        if (i + 1) % 200 == 0:
-            print(f"  encoded {i + 1}/{len(rows)} ({time.time() - t0:.0f} s)", flush=True)
     X = torch.stack(feats)
     y = torch.tensor([r["hardness"] for r in keep], dtype=torch.float32)
     groups = sorted({r["group"] for r in keep})
