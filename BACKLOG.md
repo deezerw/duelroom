@@ -98,6 +98,13 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       the same hand through the kill check (duel page + tally). Runs: results/experiments/
       better_than_me{,2}.log (Angelechy, then a going-first Blue-Eyes smoke batch: no going-first
       Blue-Eyes positions existed). (a)/(b) go live with this round's METHOD bump if they help.
+- [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
+      Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full
+      + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
+      both saves came from candidate 1; boards picked at 2 / 3 / 5 passed the 4x look-ahead
+      and still died at 16x. Cap at 2 = ~1/3 the turn-1 cost, every measured save kept. Read
+      tonight's duelpc games' `fallback` index first (game_turn1 has no column: add one, or
+      read the look*/fb* folders), then decide.
 - [ ] **Defender gives up a hand trap to a discard cost** (found 2026-11-26 while turning on
       RESPOND_ALL): patch 0004's DefenderPick gives up its OWN lowest-ATK card, and hand traps
       are 0 ATK, so a discard cost of a newly listed card (Mind Shuffle's search: "then discard
