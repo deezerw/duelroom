@@ -118,8 +118,11 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
       both saves came from candidate 1; boards picked at 2 / 3 / 5 passed the 4x look-ahead
       and still died at 16x. Cap at 2 = ~1/3 the turn-1 cost, every measured save kept. Read
-      tonight's duelpc games' `fallback` index first (game_turn1 has no column: add one, or
-      read the look*/fb* folders), then decide.
+      tonight's duelpc games' `fallback` index first (game_turn1.fallback from the long run on;
+      the smoke's is read from its look*/fb* folders), then decide. Smoke, 48 turn 1s (lazy pick:
+      the last look index is where it stopped): full 9, cand 1 12, cand 2-5 6, cand 6 / none 21.
+      Its first 17 games: both wins from full (1/1) or cand 1 (1/4); cand 2-5 1/1 killed; cand 6 /
+      none 11/11 killed. Cap at 2 would have cut 25 of 48 picks short and lost no win so far.
 - [ ] **Defender gives up a hand trap to a discard cost** (found 2026-11-26 while turning on
       RESPOND_ALL): patch 0004's DefenderPick gives up its OWN lowest-ATK card, and hand traps
       are 0 ATK, so a discard cost of a newly listed card (Mind Shuffle's search: "then discard
