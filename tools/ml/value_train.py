@@ -143,17 +143,18 @@ def main():
     from skills import net_prior
 
     rows = [json.loads(l) for l in Path(args.positions).read_text().splitlines()]
-    budgets = Counter(r["otk_ms"] for r in rows)
-    otk = args.otk_ms or budgets.most_common(1)[0][0]
-    rows = [r for r in rows if r["otk_ms"] == otk and Path(r["prefix"]).exists()]
     if args.eras != "all":
-        # bc_train's era filter: no position from before the 2026-11-20 fixes (board_data's
-        # 2026-11-19 boards are one of those eras)
+        # bc_train's era filter, BEFORE the budget is chosen (the old eras' 1x kill checks
+        # were the most common budget, and nothing was left after it): no position from
+        # before the 2026-11-20 fixes (board_data's 2026-11-19 boards are one of those eras)
         from bc_train import SKIP_ERAS
         n = len(rows)
         rows = [r for r in rows if r.get("device") not in SKIP_ERAS
                 and not (r["source"] == "board_data" and "board_kill" in SKIP_ERAS)]
         print(f"  {len(rows)} of {n} positions after the pre-2026-11-20 eras", flush=True)
+    budgets = Counter(r["otk_ms"] for r in rows)
+    otk = args.otk_ms or budgets.most_common(1)[0][0]
+    rows = [r for r in rows if r["otk_ms"] == otk and Path(r["prefix"]).exists()]
     print(f"budgets {dict(budgets)}; using {otk // 1000} s: {len(rows)} positions", flush=True)
     # on the CPU first: the encoding workers are forked before CUDA is touched
     prior = net_prior.Prior(str(Path(args.bc_dir) / "policy.pt"), device="cpu")
