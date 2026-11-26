@@ -8261,3 +8261,15 @@ def test_duel_ghost_ogre_skips_a_requiem_that_tributed_itself():
     field = live([(perl, 0)], [0x8], {"mzone": [], "szone": [{"code": perl, "position": 1}]})
     assert duel._field_link(field, 1)
     assert not duel._field_link(live([(perl, 1)], [0x8], {"mzone": [], "szone": []}), 1)   # its own link
+
+
+def test_defender_keeps_its_hand_traps_from_costs_only_with_a_0020_binary(monkeypatch):
+    """game.defender_args: --opp-keep (patch 0020: its hand traps given to a cost last) is
+    passed only when the rooted binary has it; the live one before the next bump has not."""
+    from skills import game
+    ash, sulliek = 14558127, 74920585
+    monkeypatch.setattr(game, "_bin_has", lambda f: f != "--opp-keep")
+    assert "--opp-keep" not in game.defender_args([ash, sulliek])
+    monkeypatch.setattr(game, "_bin_has", lambda f: True)
+    a = game.defender_args([ash, sulliek])
+    assert a[a.index("--opp-keep") + 1] == str(ash)

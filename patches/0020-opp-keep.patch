@@ -1,0 +1,75 @@
+diff -ruN combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-26 18:17:04.009822243 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-26 18:31:11.215572130 -0500
+@@ -1522,6 +1522,8 @@
+ 	std::vector<uint32_t> opp_on_activation;
+ 	// --opp-on-field <code|code...> (patch 0019).
+ 	std::vector<uint32_t> opp_on_field;
++	// --opp-keep <code|code...> (patch 0020).
++	std::vector<uint32_t> opp_keep;
+ 	// --opp-key <code|code...> (patch 0012).
+ 	std::vector<uint32_t> opp_key;
+ 	// --opp-gy-want <code|code...> (patch 0013).
+@@ -2085,6 +2087,8 @@
+ 				"  --opp-on-field <c> with --opp-smart: these defender pieces (Ghost Ogre)\n"
+ 				"                     answer only a card of the searcher's activated on the\n"
+ 				"                     field that is still there face-up (0019)\n"
++				"  --opp-keep <c>     the defender gives up these of its own cards (its hand\n"
++				"                     traps) only when nothing else can pay a cost (0020)\n"
+ 				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+@@ -2634,7 +2638,8 @@
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+ 				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key" ||
+-				  a == "--opp-gy-want" || a == "--opp-on-activation" || a == "--opp-on-field") {
++				  a == "--opp-gy-want" || a == "--opp-on-activation" || a == "--opp-on-field" ||
++				  a == "--opp-keep") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2646,6 +2651,7 @@
+ 				: (a == "--opp-dead") ? o.opp_dead
+ 				: (a == "--opp-on-activation") ? o.opp_on_activation
+ 				: (a == "--opp-on-field") ? o.opp_on_field
++				: (a == "--opp-keep") ? o.opp_keep
+ 				: (a == "--opp-key") ? o.opp_key
+ 				: (a == "--opp-gy-want") ? o.opp_gy_want : o.opp_respond;
+ 			std::string sv(v);
+@@ -4301,6 +4307,7 @@
+ 	cfg.opp_dead = opt.opp_dead;
+ 	cfg.opp_on_activation = opt.opp_on_activation;
+ 	cfg.opp_on_field = opt.opp_on_field;
++	cfg.opp_keep = opt.opp_keep;
+ 	cfg.opp_key = opt.opp_key;
+ 	cfg.opp_gy_want = opt.opp_gy_want;
+ 
+diff -ruN combo-solver-rooted/solver-patched/search.cpp combo-solver-next/solver-patched/search.cpp
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-26 18:17:04.009822243 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-26 18:31:11.216572154 -0500
+@@ -1940,6 +1940,12 @@
+ 		   std::find(cfg.opp_gy_want.begin(), cfg.opp_gy_want.end(),
+ 					 duel.Db().Canonical(cands[i].code)) != cfg.opp_gy_want.end())
+ 			val[i] = 1;
++		// Patch 0020: its own --opp-keep cards (hand traps: 0 ATK, so the ATK pick gave
++		// Ash / Imperm up FIRST to a discard cost such as Mind Shuffle's) go last.
++		if(cands[i].con == prompt_player && !cfg.opp_keep.empty() &&
++		   std::find(cfg.opp_keep.begin(), cfg.opp_keep.end(),
++					 duel.Db().Canonical(cands[i].code)) != cfg.opp_keep.end())
++			val[i] = -(int64_t(1) << 40);
+ 		// Patch 0012: the attacker's kill keys first, in --opp-key order (its
+ 		// kills hinge on them: Angelechy's Kusanagi used Enlisted as its Tuner in
+ 		// 332 of 340 kills, and the ATK pick took Destrier over it).
+diff -ruN combo-solver-rooted/solver-patched/search.h combo-solver-next/solver-patched/search.h
+--- combo-solver-rooted/solver-patched/search.h	2026-11-26 18:17:04.009822243 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-26 18:31:11.215572130 -0500
+@@ -2750,6 +2750,8 @@
+ 	std::vector<uint32_t> opp_on_activation;
+ 	// --opp-on-field <codes> (duelroom patch 0019): see Search::ActivationLive.
+ 	std::vector<uint32_t> opp_on_field;
++	// --opp-keep <codes> (duelroom patch 0020): see Search::DefenderPick.
++	std::vector<uint32_t> opp_keep;
+ 	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
+ 	// important first; the defender's target pick takes one over any other.
+ 	std::vector<uint32_t> opp_key;

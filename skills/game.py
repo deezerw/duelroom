@@ -657,6 +657,10 @@ def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
         fld = sorted({cards.canonical(c) for c in codes} & set(ON_FIELD_ACTIVATION))
         if fld and _bin_has("--opp-on-field"):
             args += ["--opp-on-field", "|".join(map(str, fld))]
+        # patch 0020 (needs the binary): its hand traps are the last cards it gives to a cost
+        keep = [c for c in codes if is_hand_trap(c, cards)]
+        if keep and _bin_has("--opp-keep"):
+            args += ["--opp-keep", "|".join(map(str, keep))]
         if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:
