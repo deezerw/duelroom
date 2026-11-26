@@ -29,6 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools" / "ml"))
 
 
 def encode_position(prior, prefix, cards):
@@ -124,6 +125,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--features", default="context+globals+history",
                     help="trunk outputs fed to the head: context, or context+globals+history")
+    ap.add_argument("--eras", default="current", choices=("current", "all"),
+                    help="current: leave out positions from before the 2026-11-20 fixes")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
                     help="processes replaying the positions (same result for any count)")
     args = ap.parse_args()
@@ -143,6 +146,14 @@ def main():
     budgets = Counter(r["otk_ms"] for r in rows)
     otk = args.otk_ms or budgets.most_common(1)[0][0]
     rows = [r for r in rows if r["otk_ms"] == otk and Path(r["prefix"]).exists()]
+    if args.eras != "all":
+        # bc_train's era filter: no position from before the 2026-11-20 fixes (board_data's
+        # 2026-11-19 boards are one of those eras)
+        from bc_train import SKIP_ERAS
+        n = len(rows)
+        rows = [r for r in rows if r.get("device") not in SKIP_ERAS
+                and not (r["source"] == "board_data" and "board_kill" in SKIP_ERAS)]
+        print(f"  {len(rows)} of {n} positions after the pre-2026-11-20 eras", flush=True)
     print(f"budgets {dict(budgets)}; using {otk // 1000} s: {len(rows)} positions", flush=True)
     # on the CPU first: the encoding workers are forked before CUDA is touched
     prior = net_prior.Prior(str(Path(args.bc_dir) / "policy.pt"), device="cpu")

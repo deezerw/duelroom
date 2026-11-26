@@ -76,10 +76,21 @@ def from_games():
             continue
         # the games' kill budget: 1x before OTK_X, OTK_X after (FIRST_METHOD_SINCE)
         ms = game.OTK_MS * (game.OTK_X if d.get("created", "") >= game.FIRST_METHOD_SINCE else 1)
+        lost, hard = game_label(d, ms)
         yield {"source": "games", "start": pos[0], "prefix": pos[1],
                "group": f"{d['deck_hash']}:{d['hand_index']}", "eseed": d["enemy_seed"],
-               "otk_ms": ms, "lost": int(all(k["lost"] for k in d["kill"])),
-               "hardness": hardness(d["kill"], ms / 1000), "device": d["device"]}
+               "otk_ms": ms, "lost": lost, "hardness": hard, "device": d["device"]}
+
+
+def game_label(d, ms):
+    """(lost, hardness) of a stored game's kill check. `lost` is the GAME's verdict
+    (outcome lost_t2): since 2026-11-25b a kill needs a MAJORITY of futures
+    (game.majority), and the kill entries describe the real future only. Where the
+    two disagree the board was killed in some futures and not others: hardness 0,
+    the line between "killed" and "untouched"."""
+    real = int(all(k["lost"] for k in d["kill"]))
+    lost = int(d["outcome"] == "lost_t2") if d.get("outcome") else real
+    return lost, (hardness(d["kill"], ms / 1000) if lost == real else 0.0)
 
 
 def main():

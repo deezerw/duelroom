@@ -7970,3 +7970,21 @@ def test_kill_labeller_skips_reseeded_futures_and_survives_a_bad_game(tmp_path, 
     monkeypatch.setattr(board_data, "kill_detail", lambda *a, **kw: 1 / 0)
     bad = gk.label(g)
     assert bad["ok"] == 0 and "ZeroDivisionError" in bad["error"]
+
+
+def test_value_label_follows_the_games_majority_verdict():
+    """tools/ml/value_data.game_label: `lost` is the game's outcome (a kill needs a
+    majority of futures since 2026-11-25b), not the real future's search alone; where
+    they disagree the hardness is 0 -- killed in some futures, not in others."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "value_data", Path(__file__).resolve().parent.parent / "tools" / "ml" / "value_data.py")
+    vd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vd)
+    killed = [{"lost": 1, "first_win_s": 80.0}]
+    held = [{"lost": 0, "damage": 2000}]
+    assert vd.game_label({"outcome": "lost_t2", "kill": killed}, 320_000) == (1, 0.75)
+    assert vd.game_label({"outcome": "win", "kill": held}, 320_000) == (0, -0.75)
+    assert vd.game_label({"outcome": "win", "kill": killed}, 320_000) == (0, 0.0)   # outvoted kill
+    assert vd.game_label({"outcome": "lost_t2", "kill": held}, 320_000) == (1, 0.0)
+    assert vd.game_label({"kill": killed}, 320_000) == (1, 0.75)                     # no outcome stored
