@@ -1,0 +1,93 @@
+diff --git a/skills/game.py b/skills/game.py
+index d5e136b..c6f369a 100644
+--- a/skills/game.py
++++ b/skills/game.py
+@@ -113,9 +113,12 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
+ # to add games beside any of another method (or, for rows from before the
+ # stamp, created before METHOD_SINCE) -- so a process that started on older
+ # code and is still writing can never pass as the new method.
+-METHOD = "2026-11-25c"
+-METHOD_SINCE = {False: "2026-11-25T18:30:00",    # 2026-11-25c: + patch 0015, budgets count
+-                True: "2026-11-25T18:30:00"}     # CPU work (a loaded machine no longer searches less)
++METHOD = "2026-11-26a"
++METHOD_SINCE = {False: "BUMP_UTC",    # 2026-11-26a (user chose "bump with both"): every card
++                True: "BUMP_UTC"}     # answers (RESPOND_ALL), turn 1 picked by survival
++# (T1_PICK_ALWAYS, T1_FALLBACKS 6), Field Spells activated at end of turn, Super Poly dead with
++# an empty hand, patches 0016-0018 in the rooted solver (0017: Veiler / Imperm only onto a
++# monster's on-field effect). 2026-11-25c: + patch 0015, budgets count CPU work.
+ # 2026-11-25b: a majority of futures; 25a: one committed defence script     # (patch 0014 --reseed) for every kill / lethal verdict     # defence script (DEFENCES = (1,)), no hindsight.
+ # Before: 2026-11-21c (patches 0011-0013 live, every Trap set, Continuous Spells activated)     # (negates wait for a live target), 0012 (kill
+ # keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
+@@ -566,7 +569,7 @@ QUICK_RESPOND = False
+ # core offers only what is legal where the card sits; the smart defender still ranks hand
+ # traps first and holds the rest until the attacker has a monster. Off until
+ # tools/experiments/quick_respond_ab.py's "all" arm measures it (both sides use it).
+-RESPOND_ALL = False
++RESPOND_ALL = True          # A/B 2026-11-26: 10 boards saved, 0 lost of 59 (p 0.002)
+ _THEIR_TURN_QUICK = re.compile(r"\(Quick Effect\): You can Special Summon this card from your hand|"
+                                r"When your opponent activates[^.]*\(Quick Effect\): You can Special Summon "
+                                r"this card from your hand", re.I)
+@@ -948,14 +951,14 @@ def enemy_script_args(respond, script, cards=None):
+ # learned model) beat the full goal. Off (0) until tools/experiments/t1_starters.py
+ # measures it. The look-ahead's seed is never the game's turn-2 seed, so a board it
+ # keeps is not one the game's own search was already seen to miss.
+-T1_FALLBACKS = 0            # fallback goals tried (best first); 0 = off
++T1_FALLBACKS = 6            # fallback goals tried (best first); 0 = off
+ # The pick runs on EVERY turn 1, not only one that missed the full goal (user, 2026-11-26:
+ # "i want it to be better than me"): a reached goal is just one candidate, kept when it
+ # survives the look-ahead -- it comes first -- and replaced by a board that does when it
+ # does not. Candidates also take the hand's breadth goals (base + one piece: trainer.
+ # breadth_goals), so board SHAPES the full goal never asks for are tried. Off until
+ # tools/experiments/t1_starters.py `--always` measures it.
+-T1_PICK_ALWAYS = False
++T1_PICK_ALWAYS = True       # A/B 2026-11-26 Angelechy: 2 saved, 0 lost of 16
+ FALLBACK_PICK_X = 4         # the look-ahead kill check, x OTK_MS per defence
+ FALLBACK_SEED = 7           # added to the game's seed * 100: a seed no game uses
+ 
+diff --git a/tests/test_regressions.py b/tests/test_regressions.py
+index dbb34b7..4ceabcf 100644
+--- a/tests/test_regressions.py
++++ b/tests/test_regressions.py
+@@ -5694,6 +5694,7 @@ def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
+     full = {"board": "full", "start": "s", "prefix": "full", "reached": False}
+     kw = dict(our_deck="d", enemy_deck="e", hand=[], enemy_seed=1000, scratch=tmp_path, ms=1,
+               seed=1000, enemy_respond=[], enemy_target="t", our_respond=[], cards=object())
++    monkeypatch.setattr(game, "T1_PICK_ALWAYS", False)     # the original rule: misses only
+     assert game.turn1_fallbacks({**full, "reached": True}, ["g1"], n=2, **kw)["prefix"] == "full"
+     assert calls == [], "a reached goal costs nothing more"
+     alive.add("g2")
+@@ -5702,8 +5703,8 @@ def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
+     alive.clear(); calls.clear()
+     t = game.turn1_fallbacks(full, ["g1"], n=2, **kw)
+     assert t["prefix"] == "full" and t["fallback"] == 0
+-    assert game.turn1_fallbacks(full, ["g1"], n=0, **kw) is full, "off by default"
+-    assert game.T1_FALLBACKS == 0
++    assert game.turn1_fallbacks(full, ["g1"], n=0, **kw) is full, "n=0: off"
++    assert game.T1_FALLBACKS == 6          # live since METHOD 2026-11-26a
+ 
+ 
+ def test_closing_a_turn_cut_mid_selection_ends():
+@@ -7845,7 +7846,7 @@ def test_respond_all_lists_every_card_of_the_deck(tmp_path, monkeypatch):
+     from skills import game
+     ydk = tmp_path / "d.ydk"
+     ydk.write_text("#main\n14558127\n14558127\n77103950\n#extra\n69946549\n!side\n")
+-    assert game.RESPOND_ALL is False
++    monkeypatch.setattr(game, "RESPOND_ALL", False)
+     today = set(game.respond_codes(ydk))
+     assert 14558127 in today and 69946549 not in today
+     monkeypatch.setattr(game, "RESPOND_ALL", True)
+diff --git a/web/views.py b/web/views.py
+index cb23572..429d344 100644
+--- a/web/views.py
++++ b/web/views.py
+@@ -559,6 +559,10 @@ OLD_SECTIONS = {
+     "endgame-t1": "older settings: the enemy's turn 1 aimed at one card (Endgame Problem)",
+     "brk1x": "older settings: your going-second break searched 1x (now 8x)",
+     "kill1x": "older settings: their kill check searched 1x (now 16x), one-target turn 2",
++    "m25c": "older settings (2026-11-25c): only script-read interruptions answered their turn (no Mind "
++            "Shuffle, Perlereino, Tearlaments GY Fusions), turn 1 kept the full goal's board even when it "
++            "died, Perlereino left in hand, Veiler / Imperm fired at any chain",
++    "m25c-pc": "older settings (2026-11-25c, the PC's stored turn 1s): as m25c",
+     "m21c": "older settings (2026-11-21c): the defending side still had HINDSIGHT -- it lost only "
+             "if the attacker beat both defence scripts, as if it chose its script after seeing the line",
+     "m21b": "older settings (2026-11-21b): before patches 0011-0013 (negates wait for a live "
