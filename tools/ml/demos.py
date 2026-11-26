@@ -10,6 +10,8 @@ thousands of such lines as .yrp files that replay from the duel's start:
   board_kill  board_data's kill lines (its turn-1 variants, kill at 4x/16x)
   break       a going-second game we won: seat 0 = their (trained) turn 1,
               seat 1 = our break
+  lethal      a going-first game we won: seat 0 = our turn 1 + our turn-3 lethal,
+              seat 1 = their turn-2 build
 
 Only the TURN PLAYER's decisions are the search's; the other seat's answers on
 that turn are the scripted defender's. Each record says so in
@@ -57,6 +59,13 @@ def sources():
             "SELECT deck_hash, hand_index, enemy_seed, device, run, line FROM game_results "
             "WHERE first=0 AND outcome='win' AND line IS NOT NULL"):
         out.append(("break", line, {"deck_hash": dh, "hand": h, "eseed": e, "device": dev, "run": run}))
+    # going first, a game we WON ends with our turn-3 lethal line, which replays all three
+    # turns from the start: seat 0 = our turn 1 and our lethal, seat 1 = their turn-2 build.
+    # Left out before 2026-11-26 -- the attacking decisions of our own side were never taught.
+    for dh, h, e, dev, run, line in conn.execute(
+            "SELECT deck_hash, hand_index, enemy_seed, device, run, line FROM game_results "
+            "WHERE first=1 AND outcome='win' AND line IS NOT NULL"):
+        out.append(("lethal", line, {"deck_hash": dh, "hand": h, "eseed": e, "device": dev, "run": run}))
     return [s for s in out if Path(s[1]).exists()]
 
 
