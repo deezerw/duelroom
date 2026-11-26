@@ -7988,3 +7988,23 @@ def test_value_label_follows_the_games_majority_verdict():
     assert vd.game_label({"outcome": "win", "kill": killed}, 320_000) == (0, 0.0)   # outvoted kill
     assert vd.game_label({"outcome": "lost_t2", "kill": held}, 320_000) == (1, 0.0)
     assert vd.game_label({"kill": killed}, 320_000) == (1, 0.75)                     # no outcome stored
+
+
+def test_a_set_super_poly_with_an_empty_hand_is_dead():
+    """drill.NEEDS_HAND: Super Polymerization discards a card, so set with an empty
+    hand it can never fire (the engine offered it 0 times in 5 such games) -- not a
+    piece; with a card in hand it is."""
+    import os
+    from skills import drill, engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+    cards = default_cards()
+    poly = 48130397
+    def board(hand):
+        return {"turn": 2, "players": [{"mzone": [], "szone": [{"code": poly, "position": 10, "sequence": 1, "overlay": []}],
+                                        "hand": hand, "grave": [], "banished": []},
+                                       {"mzone": [], "szone": [], "hand": [], "grave": [], "banished": []}]}
+    assert poly in drill.dead_on_field(board([]), cards)
+    assert poly not in drill.dead_on_field(board([14558127]), cards)
+    assert poly not in game._pieces(board([]), 0, cards, [poly])
+    assert poly in game._pieces(board([14558127]), 0, cards, [poly])

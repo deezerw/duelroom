@@ -221,6 +221,14 @@ def link_equips(board, cards, player=0):
     return n
 
 
+# Interruptions whose cost DISCARDS from the hand: dead with fewer cards in hand than that
+# (2026-11-26, Blue-Eyes going-first smoke: Super Polymerization set as a counted piece in 7
+# games, 5 with an empty hand -- the engine offered it 0 times in 300+ of their windows).
+# shortcut: the hand at the end of OUR turn; a search on their turn (Sulliek's, Mind
+# Shuffle's) can refill it -- a rarely-live card, counted dead.
+NEEDS_HAND = {48130397: 1}      # Super Polymerization: discard 1 card
+
+
 def dead_on_field(board, cards, player=0):
     """Codes whose interruption cannot fire from that player's field (face-up
     or set) on this board: a bare Desirae, a Trivikarma without Visas, an Xyz
@@ -236,8 +244,10 @@ def dead_on_field(board, cards, player=0):
     held = {"mzone": mzone,
             "szone": {cards.canonical(c["code"]) for c in me.get("szone") or [] if c.get("code")},
             "hand": {cards.canonical(c) for c in me.get("hand") or [] if c}}
-    return dead | {c for c, ways in NEEDS_ENABLER.items()
-                   if not any(code in held[zone] and code not in dead for zone, code in ways)}
+    in_hand = len([c for c in me.get("hand") or [] if c])
+    return (dead | {c for c, n in NEEDS_HAND.items() if in_hand < n}
+            | {c for c, ways in NEEDS_ENABLER.items()
+               if not any(code in held[zone] and code not in dead for zone, code in ways)})
 
 
 def _partner(codes, need, cards):
