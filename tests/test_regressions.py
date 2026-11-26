@@ -8078,3 +8078,23 @@ def test_duel_ai_plans_no_hand_traps_and_no_discard_card_when_your_hand_is_empty
     if game._bin_has("--opp-set-root"):
         setc = lambda a: a[a.index("--opp-set-root") + 1]  # noqa: E731
         assert setc(full) == "48130397" and setc(empty) not in ("48130397", None)
+
+
+def test_value_split_never_shares_a_hand_or_enemy_hand_between_halves(monkeypatch):
+    """tools/ml/value_train.crossed_split: a position is held out when its hand OR its
+    enemy hand is; training holds neither -- so no held-out hand and no held-out enemy
+    hand is ever trained on (the 10 enemy hands sat in both halves before)."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent / "tools" / "ml"
+    monkeypatch.syspath_prepend(str(root))
+    spec = importlib.util.spec_from_file_location("value_train", root / "value_train.py")
+    vt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vt)
+    rows = [{"group": f"D:{h}", "eseed": 1000 + e} for h in range(24) for e in range(10)]
+    held, held_e, tr, te = vt.crossed_split(rows, 0.2, 0)
+    assert len(held) == 4 and len(held_e) == 2
+    train = [r for r, t in zip(rows, tr) if t]
+    test = [r for r, t in zip(rows, te) if t]
+    assert not any(r["group"] in held or str(r["eseed"]) in held_e for r in train)
+    assert all(r["group"] in held or str(r["eseed"]) in held_e for r in test)
+    assert len(train) + len(test) == len(rows)

@@ -9,7 +9,7 @@ there (board + history, what the actor reads) feeds ygorl's ValueHead (tanh,
 the label's [-1, 1] range). No card-value feature anywhere: the board is the
 input, the outcome the target (STAGE16 rule).
 
-Held out by (deck, hand) group, as bc_train.py. Reported on the held-out
+Held out by (deck, hand) or enemy hand, crossed (crossed_split). Reported on the held-out
 positions: Pearson / Spearman of value vs hardness, AUC for "killed", and the
 within-enemy-hand Spearman (same enemy opening, different boards -- the
 question the 2026-11-17 board-value attempts failed: does the net rank the
@@ -109,6 +109,24 @@ def encode_all(spec, prefixes, cards, workers, log=print):
     return [o for o, _e in got]
 
 
+def crossed_split(rows, share, seed):
+    """(held hands, held enemy hands, train mask, test mask). A position's label depends
+    on OUR board and THEIR hand, and the 10 enemy hands sat in both halves when only our
+    hand was held out (bc_train had the same leak). Test: its hand OR its enemy hand held
+    out (something the net never trained on); train: neither ("both held" left ~30
+    positions with 24 hands and 10 enemy hands)."""
+    rng = random.Random(seed)
+    groups = sorted({r["group"] for r in rows})
+    enemies = sorted({str(r.get("eseed")) for r in rows})
+    rng.shuffle(groups)
+    rng.shuffle(enemies)
+    held = set(groups[:max(1, int(len(groups) * share))])
+    held_e = set(enemies[:max(1, int(len(enemies) * share))])
+    te = [r["group"] in held or str(r.get("eseed")) in held_e for r in rows]
+    tr = [r["group"] not in held and str(r.get("eseed")) not in held_e for r in rows]
+    return held, held_e, tr, te
+
+
 def spearman(xs, ys):
     from scipy.stats import spearmanr
     return float(spearmanr(xs, ys).statistic) if len(xs) > 2 else float("nan")
@@ -178,13 +196,11 @@ def main():
     X = torch.stack(feats)
     y = torch.tensor([r["hardness"] for r in keep], dtype=torch.float32)
     groups = sorted({r["group"] for r in keep})
-    rng = random.Random(args.seed)
-    rng.shuffle(groups)
-    held = set(groups[:max(1, int(len(groups) * args.heldout))])
-    te = torch.tensor([r["group"] in held for r in keep])
-    tr = ~te
+    held, held_e, tr_l, te_l = crossed_split(keep, args.heldout, args.seed)
+    te, tr = torch.tensor(te_l), torch.tensor(tr_l)
     print(f"{len(keep)} encoded ({len(rows) - len(keep)} skipped); train {int(tr.sum())} / held-out "
-          f"{int(te.sum())} positions ({len(groups) - len(held)} / {len(held)} groups)", flush=True)
+          f"{int(te.sum())} positions ({len(groups) - len(held)} / {len(held)} hands, "
+          f"{len(held_e)} enemy hands held out)", flush=True)
 
     torch.manual_seed(args.seed)
     head = ValueHead(X.shape[1], hidden=128)
@@ -224,7 +240,8 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     torch.save({"head": head.state_dict(), "ctx_dim": X.shape[1], "otk_ms": otk,
-                "features": args.features, "heldout_groups": sorted(held)}, out / "value_head.pt")
+                "features": args.features, "heldout_groups": sorted(held),
+                "heldout_enemy_hands": sorted(held_e)}, out / "value_head.pt")
     torch.save({"X": X, "y": y, "heldout": te, "lost": torch.tensor(lost)}, out / "features.pt")
     (out / "report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1), flush=True)
