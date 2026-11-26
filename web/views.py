@@ -559,6 +559,10 @@ OLD_SECTIONS = {
     "endgame-t1": "older settings: the enemy's turn 1 aimed at one card (Endgame Problem)",
     "brk1x": "older settings: your going-second break searched 1x (now 8x)",
     "kill1x": "older settings: their kill check searched 1x (now 16x), one-target turn 2",
+    "m25c": "older settings (2026-11-25c): only script-read interruptions answered their turn (no Mind "
+            "Shuffle, Perlereino, Tearlaments GY Fusions), turn 1 kept the full goal's board even when it "
+            "died, Perlereino left in hand, Veiler / Imperm fired at any chain",
+    "m25c-pc": "older settings (2026-11-25c, the PC's stored turn 1s): as m25c",
     "m21c": "older settings (2026-11-21c): the defending side still had HINDSIGHT -- it lost only "
             "if the attacker beat both defence scripts, as if it chose its script after seeing the line",
     "m21b": "older settings (2026-11-21b): before patches 0011-0013 (negates wait for a live "

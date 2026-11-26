@@ -5694,6 +5694,7 @@ def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
     full = {"board": "full", "start": "s", "prefix": "full", "reached": False}
     kw = dict(our_deck="d", enemy_deck="e", hand=[], enemy_seed=1000, scratch=tmp_path, ms=1,
               seed=1000, enemy_respond=[], enemy_target="t", our_respond=[], cards=object())
+    monkeypatch.setattr(game, "T1_PICK_ALWAYS", False)     # the original rule: misses only
     assert game.turn1_fallbacks({**full, "reached": True}, ["g1"], n=2, **kw)["prefix"] == "full"
     assert calls == [], "a reached goal costs nothing more"
     alive.add("g2")
@@ -5702,8 +5703,8 @@ def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
     alive.clear(); calls.clear()
     t = game.turn1_fallbacks(full, ["g1"], n=2, **kw)
     assert t["prefix"] == "full" and t["fallback"] == 0
-    assert game.turn1_fallbacks(full, ["g1"], n=0, **kw) is full, "off by default"
-    assert game.T1_FALLBACKS == 0
+    assert game.turn1_fallbacks(full, ["g1"], n=0, **kw) is full, "n=0: off"
+    assert game.T1_FALLBACKS == 6          # live since METHOD 2026-11-26a
 
 
 def test_closing_a_turn_cut_mid_selection_ends():
@@ -7845,7 +7846,7 @@ def test_respond_all_lists_every_card_of_the_deck(tmp_path, monkeypatch):
     from skills import game
     ydk = tmp_path / "d.ydk"
     ydk.write_text("#main\n14558127\n14558127\n77103950\n#extra\n69946549\n!side\n")
-    assert game.RESPOND_ALL is False
+    monkeypatch.setattr(game, "RESPOND_ALL", False)
     today = set(game.respond_codes(ydk))
     assert 14558127 in today and 69946549 not in today
     monkeypatch.setattr(game, "RESPOND_ALL", True)
@@ -8122,7 +8123,7 @@ def test_turn1_pick_solves_a_candidate_only_after_every_board_before_it_died(mon
     assert solved == ["g1", "g2"]
 
 
-def test_duel_ai_plans_with_your_face_up_board_answering():
+def test_duel_ai_plans_with_your_face_up_board_answering(monkeypatch):
     """duel.plan_args(your_board=): your face-up pieces (Desirae with its Sequence, a
     marked Dragostapelia) are in the planning copy's --opp-respond -- only the assumed
     hand traps and set card were, so its plans had your board never fire."""
@@ -8140,5 +8141,9 @@ def test_duel_ai_plans_with_your_face_up_board_answering():
     def responded(args):
         i = args.index("--opp-respond")
         return {int(c) for c in args[i + 1].split("|")}
+    from skills import game
+    monkeypatch.setattr(game, "RESPOND_ALL", False)
     assert drago not in responded(duel.plan_args(row, cards, 2, your_hand=1))
     assert drago in responded(duel.plan_args(row, cards, 2, your_hand=1, your_board=board))
+    monkeypatch.setattr(game, "RESPOND_ALL", True)         # live since 2026-11-26a: every card
+    assert drago in responded(duel.plan_args(row, cards, 2, your_hand=1))

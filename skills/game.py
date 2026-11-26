@@ -113,9 +113,12 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-25c"
-METHOD_SINCE = {False: "2026-11-25T18:30:00",    # 2026-11-25c: + patch 0015, budgets count
-                True: "2026-11-25T18:30:00"}     # CPU work (a loaded machine no longer searches less)
+METHOD = "2026-11-26a"
+METHOD_SINCE = {False: "2026-11-26T22:09:48",    # 2026-11-26a (user chose "bump with both"): every card
+                True: "2026-11-26T22:09:48"}     # answers (RESPOND_ALL), turn 1 picked by survival
+# (T1_PICK_ALWAYS, T1_FALLBACKS 6), Field Spells activated at end of turn, Super Poly dead with
+# an empty hand, patches 0016-0018 in the rooted solver (0017: Veiler / Imperm only onto a
+# monster's on-field effect). 2026-11-25c: + patch 0015, budgets count CPU work.
 # 2026-11-25b: a majority of futures; 25a: one committed defence script     # (patch 0014 --reseed) for every kill / lethal verdict     # defence script (DEFENCES = (1,)), no hindsight.
 # Before: 2026-11-21c (patches 0011-0013 live, every Trap set, Continuous Spells activated)     # (negates wait for a live target), 0012 (kill
 # keys first), 0013 (GY-loving cards given to send-to-GY costs), every Trap set and
@@ -566,7 +569,7 @@ QUICK_RESPOND = False
 # core offers only what is legal where the card sits; the smart defender still ranks hand
 # traps first and holds the rest until the attacker has a monster. Off until
 # tools/experiments/quick_respond_ab.py's "all" arm measures it (both sides use it).
-RESPOND_ALL = False
+RESPOND_ALL = True          # A/B 2026-11-26: 10 boards saved, 0 lost of 59 (p 0.002)
 _THEIR_TURN_QUICK = re.compile(r"\(Quick Effect\): You can Special Summon this card from your hand|"
                                r"When your opponent activates[^.]*\(Quick Effect\): You can Special Summon "
                                r"this card from your hand", re.I)
@@ -948,14 +951,14 @@ def enemy_script_args(respond, script, cards=None):
 # learned model) beat the full goal. Off (0) until tools/experiments/t1_starters.py
 # measures it. The look-ahead's seed is never the game's turn-2 seed, so a board it
 # keeps is not one the game's own search was already seen to miss.
-T1_FALLBACKS = 0            # fallback goals tried (best first); 0 = off
+T1_FALLBACKS = 6            # fallback goals tried (best first); 0 = off
 # The pick runs on EVERY turn 1, not only one that missed the full goal (user, 2026-11-26:
 # "i want it to be better than me"): a reached goal is just one candidate, kept when it
 # survives the look-ahead -- it comes first -- and replaced by a board that does when it
 # does not. Candidates also take the hand's breadth goals (base + one piece: trainer.
 # breadth_goals), so board SHAPES the full goal never asks for are tried. Off until
 # tools/experiments/t1_starters.py `--always` measures it.
-T1_PICK_ALWAYS = False
+T1_PICK_ALWAYS = True       # A/B 2026-11-26 Angelechy: 2 saved, 0 lost of 16
 FALLBACK_PICK_X = 4         # the look-ahead kill check, x OTK_MS per defence
 FALLBACK_SEED = 7           # added to the game's seed * 100: a seed no game uses
 
