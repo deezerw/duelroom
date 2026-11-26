@@ -107,8 +107,11 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       Spells / Traps are what patch 0017 fixed. Next bump: Ghost Ogre needs a VARIANT of
       0017's rule, not the list -- it also answers a face-up Spell / Trap's effect ("destroy that
       card on the field": Perlereino, Scream are real stops), which 0017's monster-only check
-      would forbid. Patch 0019: "the activating card is still on the field" for Ogre (monster or
-      face-up S/T), duel._monster_link's Python twin likewise, then the kill-check A/B. Bystial
+      would forbid. Patch 0019 `--opp-on-field` BUILT 2026-11-26 (build/combo-solver-0019, in
+      build_rooted_solver.sh; NOT live): "the activating card is still on the field, face-up"
+      (monster or S/T). Left: game.defender_args emitting it for Ghost Ogre, duel's Python
+      twin of the rule, a position-level gate (an Ogre held after Requiem tributed itself), the
+      kill-check A/B. Bystial
       -> Requiem is NOT this (it banishes from the GY, which the table cannot score as a stop).
 - [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
       Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full

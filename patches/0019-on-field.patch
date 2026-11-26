@@ -1,0 +1,87 @@
+diff -ruN combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-26 00:54:27.454823426 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-26 18:17:04.009822243 -0500
+@@ -1520,6 +1520,8 @@
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// --opp-on-activation <code|code...> (patch 0017).
+ 	std::vector<uint32_t> opp_on_activation;
++	// --opp-on-field <code|code...> (patch 0019).
++	std::vector<uint32_t> opp_on_field;
+ 	// --opp-key <code|code...> (patch 0012).
+ 	std::vector<uint32_t> opp_key;
+ 	// --opp-gy-want <code|code...> (patch 0013).
+@@ -2080,6 +2082,9 @@
+ 				"  --opp-on-activation <c>  with --opp-smart: these defender pieces (Veiler,\n"
+ 				"                     Impermanence) answer only the searcher's monster effect\n"
+ 				"                     activated on the field, and target that monster (0017)\n"
++				"  --opp-on-field <c> with --opp-smart: these defender pieces (Ghost Ogre)\n"
++				"                     answer only a card of the searcher's activated on the\n"
++				"                     field that is still there face-up (0019)\n"
+ 				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+@@ -2629,7 +2634,7 @@
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+ 				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key" ||
+-				  a == "--opp-gy-want" || a == "--opp-on-activation") {
++				  a == "--opp-gy-want" || a == "--opp-on-activation" || a == "--opp-on-field") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2640,6 +2645,7 @@
+ 				: (a == "--opp-negate-mon") ? o.opp_negate_mon
+ 				: (a == "--opp-dead") ? o.opp_dead
+ 				: (a == "--opp-on-activation") ? o.opp_on_activation
++				: (a == "--opp-on-field") ? o.opp_on_field
+ 				: (a == "--opp-key") ? o.opp_key
+ 				: (a == "--opp-gy-want") ? o.opp_gy_want : o.opp_respond;
+ 			std::string sv(v);
+@@ -4294,6 +4300,7 @@
+ 	cfg.opp_negate_mon = opt.opp_negate_mon;
+ 	cfg.opp_dead = opt.opp_dead;
+ 	cfg.opp_on_activation = opt.opp_on_activation;
++	cfg.opp_on_field = opt.opp_on_field;
+ 	cfg.opp_key = opt.opp_key;
+ 	cfg.opp_gy_want = opt.opp_gy_want;
+ 
+diff -ruN combo-solver-rooted/solver-patched/search.cpp combo-solver-next/solver-patched/search.cpp
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-26 00:54:27.451823344 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-26 18:17:04.009822243 -0500
+@@ -1839,11 +1839,22 @@
+ 
+ bool Search::ActivationLive(uint32_t code) {
+ 	const uint32_t c = duel.Db().Canonical(code);
++	Duel::ChainLink l{};
++	const uint8_t who = static_cast<uint8_t>(cfg.target_player);
++	// Patch 0019: Ghost Ogre destroys "that card on the field" -- wasted on a card that left
++	// as its own cost (Fiendsmith's Requiem tributes itself: 9 of 11 Ogres stopped nothing,
++	// tools/experiments/wasted_answers.py). Answer only a card activated on the field that is
++	// still there face-up: a monster OR a face-up Spell / Trap (Perlereino is a real stop).
++	if(std::find(cfg.opp_on_field.begin(), cfg.opp_on_field.end(), c) != cfg.opp_on_field.end()) {
++		if(duel.ChainLinkFromEnd(0, &l) && l.trig_con == who && (l.trig_loc & LOCATION_ONFIELD) &&
++		   l.con == who && (l.loc & LOCATION_ONFIELD) && (l.pos & POS_FACEUP))
++			return true;
++		++stats.activation_holds;
++		return false;
++	}
+ 	if(std::find(cfg.opp_on_activation.begin(), cfg.opp_on_activation.end(), c) ==
+ 	   cfg.opp_on_activation.end())
+ 		return true;
+-	Duel::ChainLink l{};
+-	const uint8_t who = static_cast<uint8_t>(cfg.target_player);
+ 	if(duel.ChainLinkFromEnd(0, &l) && l.trig_con == who && (l.trig_loc & LOCATION_MZONE) &&
+ 	   l.con == who && (l.loc & LOCATION_MZONE) && (l.pos & POS_FACEUP))
+ 		return true;
+diff -ruN combo-solver-rooted/solver-patched/search.h combo-solver-next/solver-patched/search.h
+--- combo-solver-rooted/solver-patched/search.h	2026-11-26 00:54:27.452823371 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-26 18:17:04.009822243 -0500
+@@ -2748,6 +2748,8 @@
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// --opp-on-activation <codes> (duelroom patch 0017): see Search::ActivationLive.
+ 	std::vector<uint32_t> opp_on_activation;
++	// --opp-on-field <codes> (duelroom patch 0019): see Search::ActivationLive.
++	std::vector<uint32_t> opp_on_field;
+ 	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
+ 	// important first; the defender's target pick takes one over any other.
+ 	std::vector<uint32_t> opp_key;
