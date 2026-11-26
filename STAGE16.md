@@ -140,3 +140,26 @@ Steps 0-2 can start now (little compute). Step 3 onwards waits until the honest 
   kills in less time. First evidence the learned prior makes the search better, not just slower.
   Next: the prior where the games search (arm b: the C++ NRPA's starting policy, batched GPU
   inference), or the PUCT search with the net driving real decisions (kill check, lethal turn).
+- **2026-11-26, the pipeline made ready for GPU training (overnight loop; READ before any run):**
+  - **The 2026-11-20/21 held-out numbers were LEAKED.** Every decision was held out by OUR hand,
+    but half the samples are the enemy's (its kills, its turn 1 going second) and its 10 hands
+    sat in both halves: the 54% vs 30% enemy-kill accuracy and prior_ab's 40 "held-out" kills were
+    on enemy hands the net had trained on. Fixed: `bc_train.seat_groups` (ours by our hand, the
+    enemy's by its seed), `value_train.crossed_split` (test = an unseen hand OR enemy hand, train
+    = neither); prior_ab rebuilds the same split. The 2x-far-kills result needs re-measuring.
+  - **The old demos were 98% misplay eras** (86 of 4748 lines current): `bc_train.SKIP_ERAS`
+    leaves out everything before the 2026-11-20 fixes; `--eras method` trains on the live
+    method's games only (`LIVE_DEVICES`), the right choice for the first run on METHOD
+    2026-11-26a (every card answers, turn 1 picked by survival). value_train takes the same flag
+    and filters eras BEFORE choosing the kill budget.
+  - **Value labels follow the game's majority verdict** (`value_data.game_label`; hardness 0 where
+    the real future and the majority disagree). The kill labeller had crashed on every game since
+    the majority-of-futures change (reseeded futures read as defences): fixed, `demos.py` now
+    labels new games first.
+  - **Speed:** sample build on every core + one replay for both seats (22 min -> ~2 min for the
+    old set); value positions encoded on every core; `mcts.clone_observer` 1.38x per search, exact.
+  - **One command:** `tools/duelpc/train.sh --eras method --epochs 8` (data here, train on the
+    PC's GPU, nets pulled back). Smoke-run end to end 2026-11-26 (1 epoch, 3000 samples).
+  - **Data:** tonight's METHOD 2026-11-26a games on duelpc (`tools/duelpc/tonight_games.sh`:
+    smoke + play_audit gate + long run until 20:25) are the first clean set; one night is small
+    (~1-2 hundred games), so the first run is a pipeline check, not a verdict.
