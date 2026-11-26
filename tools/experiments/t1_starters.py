@@ -110,7 +110,7 @@ def main(limit=POSITIONS, n=FALLBACKS, mode="missed", enemy=ENEMY, label=DEVICE)
             fh.write(json.dumps(rec) + "\n")
         print(json.dumps(rec), flush=True)
 
-    with ThreadPoolExecutor(1 if dev.name == "server" else dev.workers) as ex:
+    with ThreadPoolExecutor(4 if dev.name == "server" else dev.workers) as ex:
         list(ex.map(one, jobs))
     summary()
 
