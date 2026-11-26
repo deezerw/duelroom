@@ -685,9 +685,24 @@ class Position:
 
 
 def _continuous_spell(code):
+    """A Spell that works face-up on the opponent's turn, so the end of turn ACTIVATES it
+    rather than setting it: Continuous, or Field (Primeval Planet Perlereino: its destroy
+    triggers on their turn, and Stage 15 found it left in hand in 18 of 240 turn 1s)."""
     from ygorl.engine.duel import default_cards
     card = default_cards().get(code)
-    return bool(card is not None and card.type & 0x2 and card.type & 0x20000)
+    return bool(card is not None and card.type & 0x2 and card.type & (0x20000 | 0x80000))
+
+
+def _field_spell(code):
+    from ygorl.engine.duel import default_cards
+    card = default_cards().get(code)
+    return bool(card is not None and card.type & 0x2 and card.type & 0x80000)
+
+
+def _field_zone_free(session, player):
+    from ygorl.solver.targets import board_summary
+    b = board_summary(session.core, session.tracker.turn, (8000, 8000))
+    return not any(m and m.get("sequence") == 5 for m in b["players"][player].get("szone") or [])
 
 
 LENIENT_SKIP = 16   # how far ahead a copy's line may hold answers the real duel skips
@@ -783,7 +798,9 @@ def replay(source, responses=None, until_turn=None, free_set=None, lenient=None)
                          if a.card and a.card.code in to_set and (
                              (a.kind == "sset" and not _continuous_spell(a.card.code)) or
                              (a.kind == "activate" and _continuous_spell(a.card.code)
-                              and a.card.loc is not None and a.card.loc.location & 0x2))), None)
+                              and a.card.loc is not None and a.card.loc.location & 0x2
+                              # never over our own Field Spell (it would be sent to the GY)
+                              and (not _field_spell(a.card.code) or _field_zone_free(session, setter))))), None)
                    if point.player == setter and point.turn_player == setter else None)
             pick = put if put is not None else next(
                 (kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0)
@@ -1418,9 +1435,10 @@ def free_sets(deck, cards=None, extra=()):
         card = cards.get(c)
         if card and card.type & 0x4:                                # TYPE_TRAP
             out.append(c)
-        elif card and card.type & 0x2 and card.type & 0x20000:     # a Continuous Spell:
+        elif card and card.type & 0x2 and card.type & (0x20000 | 0x80000):   # Continuous / Field:
             out.append(c)          # activated face-up instead (a set one never flips on
-                                   # their turn): Tearlaments Scream triggers on THEIR summons
+                                   # their turn): Tearlaments Scream triggers on THEIR summons,
+                                   # Perlereino destroys on their turn
     for c in extra:
         card = cards.get(int(c))
         if (int(c) in main and int(c) not in out and card

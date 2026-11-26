@@ -8024,3 +8024,14 @@ def test_ai_drops_its_draw_card_where_the_search_would_pass():
     assert duel.with_drawer(0, 0, drawers) == 2          # the search passes: Fuwalos
     assert duel.with_drawer(1, 0, drawers) == 1          # Ash does better: Ash (Fuwalos stays)
     assert duel.with_drawer(0, 0, []) == 0
+
+
+def test_end_of_turn_activates_a_field_spell_left_in_hand_only_into_a_free_zone():
+    """game.free_sets / replay(free_set=): a Field Spell (Perlereino: its destroy works
+    on their turn) left in hand is activated at the end of the turn like a Continuous
+    Spell -- 48 of 63 stored turn 1s that kept it in hand -- never over our own Field Spell."""
+    from skills import engine, game
+    perl = 77103950
+    assert game._continuous_spell(perl) and game._field_spell(perl)
+    assert not game._field_spell(6767771)                        # Scream: Continuous only
+    assert perl in game.free_sets(engine.DECKS / "imported.ydk")
