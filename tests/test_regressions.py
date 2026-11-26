@@ -8273,3 +8273,22 @@ def test_defender_keeps_its_hand_traps_from_costs_only_with_a_0020_binary(monkey
     monkeypatch.setattr(game, "_bin_has", lambda f: True)
     a = game.defender_args([ash, sulliek])
     assert a[a.index("--opp-keep") + 1] == str(ash)
+
+
+def test_demos_drop_records_whose_replay_a_relabel_moved(tmp_path):
+    """tools/ml/demos.prune_moved: a relabel moves a section's game folders, so a converted
+    record's device and path go stale (a bumped-away game still read "server"); records
+    whose replay is gone are dropped, to be re-read from the new place with the new label."""
+    import importlib.util
+    import json as _json
+    spec = importlib.util.spec_from_file_location(
+        "demos", Path(__file__).resolve().parent.parent / "tools" / "ml" / "demos.py")
+    dm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dm)
+    here = tmp_path / "line.yrp"; here.write_text("x")
+    f = tmp_path / "demos.jsonl"
+    f.write_text("".join(_json.dumps({"key": k, "lines": [{"source": str(p)}]}) + "\n"
+                         for k, p in (("a", here), ("b", tmp_path / "moved.yrp"))))
+    assert dm.prune_moved(f) == 1
+    assert [_json.loads(l)["key"] for l in f.read_text().splitlines()] == ["a"]
+    assert dm.prune_moved(f) == 0

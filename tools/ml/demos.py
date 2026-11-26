@@ -94,6 +94,31 @@ def convert(src):
     return demo.to_json()
 
 
+def prune_moved(path):
+    """Drop the records whose replay is no longer where they say: a relabel
+    (tools/relabel_games.py, every METHOD bump) MOVES a section's game folders and the
+    record's device / path go stale -- 2026-11-26 the bumped-away going-second games
+    still read device "server", so training on "the live method only" kept them (and
+    their new path converted them a second time). sources() offers the moved game again
+    from its new place, with its new label. Returns how many were dropped."""
+    if not path.exists():
+        return 0
+    keep, gone = [], 0
+    for raw in path.read_text().splitlines():
+        src = (json.loads(raw).get("lines") or [{}])[0].get("source")
+        if src and not Path(src).exists():
+            gone += 1
+            continue
+        keep.append(raw)
+    if gone:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("".join(l + "\n" for l in keep))
+        tmp.replace(path)
+        print(f"{gone} record(s) whose replay moved (a relabel): dropped, re-read from their new place",
+              flush=True)
+    return gone
+
+
 def _key(src):
     return hashlib.sha1(src[1].encode()).hexdigest()[:16]
 
@@ -107,6 +132,7 @@ def main(workers=None):
     game_kills.main(workers)
     OUT.mkdir(parents=True, exist_ok=True)
     out, rej = OUT / "demos.jsonl", OUT / "rejected.jsonl"
+    prune_moved(out)
     done = set()
     for f in (out, rej):
         if f.exists():

@@ -26,10 +26,15 @@ python3 -c "import json,sys; [print(json.loads(l)['prefix'].removeprefix('/home/
   | sort -u > /tmp/duelroom-train-prefixes.txt
 rsync -a --files-from=/tmp/duelroom-train-prefixes.txt --ignore-missing-args ./ "$H:duelroom/"
 
+# the era filter applies to BOTH nets (it reached only bc_train before: the value head trained on
+# every era after 2026-11-20 while the policy trained on the live method)
+VERAS=""
+args=("$@")
+for i in "${!args[@]}"; do [ "${args[$i]}" = "--eras" ] && VERAS="--eras ${args[$((i+1))]}"; done
 say "train on the GPU -> $OUT"
 ssh "$H" "cd ~/duelroom && export YGORL_THIRD_PARTY=~/duelroom/vendor/third_party_merged && \
   ~/duelroom-ml/bin/python tools/ml/bc_train.py results/ml/demos/demos.jsonl $OUT $* && \
-  ~/duelroom-ml/bin/python tools/ml/value_train.py results/ml/value/positions.jsonl $OUT $OUT/value" \
+  ~/duelroom-ml/bin/python tools/ml/value_train.py results/ml/value/positions.jsonl $OUT $OUT/value $VERAS" \
   2>&1 | grep -v '^{"epoch"' | tail -40
 
 say "pull $OUT back"
