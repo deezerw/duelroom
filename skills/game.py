@@ -206,6 +206,11 @@ NEGATE_ONLY = {35103106: "any",        # Evolzar Lars: a face-up card
 # to fuse away, then a Dragostapelia at a quiet window. They answer a monster's
 # effect activated ON THE FIELD, and target that monster.
 ON_MONSTER_ACTIVATION = {97268402: "Effect Veiler", 10045474: "Infinite Impermanence"}
+# Patch 0019 (user, 2026-11-26: "dont use imperm on requiem unless i cant use its ability to
+# dodge it"): answers that destroy "that card on the field" -- wasted on a card that left as
+# its own cost (Ghost Ogre -> Fiendsmith's Requiem: 9 of 11 stopped nothing). They answer a
+# card activated on the field that is still there face-up, monster or Spell / Trap.
+ON_FIELD_ACTIVATION = {59438930: "Ghost Ogre & Snow Rabbit"}
 # None: emit the 0011 flags when ROOTED_BIN has them; an A/B arm on another
 # build sets True / False.
 NEGATE_LIVE = None
@@ -647,6 +652,11 @@ def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
         act = sorted({cards.canonical(c) for c in codes} & set(ON_MONSTER_ACTIVATION))
         if act and _bin_has("--opp-on-activation"):
             args += ["--opp-on-activation", "|".join(map(str, act))]
+        # patch 0019 (needs the binary; the live one before the next bump has not got it, so
+        # nothing changes until then): Ghost Ogre only onto a card still on the field
+        fld = sorted({cards.canonical(c) for c in codes} & set(ON_FIELD_ACTIVATION))
+        if fld and _bin_has("--opp-on-field"):
+            args += ["--opp-on-field", "|".join(map(str, fld))]
         if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:

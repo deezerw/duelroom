@@ -8231,3 +8231,33 @@ def test_turn1_rows_record_which_board_the_survival_pick_kept(tmp_path):
     import inspect
     from skills import game
     assert 'fallback=t1.get("fallback")' in inspect.getsource(game)
+
+
+def test_ghost_ogre_on_field_rule_is_emitted_only_by_a_0019_binary(monkeypatch):
+    """game.defender_args: Ghost Ogre's --opp-on-field (patch 0019: only onto a card still
+    on the field) is passed only when the rooted binary has the flag -- the live binary
+    before the next bump has not, so tonight's games are unchanged."""
+    from skills import game
+    ogre = 59438930
+    monkeypatch.setattr(game, "_bin_has", lambda f: f != "--opp-on-field")
+    assert "--opp-on-field" not in game.defender_args([ogre, 14558127])
+    monkeypatch.setattr(game, "_bin_has", lambda f: True)
+    args = game.defender_args([ogre, 14558127])
+    assert args[args.index("--opp-on-field") + 1] == str(ogre)
+
+
+def test_duel_ghost_ogre_skips_a_requiem_that_tributed_itself():
+    """duel._field_link: the AI's Ghost Ogre answers your card activated on the field only
+    while that card is still there face-up -- Requiem tributes itself to activate (gone:
+    no Ogre), a face-up Perlereino activating stays a target."""
+    from types import SimpleNamespace as NS
+    from skills import duel
+    req, perl = 2463794, 77103950
+    def live(chain, at, you):
+        return NS(chain=chain, chain_at=at,
+                  board=lambda: {"players": [you, {"mzone": [], "szone": []}]})
+    gone = live([(req, 0)], [0x4], {"mzone": [], "szone": []})
+    assert not duel._field_link(gone, 1)
+    field = live([(perl, 0)], [0x8], {"mzone": [], "szone": [{"code": perl, "position": 1}]})
+    assert duel._field_link(field, 1)
+    assert not duel._field_link(live([(perl, 1)], [0x8], {"mzone": [], "szone": []}), 1)   # its own link

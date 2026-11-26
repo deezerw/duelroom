@@ -333,7 +333,8 @@ def answers(live, ai, respond, cards, wasted=(), dead=()):
     may sensibly use]) -- every piece of `respond` that is not ruled out: never
     onto its own link, nothing onto your own-turn-dead card, board pieces held
     until you control a monster, a negate-only piece only with a live target,
-    Veiler / Impermanence only onto your monster's activation on the field."""
+    Veiler / Impermanence only onto your monster's activation on the field, Ghost Ogre
+    only onto a card still on the field."""
     from . import game
     p = live.point
     passing = next((i for i, a in enumerate(p.actions) if a.kind == "pass"), len(p.actions) - 1)
@@ -359,6 +360,9 @@ def answers(live, ai, respond, cards, wasted=(), dead=()):
         # Veiler / Impermanence answer your monster's effect activated on the field
         if a.card.code in game.ON_MONSTER_ACTIVATION and not _monster_link(live, ai):
             continue
+        # Ghost Ogre destroys "that card on the field": never onto one that already left
+        if a.card.code in game.ON_FIELD_ACTIVATION and not _field_link(live, ai):
+            continue
         out.append(i)
     return passing, out
 
@@ -383,6 +387,17 @@ def _monster_link(live, ai):
     code = live.chain[-1][0]
     return any(m["code"] == code and m.get("position", 0) & 0x5
                for m in live.board()["players"][1 - ai].get("mzone") or [])
+
+
+def _field_link(live, ai):
+    """The top chain link is YOUR card's effect activated on the field (monster or Spell /
+    Trap zone) and that card is still there, face-up: what Ghost Ogre answers (patch 0019's
+    Python twin -- Requiem tributes itself to activate, so an Ogre finds nothing)."""
+    if not live.chain or live.chain[-1][1] == ai or live.chain_at[-1] & 0xC == 0:
+        return False
+    code, you = live.chain[-1][0], live.board()["players"][1 - ai]
+    return any(m and m["code"] == code and m.get("position", 0) & 0x5
+               for z in ("mzone", "szone") for m in you.get(z) or [])
 
 
 # --- its answers on YOUR turn, searched (user chose 2026-11-26: "search each window") ---
