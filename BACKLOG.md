@@ -98,6 +98,13 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       the same hand through the kill check (duel page + tally). Runs: results/experiments/
       better_than_me{,2}.log (Angelechy, then a going-first Blue-Eyes smoke batch: no going-first
       Blue-Eyes positions existed). (a)/(b) go live with this round's METHOD bump if they help.
+- [ ] **Defender gives up a hand trap to a discard cost** (found 2026-11-26 while turning on
+      RESPOND_ALL): patch 0004's DefenderPick gives up its OWN lowest-ATK card, and hand traps
+      are 0 ATK, so a discard cost of a newly listed card (Mind Shuffle's search: "then discard
+      1") throws away Ash / Imperm first. The duel's Python defender already keeps them
+      (_follow_up ranks a piece above a non-piece). Fix in C++ (a piece / hand trap last among
+      its own cards, after 0013's --opp-gy-want), then a paired kill-check A/B. RESPOND_ALL's
+      +10 / -0 of 59 was measured WITH this behaviour.
 - [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
 
 ### Phase 2 -- calibration (duelpc days)
