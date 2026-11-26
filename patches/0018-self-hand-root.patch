@@ -1,0 +1,119 @@
+diff -ruN combo-solver-rooted/solver-patched/duel.cpp combo-solver-next/solver-patched/duel.cpp
+--- combo-solver-rooted/solver-patched/duel.cpp	2026-11-26 00:17:52.650840758 -0500
++++ combo-solver-next/solver-patched/duel.cpp	2026-11-26 00:53:50.241803925 -0500
+@@ -241,6 +241,38 @@
+ 			}
+ 		}
+ 	}
++	// patch 0018: the searcher's hand is a SAMPLE -- its real hand back into the
++	// Deck, each sampled card out of the Deck (made if the Deck has none left)
++	if(yrp.self_hand_set) {
++		ArenaScope scope(arena);
++		auto* fld = static_cast<::duel*>(handle)->game_field;
++		const uint8_t t = yrp.self_hand_team;
++		const auto sent = fld->core.just_sent_cards;      // bookkeeping, not a game event
++		auto& hand = fld->player[t].list_hand;
++		while(!hand.empty()) {
++			card* c = hand.back();
++			fld->remove_card(c);
++			c->current.position = POS_FACEDOWN_DEFENSE;
++			fld->add_card(t, c, LOCATION_DECK, 0);
++		}
++		for(uint32_t code : yrp.self_hand) {
++			auto& deck = fld->player[t].list_main;
++			card* c = nullptr;
++			for(card* d : deck)
++				if(d->data.code == code) { c = d; break; }
++			if(c) {
++				fld->remove_card(c);
++				c->current.position = POS_FACEDOWN_DEFENSE;
++				fld->add_card(t, c, LOCATION_HAND, 0);
++			} else if(!ExecLua("Debug.AddCard(" + std::to_string(code) + "," + std::to_string(t) +
++							   "," + std::to_string(t) + ",LOCATION_HAND,0,POS_FACEDOWN_DEFENSE)",
++							   "self_hand_root")) {
++				error = "--self-hand-root: Debug.AddCard(" + std::to_string(code) + ") failed";
++				return false;
++			}
++		}
++		fld->core.just_sent_cards = sent;
++	}
+ 	// patch 0014: the set cards the searcher assumes, then a fresh random future
+ 	if(yrp.root_set_card || yrp.root_reseed) {
+ 		ArenaScope scope(arena);
+diff -ruN combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-26 00:17:52.651840778 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-26 00:54:27.369821104 -0500
+@@ -1513,6 +1513,9 @@
+ 	std::vector<uint32_t> opp_hand_root;
+ 	// --opp-hand-hide (duelroom patch 0016).
+ 	bool opp_hand_hide = false;
++	// --self-hand-root <code|code...> (patch 0018).
++	std::vector<uint32_t> self_hand_root;
++	bool self_hand_set = false;
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <code|code...> (patch 0011).
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
+ 	// --opp-on-activation <code|code...> (patch 0017).
+@@ -2072,6 +2075,8 @@
+ 				"                     card; they wait while every face-up card the searcher\n"
+ 				"                     controls is --opp-dead (0011)\n"
+ 				"  --opp-negate-mon <c>  the same, counting face-up MONSTERS only (0011)\n"
++				"  --self-hand-root <c|c..>  with --root: the searcher's hand is this sample;\n"
++				"                     the real one goes back into the Deck (- = empty) (0018)\n"
+ 				"  --opp-on-activation <c>  with --opp-smart: these defender pieces (Veiler,\n"
+ 				"                     Impermanence) answer only the searcher's monster effect\n"
+ 				"                     activated on the field, and target that monster (0017)\n"
+@@ -2605,6 +2610,17 @@
+ 		} else if(a == "--opp-set-root") {
+ 			const char* v = next("--opp-set-root"); if(!v) return false;
+ 			o.opp_set_root = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
++		} else if(a == "--self-hand-root") {          // patch 0018; "-" = an empty hand
++			const char* v = next("--self-hand-root"); if(!v) return false;
++			o.self_hand_set = true;
++			std::string sv(v);
++			size_t at = 0;
++			while(at < sv.size() && sv != "-") {
++				size_t bar = sv.find('|', at);
++				if(bar == std::string::npos) bar = sv.size();
++				if(bar > at) o.self_hand_root.push_back(static_cast<uint32_t>(std::stoul(sv.substr(at, bar - at))));
++				at = bar + 1;
++			}
+ 		} else if(a == "--opp-hand-hide") {
+ 			o.opp_hand_hide = true;
+ 		} else if(a == "--opp-hold-until") {
+@@ -11442,6 +11458,18 @@
+ 			std::printf("  root              : %zu answer(s) replayed before "
+ 						"every search (--root)\n", ry->responses.size());
+ 		}
++		if(opt.self_hand_set) {                    // patch 0018
++			if(opt.root_file.empty()) {
++				std::printf("!! --self-hand-root needs --root\n");
++				return 1;
++			}
++			Replay* sy = const_cast<Replay*>(start_yrp);
++			sy->self_hand = opt.self_hand_root;
++			sy->self_hand_team = static_cast<uint8_t>(opt.target_player);
++			sy->self_hand_set = true;
++			std::printf("  self hand at root : player %d's hand is a %zu-card sample "
++						"(--self-hand-root)\n", opt.target_player, sy->self_hand.size());
++		}
+ 		if(opt.opp_hand_hide) {                   // patch 0016
+ 			if(opt.root_file.empty()) {
+ 				std::printf("!! --opp-hand-hide needs --root\n");
+diff -ruN combo-solver-rooted/solver-patched/replay.h combo-solver-next/solver-patched/replay.h
+--- combo-solver-rooted/solver-patched/replay.h	2026-11-26 00:17:52.648840718 -0500
++++ combo-solver-next/solver-patched/replay.h	2026-11-26 00:53:50.217803265 -0500
+@@ -83,6 +83,14 @@
+ 	// opponent's REAL hand leaves the planning copy, so the search knows only the
+ 	// assumed hand (hidden information, both sides; user chose 2026-11-25).
+ 	bool root_hand_hide{};
++	// --self-hand-root (duelroom patch 0018): the SEARCHER's hand at the root is
++	// this sample instead (the duel AI asking "what could you do from here" without
++	// your real hand): the real hand goes back into the Deck, each sampled card is
++	// taken out of the Deck (made, when the Deck has no copy). With --reseed the
++	// Deck is then shuffled, so neither its contents nor its order give the hand away.
++	std::vector<uint32_t> self_hand;
++	uint8_t self_hand_team{0};
++	bool self_hand_set{};
+ 	// duelroom patch 0014, applied at the root after root_hand:
+ 	// root_reseed != 0 -- the core's RNG is reseeded and both Decks shuffled: the
+ 	// search no longer knows the duel's real future (its draws, mills, shuffles);

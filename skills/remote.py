@@ -57,6 +57,7 @@ _V = engine.VENDOR
 STATIC = (
     _V / "build" / "combo-solver-rooted" / "bin",
     _V / "build" / "combo-solver-uffd" / "bin",   # the pinned one: trainer, starters, pilot
+    _V / "build" / "combo-solver-0018" / "bin",   # the duel AI's searched answers (duel.DEFEND_BIN)
     engine.ROOT / "vendor" / "third_party_merged",
     engine.UPSTREAM_THIRD_PARTY / "CardScripts",
     engine.UPSTREAM_THIRD_PARTY / "BabelCDB",

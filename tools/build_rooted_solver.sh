@@ -52,6 +52,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0017: --opp-on-activation, Veiler / Impermanence answer only a monster's effect
 # activated on the field, and target that monster (duel 8 Veilered at empty chains).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0017-on-activation.patch" >&2)
+# 0018: --self-hand-root, the SEARCHER's hand is a sample (the duel AI weighs a hand
+# trap against hands you could hold, never your real one).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0018-self-hand-root.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -62,6 +65,7 @@ grep -q -- "--root" <<<"$help" || { echo "built binary lacks --root" >&2; exit 1
 grep -q -- "--stop-on-win" <<<"$help" || { echo "built binary lacks --stop-on-win" >&2; exit 1; }
 grep -q -- "--opp-smart" <<<"$help" || { echo "built binary lacks --opp-smart" >&2; exit 1; }
 grep -q -- "--opp-on-activation" <<<"$help" || { echo "built binary lacks --opp-on-activation" >&2; exit 1; }
+grep -q -- "--self-hand-root" <<<"$help" || { echo "built binary lacks --self-hand-root" >&2; exit 1; }
 grep -q -- "--opp-branches" <<<"$help" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
 grep -q -- "--no-self-target" <<<"$help" || { echo "built binary lacks --no-self-target" >&2; exit 1; }
 grep -q -- "--no-own-chain" <<<"$help" || { echo "built binary lacks --no-own-chain" >&2; exit 1; }
