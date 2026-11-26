@@ -837,18 +837,28 @@ def _winner(path):
     return won.get("p")
 
 
-def _pieces(board, player, cards):
+def _pieces(board, player, cards, extra=()):
     """That player's interruption pieces on `board`, less the ones that cannot
     fire there (`drill.dead_on_field`: a bare Desirae, Trivikarma without Visas,
-    an Xyz short of materials; `drill.dead_in_hand`: a Mulcharmy held with a board)."""
+    an Xyz short of materials; `drill.dead_in_hand`: a Mulcharmy held with a board).
+    `extra`: the player's own "counts as an interruption" cards (trainer prefs),
+    counted on the field or set -- the scripts miss Dragostapelia, Kaleido-Heart,
+    a set Super Polymerization."""
     from ygorl.solver.blocking import board_interruptions
 
     from .drill import dead_in_hand, dead_on_field
     dead = dead_on_field(board, cards, player)
     dead_h = dead_in_hand(board, cards, player)
-    return [c for c, w, _n in board_interruptions(board, cards, player).pieces
-            if not (w in ("field", "set") and cards.canonical(c) in dead)
-            and not (w == "hand" and cards.canonical(c) in dead_h)]
+    out = [c for c, w, _n in board_interruptions(board, cards, player).pieces
+           if not (w in ("field", "set") and cards.canonical(c) in dead)
+           and not (w == "hand" and cards.canonical(c) in dead_h)]
+    extra = {int(c) for c in extra}
+    for z in ("mzone", "szone"):
+        for m in board["players"][player].get(z) or []:
+            c = m.get("code") if isinstance(m, dict) else m
+            if c in extra and c not in out and cards.canonical(c) not in dead:
+                out.append(c)
+    return out
 
 
 def _hand(board, player):
@@ -1665,7 +1675,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                      else t1["enemy_hand"])
             rec.update(start=str(t1["start"]), prefix=str(t1["prefix"]),
                        reached=int(t1["reached"]),
-                       pieces=json.dumps(_pieces(t1["board"], 0, cards)),  # turn 1's player
+                       pieces=json.dumps(_pieces(t1["board"], 0, cards,
+                                                 ours_extra if first else ())),  # turn 1's player
                        enemy_hand=json.dumps(sorted(ehand)))
         with conn:
             conn.execute(

@@ -5685,7 +5685,7 @@ def test_turn1_falls_back_to_the_first_board_that_lives(monkeypatch, tmp_path):
     monkeypatch.setattr(game, "turn1_vs_scripts",
                         lambda *a, **kw: {"board": a[3], "start": "s", "prefix": a[3], "reached": True})
     monkeypatch.setattr(game, "live_goal", lambda g, d: g)
-    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [])
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c, *x: [])
     alive = set()
     def fake_kill(start, prefix, *a, **kw):
         calls.append(prefix)
@@ -7009,11 +7009,11 @@ def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
     # yours (player 0): Lars (a piece, 2500), Black Luster Soldier (3000, not a piece here)
     acts = [NS(card=NS(code=35103106, loc=loc(0))), NS(card=NS(code=70405001, loc=loc(0)))]
     live = NS(point=NS(actions=acts), board=lambda: {"players": [{}, {}]}, chain=[], chain_at=[])
-    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 0 else [])
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c, *x: [35103106] if pl == 0 else [])
     assert duel._follow_up(live, 1, cards) == 0
     # only its own (player 1): gives up the non-piece, lower-ATK one
     own = [NS(card=NS(code=35103106, loc=loc(1))), NS(card=NS(code=14558127, loc=loc(1)))]
-    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 1 else [])
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c, *x: [35103106] if pl == 1 else [])
     live.point = NS(actions=own)
     assert duel._follow_up(live, 1, cards) == 1
 
@@ -7037,7 +7037,7 @@ def test_duel_ai_negates_only_a_live_card(monkeypatch):
     acts = [NS(kind="chain", card=NS(code=lars)), NS(kind="pass", card=None)]
     live = NS(point=NS(actions=acts, decision=NS(name="MSG_SELECT_CHAIN")),
               chain=[(problem, 0)], board=lambda: board)
-    monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [])
+    monkeypatch.setattr(game, "_pieces", lambda b, pl, c, *x: [])
     assert duel.defend(live, 1, [lars], cards, dead=dead) == 1, "holds: nothing live"
     board["players"][0]["szone"] = [{"code": problem, "position": 1}]
     assert duel.defend(live, 1, [lars], cards, dead=dead) == 0, "fires: Problem is face-up"
@@ -7333,7 +7333,7 @@ def test_enemy_picks_its_hand_trap_timing_on_our_turn_1(monkeypatch, tmp_path):
         calls.append(sc)
         return {"board": boards[sc]}
     monkeypatch.setattr(game, "turn1", fake_turn1)
-    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [0] * b)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c, *x: [0] * b)
     monkeypatch.setattr(game, "enemy_script_args", lambda r, s, c=None: [s])
     t = game.turn1_vs_scripts("d", "e", [], [], 1000, tmp_path, 1, 1, [], scripts=("first",))
     assert t["script"] == "first" and calls == ["first"]
@@ -7683,7 +7683,7 @@ def test_ai_veiler_answers_your_monsters_activation_and_targets_it(monkeypatch):
     # the target: the monster whose effect it answers, not your "best" card
     tgt = [N(kind="select", card=N(code=c, loc=N(controller=0, location=4))) for c in (MERRLI, DRAGO)]
     lv = live([(MERRLI, 0), (VEILER, 1)], [0x4, 0x2], "MSG_SELECT_CARD", tgt)
-    monkeypatch.setattr(game, "_pieces", lambda b, p, cards: [DRAGO])
+    monkeypatch.setattr(game, "_pieces", lambda b, p, cards, *x: [DRAGO])
     monkeypatch.setattr(game, "kill_keys", lambda *a: ())
     assert duel._follow_up(lv, ai, {}) == 0
 
@@ -7809,7 +7809,7 @@ def test_turn1_pick_always_replaces_a_reached_goal_that_dies(monkeypatch, tmp_pa
     monkeypatch.setattr(game, "turn1_vs_scripts",
                         lambda *a, **kw: {"board": a[3], "start": "s", "prefix": a[3], "reached": True})
     monkeypatch.setattr(game, "live_goal", lambda g, d: g)
-    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [])
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c, *x: [])
     alive = {"g1"}
     monkeypatch.setattr(game, "kill_check", lambda start, prefix, *a, **kw: prefix not in alive)
     monkeypatch.setattr(game, "T1_PICK_ALWAYS", True)
@@ -7900,3 +7900,23 @@ def test_bc_samples_build_in_parallel_with_the_same_rows(monkeypatch):
     rows, skipped, failed = one
     assert rows == [("a,b", "a"), ("a,b", "b"), ("b,c", "c"), ("c,d", "d")]
     assert failed == 5 and skipped == Counter({"forced": 15, "repeat": 26})
+
+
+def test_pieces_count_the_players_marked_interrupters_on_the_field():
+    """game._pieces(extra=): a card the player marked "counts as an interruption"
+    (Dragostapelia, a set Super Polymerization) is a piece on the field or set --
+    the duel AI's targeting and the games' piece stats missed them; in hand it is not."""
+    import os
+    from skills import engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+    cards = default_cards()
+    drago, poly = 69946549, 48130397
+    board = {"turn": 2, "players": [{"mzone": [{"code": drago, "position": 1, "sequence": 2, "overlay": []}],
+                                     "szone": [{"code": poly, "position": 10, "sequence": 1, "overlay": []}],
+                                     "hand": [poly], "grave": [], "banished": []},
+                                    {"mzone": [], "szone": [], "hand": [], "grave": [], "banished": []}]}
+    plain = game._pieces(board, 0, cards)
+    marked = game._pieces(board, 0, cards, [drago, poly])
+    assert drago not in plain and drago in marked and poly in marked
+    assert marked.count(poly) == 1

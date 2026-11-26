@@ -589,7 +589,8 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
 
     p = live.point
     b = live.board()
-    pieces = {0: set(game._pieces(b, 0, cards)), 1: set(game._pieces(b, 1, cards))}
+    marked = _marked(live.row) if getattr(live, "row", None) else {0: (), 1: ()}
+    pieces = {s: set(game._pieces(b, s, cards, marked[s])) for s in (0, 1)}
 
     def worth(c):
         card = cards.get(c.code) if c.code else None
@@ -614,6 +615,15 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
     if opts:
         return min(opts, key=lambda t: worth(t[1]))[0]
     return 0
+
+
+def _marked(row):
+    """{seat: that side's "counts as an interruption" cards} (trainer prefs by deck)."""
+    from . import db, trainer
+    you = row["user_seat"]
+    c = db.connect()
+    return {you: trainer.prefs(c, row["user_deck"])["interrupters"],
+            1 - you: trainer.prefs(c, row["ai_deck"])["interrupters"]}
 
 
 def _plan_step(live, plan):
@@ -1325,7 +1335,7 @@ def compare(conn, did):
     res = {"method": game.METHOD, "kill_ms": game.OTK_MS * game.OTK_X, "turn1_ms": COMPARE_MS}
     for who, (resp, board) in boards.items():
         st, pre = breaking.split_position(tpl, resp, root / who)
-        pieces = game._pieces(board, 0, cards)
+        pieces = game._pieces(board, 0, cards, prefs["interrupters"])
         killed = game.kill_check(st, pre, target, set(pieces) | respond, ai_deck,
                                  root / who / "kill", game.OTK_MS * game.OTK_X, seed * 100)
         pl = board["players"][0]
