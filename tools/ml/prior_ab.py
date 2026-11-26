@@ -34,6 +34,13 @@ def group_of(raw):
     return f"{solver.get('deck_hash') or deck.get('name')}:{raw.get('hand_index')}"
 
 
+def trained_raws(raws, report):
+    """The lines bc_train read: its era filter (a report without one kept every line)."""
+    skip = set(report.get("skip_eras") or ())
+    return [r for r in raws if (r.get("solver") or {}).get("device") not in skip
+            and (r.get("solver") or {}).get("kind") not in skip]
+
+
 def heldout_groups(raws, report, seed=0, share=0.2):
     groups = sorted({group_of(r) for r in raws})
     want = report["groups"]["train"] + report["groups"]["heldout"]
@@ -125,6 +132,7 @@ def main():
 
     raws = [json.loads(l) for l in Path(args.demos).read_text().splitlines()]
     report = json.loads((Path(args.bc_dir) / "report.json").read_text())
+    raws = trained_raws(raws, report)
     held = heldout_groups(raws, report)
     kills = [r for r in raws if group_of(r) in held and (r.get("solver") or {}).get("kind") == "kill"]
     kills = random.Random(args.seed).sample(kills, min(args.positions, len(kills)))

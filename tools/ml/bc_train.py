@@ -29,6 +29,20 @@ from pathlib import Path
 import numpy as np
 
 
+# Eras whose lines teach misplays fixed since (user, 2026-11-26: "perfect so we can start gpu
+# training"): everything before 2026-11-20's fixes -- hand traps spent on their own turn (patch
+# 0009), gifts handed over -- i.e. the relabelled devices kill1x / endgame-t1 / brk1x / gift and
+# board_data's 2026-11-19 kill lines. The demos file keeps them; --eras all trains on them.
+SKIP_ERAS = ("kill1x", "endgame-t1", "brk1x", "gift", "board_kill")
+
+
+def keep_demo(raw, skip=SKIP_ERAS):
+    """Train on this demonstration (a parsed demos.jsonl record)? Its era is the game's
+    device label; board_data's kill lines carry kind board_kill."""
+    solver = raw.get("solver") or {}
+    return solver.get("device") not in skip and solver.get("kind") not in skip
+
+
 def turns_of(demo, cards):
     """Turn number at every step of line 0 (a replay, no encoding)."""
     from ygorl.engine.duel import DuelSession
@@ -185,6 +199,8 @@ def main():
     ap.add_argument("--heldout", type=float, default=0.2, help="share of (deck, hand) groups held out")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--eras", default="current", choices=("current", "all"),
+                    help="current: leave out lines from before the 2026-11-20 fixes (SKIP_ERAS)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
                     help="processes building samples (the result is the same for any count)")
     args = ap.parse_args()
@@ -207,7 +223,10 @@ def main():
         d.pop("key", None)          # tools/ml/demos.py's resume key, not a ygorl field
         return Demonstration.from_json(d)
 
-    demos = Path(args.demos).read_text().splitlines()
+    skip = () if args.eras == "all" else SKIP_ERAS
+    every = Path(args.demos).read_text().splitlines()
+    demos = [l for l in every if keep_demo(json.loads(l), skip)]
+    print(f"{len(demos)} of {len(every)} lines kept (skipped eras: {', '.join(skip) or 'none'})", flush=True)
     t0 = time.time()
     rows, skipped, failed = build(demos, load, _cards_vocab, args.workers,
                                   log=lambda m: print(m, flush=True))
@@ -223,7 +242,7 @@ def main():
     held = set(groups[:max(1, int(len(groups) * args.heldout))])
     train = stack([r for r in rows if r[2]["group"] not in held])
     test = stack([r for r in rows if r[2]["group"] in held])
-    report = {"lines": len(demos), "failed_lines": failed, "skipped": dict(skipped),
+    report = {"lines": len(demos), "skip_eras": list(skip), "failed_lines": failed, "skipped": dict(skipped),
               "train_samples": len(train), "heldout_samples": len(test),
               "groups": {"train": len(groups) - len(held), "heldout": len(held)},
               "by": dict(Counter((m["kind"], m["seat"], m["turn"]) for m in train.meta + test.meta)

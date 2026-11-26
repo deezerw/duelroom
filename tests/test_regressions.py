@@ -7920,3 +7920,25 @@ def test_pieces_count_the_players_marked_interrupters_on_the_field():
     marked = game._pieces(board, 0, cards, [drago, poly])
     assert drago not in plain and drago in marked and poly in marked
     assert marked.count(poly) == 1
+
+
+def test_bc_trains_only_on_lines_from_after_the_own_turn_fixes(monkeypatch):
+    """tools/ml/bc_train.keep_demo: lines from the eras before 2026-11-20's fixes (own-
+    turn hand traps, gifts: kill1x, endgame-t1, brk1x, gift; board_data's kill lines)
+    are left out by default, and prior_ab rebuilds its split from the same lines."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent / "tools" / "ml"
+    mods = {}
+    for name in ("bc_train", "prior_ab"):
+        spec = importlib.util.spec_from_file_location(name, root / f"{name}.py")
+        mods[name] = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, mods[name])
+        spec.loader.exec_module(mods[name])
+    bc, ab = mods["bc_train"], mods["prior_ab"]
+    raws = [{"solver": {"kind": "kill", "device": d}} for d in ("gift", "kill1x", "m21c", "server")]
+    raws += [{"solver": {"kind": "board_kill", "tag": "h0"}}, {"solver": {"kind": "break", "device": "endgame-t1"}}]
+    kept = [r for r in raws if bc.keep_demo(r)]
+    assert [r["solver"].get("device") for r in kept] == ["m21c", "server"]
+    assert all(bc.keep_demo(r, ()) for r in raws)
+    assert ab.trained_raws(raws, {"skip_eras": list(bc.SKIP_ERAS)}) == kept
+    assert ab.trained_raws(raws, {}) == raws          # an older net's report: every line
