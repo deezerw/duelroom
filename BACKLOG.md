@@ -98,6 +98,15 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       the same hand through the kill check (duel page + tally). Runs: results/experiments/
       better_than_me{,2}.log (Angelechy, then a going-first Blue-Eyes smoke batch: no going-first
       Blue-Eyes positions existed). (a)/(b) go live with this round's METHOD bump if they help.
+- [ ] **Answers wasted on a card that left as its own cost** (user, 2026-11-26: "dont use
+      imperm on requiem unless i cant use its ability to dodge it"; measured with
+      tools/experiments/wasted_answers.py over 5507 stored games): Ghost Ogre -> Fiendsmith's
+      Requiem 9 of 11 no stop (Requiem tributes itself to activate: nothing left to destroy),
+      Bystial Magnamhut -> Requiem 3 / 3; negating the ACTIVATION is fine (Dominus Impulse /
+      Songs / Ash -> Requiem 0 of 80 wasted). Veiler / Imperm open-window (72) and Veiler onto
+      Spells / Traps are what patch 0017 fixed. Next bump: Ghost Ogre (and Bystial) into
+      game.ON_MONSTER_ACTIVATION's "the activating card must still be on the field" rule (patch
+      0017 reads the list), then the kill-check A/B; re-run the table on the new games.
 - [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
       Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full
       + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
