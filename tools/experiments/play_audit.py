@@ -26,6 +26,7 @@ data as good as possible before doing long long runs"): each line should read
 """
 
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -77,11 +78,17 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                   1: set(game.own_turn_dead(enemy_deck if me == 0 else deck))}
     prefs = trainer.prefs(conn, DECK)["interrupters"]
     free = {me: set(game.free_sets(deck, cards, prefs)), 1 - me: set(game.free_sets(enemy_deck, cards))}
+    # a Trap that can be activated FROM THE HAND (Dominus: "you can activate this card from
+    # your hand") is live where it is: holding it is not a free card left (2026-11-26: these
+    # alone failed tonight's gate)
+    for p_ in free:
+        free[p_] = {c for c in free[p_] if not re.search(r"activate this card from your hand",
+                                                          game.card_text(c), re.I)}
     q = ("SELECT * FROM game_results WHERE deck_hash=? AND enemy=? AND first=? AND device=? "
          "AND outcome != 'no_t1'" + (" AND created >= ?" if since else ""))
     games = conn.execute(q, (dh, enemy, int(first), device, *([since] if since else []))).fetchall()
     who = lambda p: "us" if p == me else "them"  # noqa: E731
-    c_waste, c_selfneg, c_free, c_disc = Counter(), Counter(), Counter(), Counter()
+    c_waste, c_selfneg, c_free, c_disc, c_costtrap = Counter(), Counter(), Counter(), Counter(), Counter()
     gifts = usable = avoidable = 0
     marked = trainer.prefs(conn, DECK if first else enemy)["interrupters"]
     counted, fired = Counter(), Counter()
@@ -151,6 +158,16 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                     elif k == "Move" and m.previous.location & C.LOCATION_HAND \
                             and m.reason & C.REASON_RULE and m.reason & C.REASON_DISCARD:
                         c_disc[(who(m.previous.controller), nm(m.code))] += 1
+                    elif (k == "Move" and m.previous.location & C.LOCATION_HAND
+                          and m.reason & C.REASON_COST and m.previous.controller != state["tp"]
+                          and game.is_hand_trap(m.code, cards)):
+                        # the ANSWERING side paid a cost with a hand trap (a 0-ATK card is the
+                        # scripted defender's first pick: patch 0020 --opp-keep, not live yet) --
+                        # unless it is the card's OWN activation cost (Ash discards itself): held
+                        # until the next chain link says which
+                        ch = state["chain"]
+                        if not (ch and ch[-1][0] == m.code):     # not its own activation's cost
+                            c_costtrap[(who(m.previous.controller), nm(m.code))] += 1
 
         rep.duel().replay(rep.responses, observer=O())
         fired.update(state["fired"])
@@ -165,8 +182,16 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                 except Exception:  # noqa: BLE001 -- a game that ended on turn 2
                     continue
             hand = (pos["players"][p].get("hand") or []) if pos else []
+            on = {m["code"] for z in ("mzone", "szone") for m in (pos["players"][p].get(z) or []) if m} if pos else set()
+            fzone = bool(pos) and any(m and m.get("sequence") == 5 for m in pos["players"][p].get("szone") or [])
+            full = bool(pos) and sum(1 for m in pos["players"][p].get("szone") or []
+                                     if m and m.get("sequence", 9) < 5) >= 5
+            if full:
+                continue                    # all five Spell / Trap zones taken: nothing could go down
             for c in hand:
-                if c in free[p]:
+                # a Field Spell with the field zone taken (or its 1-per-turn copy already out)
+                # could not be activated: not left by choice
+                if c in free[p] and not (game._field_spell(c) and (fzone or c in on)):
                     c_free[(who(p), nm(c))] += 1
 
     goals = [r for r in conn.execute("SELECT hand_index, best_goal FROM trainer_hands WHERE deck_hash=? "
@@ -190,6 +215,7 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
               f"avoidable at the same goal progress: {avoidable})")
     line("free left", c_free)
     line("hand discards", c_disc)
+    line("trap to a cost", c_costtrap, "  (informational: the defender's 0-ATK pick, patch 0020)")
     say(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
     bad = {"own-turn waste": sum(c_waste.values()), "self-negate": sum(c_selfneg.values()),
            "free left": sum(c_free.values()), "hand discards": sum(c_disc.values())}

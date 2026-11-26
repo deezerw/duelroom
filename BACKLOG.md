@@ -113,6 +113,14 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       twin of the rule, a position-level gate (an Ogre held after Requiem tributed itself), the
       kill-check A/B. Bystial
       -> Requiem is NOT this (it banishes from the GY, which the table cannot score as a stop).
+- [ ] **The enemy's turn 2 can end with a free Trap in hand** (play_audit, 2026-11-26 duelpc smoke:
+      Angelechy Verdict in 1 of 44 games, S/T zones free): game.replay's free_set closes only a
+      line that stops MID-turn; a line that already passed its End Phase keeps the card. The
+      gate (2%) failed on this one game and was OVERRIDDEN for tonight's second run (Claude:
+      not systemic, same pairings). Also fixed in play_audit tonight: Dominus-style hand-
+      activatable Traps, a Field Spell with its zone taken, five full S/T zones and a hand trap
+      paying its OWN activation cost were counted as misplays (64 -> 1 "trap to a cost": patch
+      0020 matters in ~1 game in 44).
 - [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
       Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full
       + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
