@@ -8172,3 +8172,50 @@ def test_bc_method_eras_keep_only_the_live_methods_games(monkeypatch):
     ab = importlib.util.module_from_spec(spec2)
     spec2.loader.exec_module(ab)
     assert ab.trained_raws(raws, {"eras": "method"}) == live
+
+
+def test_tree_search_observer_clone_is_exactly_the_deepcopy():
+    """skills/mcts.clone_observer: the per-simulation observer copy shares the never-
+    changed token rows and copies only what changes -- the same root visits and the
+    same encodings at every expansion as copy.deepcopy (which was ~30% of a search)."""
+    import hashlib
+    import json as _json
+    import os
+    import numpy as np
+    from skills import engine, mcts
+    os.environ.update(engine.env())
+    from ygorl.cards.cdb import CardVocab
+    from ygorl.engine.duel import DuelSession, default_cards
+    from ygorl.env.events import DEFAULT_EVENT_LENGTH
+    from ygorl.env.observer import PointObserver
+    from ygorl.solver.demo import Demonstration
+    demos = Path(__file__).resolve().parent.parent / "results" / "ml" / "demos" / "demos.jsonl"
+    if not demos.exists():
+        import pytest
+        pytest.skip("no demos file")
+    cards = default_cards(); vocab = CardVocab.from_db(cards)
+    raw = _json.loads(demos.open().readline()); raw.pop("key", None)
+    demo = Demonstration.from_json(raw)
+
+    def run(deep):
+        s = DuelSession(demo.replay(0).duel(None, cards=cards, snapshots=True))
+        obs = PointObserver(cards, vocab, DEFAULT_EVENT_LENGTH)
+        acts = demo.lines[0].actions
+        for a in acts[:max(0, len(acts) - 20)]:
+            p = s.point; obs.observe(p); obs.on_decision(p, a); s.act(a)
+        h = hashlib.sha256()
+        def prior(point, session, observer=None):
+            o = observer.encode(point, session.core)
+            for k in sorted(o):
+                h.update(np.ascontiguousarray(o[k]).tobytes())
+            return [1.0 / len(point.actions)] * len(point.actions)
+        saved = mcts._HISTORY_FIELDS
+        if deep:
+            mcts._HISTORY_FIELDS = set()          # unknown state: the deepcopy path
+        try:
+            t = mcts.Search(s, prior=prior, value=lambda p, se, o=None: 0.0, observer=obs, seed=3).run(60)
+        finally:
+            mcts._HISTORY_FIELDS = saved
+            s.close()
+        return list(t.root.n), h.hexdigest()
+    assert run(True) == run(False)

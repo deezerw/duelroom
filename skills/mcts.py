@@ -48,6 +48,41 @@ def outcome_only(point, session, observer=None):
     return 0.0
 
 
+# ygorl EventHistory state clone_observer knows how to copy; anything else -> deepcopy
+_HISTORY_FIELDS = {"selection_history", "attack_history", "selection_ordinals", "cards", "vocab",
+                   "length", "tokens", "turn", "turn_player", "phase", "lp", "hand", "field",
+                   "summons", "links", "solving", "windows"}
+
+
+def clone_observer(o):
+    """A copy of a ygorl PointObserver for one simulation's path. Was copy.deepcopy: 68%
+    of a 200-simulation search (2026-11-26), copying every token row of the event history
+    one Python object at a time. The rows, cards, vocab and encoder are never changed once
+    made, so they are shared; the containers, the chain links (.triggers |=) and windows
+    (.responded =) are copied. History state this does not know -> the deepcopy, as before."""
+    import copy
+    from collections import deque
+
+    def deep():
+        shared = {id(x): x for x in (getattr(o, "cards", None), getattr(o, "vocab", None),
+                                     getattr(o, "encoder", None)) if x is not None}
+        return copy.deepcopy(o, shared)
+
+    h = getattr(o, "history", None)
+    if h is not None and set(vars(h)) != _HISTORY_FIELDS:
+        return deep()
+    c = copy.copy(o)
+    if h is not None:
+        n = copy.copy(h)
+        n.tokens = tuple(deque(t, maxlen=t.maxlen) for t in h.tokens)
+        n.selection_ordinals, n.lp, n.hand = list(h.selection_ordinals), list(h.lp), list(h.hand)
+        n.field = dict(h.field)
+        n.links = {k: copy.copy(v) for k, v in h.links.items()}
+        n.windows = [copy.copy(w) for w in h.windows]
+        c.history = n
+    return c
+
+
 class Search:
     """Search from `session`'s current position (it is snapshotted and left
     there). `c_puct` as AlphaZero; `max_depth` caps a simulation's descent."""
@@ -109,12 +144,7 @@ class Search:
         s.restore(self.root_snap)
         self._obs = None
         if self.observer is not None:
-            o = self.observer
-            # the card database, vocab and encoder never change in a search (and the
-            # database cannot be copied): shared, the event history copied
-            shared = {id(x): x for x in (getattr(o, "cards", None), getattr(o, "vocab", None),
-                                         getattr(o, "encoder", None)) if x is not None}
-            self._obs = copy.deepcopy(o, shared)
+            self._obs = clone_observer(self.observer)
         if self.root is None:
             t = self._terminal()
             if t is not None:
