@@ -57,6 +57,12 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       path (optimizer, handtrap matrix) stays one card.
 - [x] `--no-activate` for THEIR card: not needed -- the rooted defender plays only what its
       `--opp-respond` lists, so dropping a field piece from that list switches it off.
+- [ ] **Patch 0017 `--opp-on-activation`** (user, 2026-11-26: "using hand traps at stupid times,
+      look at veiler"): Veiler / Impermanence answer only the searcher's monster effect activated
+      on the field and target that monster. BUILT (`build/combo-solver-0017`, in
+      build_rooted_solver.sh after 0016), NOT live: goes live with this round's METHOD bump.
+      Measured rooted at duel 8's empty-chain window: old binary Veilered there in 16/16 lines,
+      0017 in 0/16. The duel's own Python defender has the rule live already.
 - [ ] **Hidden-hand option** (user, 2026-11-25: a visible / hidden hand button; chose FULL).
       Today every search sees the other side's real hand -- even duel mode, whose copy is
       the real hand PLUS one of each hand trap (patch 0010). Hidden, both sides, games and

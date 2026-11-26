@@ -197,6 +197,12 @@ def own_turn_dead(deck):
 # Dragostapelia put its counter on one in 10 of 73, every one a lost game.
 NEGATE_ONLY = {35103106: "any",        # Evolzar Lars: a face-up card
                69946549: "mon"}        # Predaplant Dragostapelia: a face-up monster
+# Hand traps that negate a face-up monster (target it, negate its effects): legal at
+# ANY open window while the opponent has a face-up effect monster, so "fire at once"
+# spent them on nothing -- duel 8 (2026-11-26) Veilered a Merrli Super Poly was about
+# to fuse away, then a Dragostapelia at a quiet window. They answer a monster's
+# effect activated ON THE FIELD, and target that monster.
+ON_MONSTER_ACTIVATION = {97268402: "Effect Veiler", 10045474: "Infinite Impermanence"}
 # None: emit the 0011 flags when ROOTED_BIN has them; an A/B arm on another
 # build sets True / False.
 NEGATE_LIVE = None
@@ -624,6 +630,10 @@ def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
                 neg = [c for c in codes if NEGATE_ONLY.get(c) == kind]
                 if neg:
                     args += [flag, "|".join(map(str, neg))]
+        # patch 0017 (needs the binary): Veiler / Impermanence answer a monster's activation
+        act = sorted({cards.canonical(c) for c in codes} & set(ON_MONSTER_ACTIVATION))
+        if act and _bin_has("--opp-on-activation"):
+            args += ["--opp-on-activation", "|".join(map(str, act))]
         if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:

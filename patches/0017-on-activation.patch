@@ -1,0 +1,213 @@
+diff -ruN combo-solver-rooted/solver-patched/duel.cpp combo-solver-next/solver-patched/duel.cpp
+--- combo-solver-rooted/solver-patched/duel.cpp	2026-11-25 18:27:47.037231306 -0500
++++ combo-solver-next/solver-patched/duel.cpp	2026-11-26 00:17:38.243552237 -0500
+@@ -326,7 +326,7 @@
+ 	return OCG_DuelQueryCount(handle, team, loc);
+ }
+ 
+-bool Duel::LastChainLink(uint8_t* trigger_player) {
++bool Duel::LastChainLink(uint8_t* trigger_player, uint32_t* count) {
+ 	const std::vector<uint8_t>& b = ProcessorState();
+ 	// Layout: see the OCG_DuelQueryProcessorState patch (ocgapi.cpp), the source
+ 	// of truth. phase u16, turn i16, turn_player u8, then per player (lp i32,
+@@ -350,6 +350,8 @@
+ 	off += 3ull * n;   // subunits
+ 	if(!take_u32(n) || n == 0 || off + 11ull * n > b.size())
+ 		return false;
++	if(count)
++		*count = n;
+ 	off += 11ull * (n - 1) + 2;   // last link, after its chain_id
+ 	if(off >= b.size())
+ 		return false;
+@@ -378,6 +380,38 @@
+ 	return code;
+ }
+ 
++bool Duel::ChainLinkFromEnd(uint32_t k, ChainLink* out) {
++	uint32_t n = 0;
++	if(!LastChainLink(nullptr, &n) || k >= n)
++		return false;
++	uint32_t len = 0;
++	const uint8_t* data = nullptr;
++	{
++		ArenaScope scope(arena);
++		data = static_cast<const uint8_t*>(OCG_DuelQueryField(handle, &len));
++	}
++	// The chain closes the buffer: u32 count, then per link code u32, controller
++	// u8, location u8, sequence u32, position u32, triggering controller u8,
++	// location u8, sequence u32, description u64 (ocgapi.cpp).
++	constexpr uint32_t kLink = 4 + 1 + 1 + 4 + 4 + 1 + 1 + 4 + 8;
++	if(!data || len < n * kLink + 4)
++		return false;
++	uint32_t stored = 0;
++	std::memcpy(&stored, data + len - n * kLink - 4, 4);
++	if(stored != n)
++		return false;           // the layout moved: answer nothing rather than misread
++	const uint8_t* l = data + len - (k + 1) * kLink;
++	std::memcpy(&out->code, l, 4);
++	out->con = l[4];
++	out->loc = l[5];
++	std::memcpy(&out->seq, l + 6, 4);
++	std::memcpy(&out->pos, l + 10, 4);
++	out->trig_con = l[14];
++	out->trig_loc = l[15];
++	std::memcpy(&out->trig_seq, l + 16, 4);
++	return true;
++}
++
+ int32_t Duel::Lp(uint8_t player) {
+ 	// Layout as in LastChainLink: phase u16, turn i16, turn_player u8, then per
+ 	// player 16 bytes starting with lp i32.
+diff -ruN combo-solver-rooted/solver-patched/duel.h combo-solver-next/solver-patched/duel.h
+--- combo-solver-rooted/solver-patched/duel.h	2026-11-25 18:27:47.011230789 -0500
++++ combo-solver-next/solver-patched/duel.h	2026-11-26 00:17:38.243552237 -0500
+@@ -101,7 +101,13 @@
+ 	// rather than tracking MSG_CHAINING: a member counter would desynchronise on
+ 	// arena restores, and pruning wrongly is the bad direction, since it cuts a
+ 	// real move.
+-	bool LastChainLink(uint8_t* trigger_player);
++	bool LastChainLink(uint8_t* trigger_player, uint32_t* count = nullptr);
++	// One chain link, `k` links from the most recent (0 = the last), read from
++	// OCG_DuelQueryField's chain records (duelroom patch 0017): where its card is
++	// now and where it was when the effect was activated. False past the chain.
++	struct ChainLink { uint32_t code; uint8_t con, loc; uint32_t seq, pos;
++	                   uint8_t trig_con, trig_loc; uint32_t trig_seq; };
++	bool ChainLinkFromEnd(uint32_t k, ChainLink* out);
+ 	// The card code of the chain's most recent link, 0 when no chain is in
+ 	// progress (duelroom patch 0006: the trigger a searched defender's rule is
+ 	// keyed by). Read from OCG_DuelQueryField, whose chain records close the
+diff -ruN combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-25 18:27:47.038231326 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-26 00:17:38.247552317 -0500
+@@ -1515,6 +1515,8 @@
+ 	bool opp_hand_hide = false;
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <code|code...> (patch 0011).
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
++	// --opp-on-activation <code|code...> (patch 0017).
++	std::vector<uint32_t> opp_on_activation;
+ 	// --opp-key <code|code...> (patch 0012).
+ 	std::vector<uint32_t> opp_key;
+ 	// --opp-gy-want <code|code...> (patch 0013).
+@@ -2070,6 +2072,9 @@
+ 				"                     card; they wait while every face-up card the searcher\n"
+ 				"                     controls is --opp-dead (0011)\n"
+ 				"  --opp-negate-mon <c>  the same, counting face-up MONSTERS only (0011)\n"
++				"  --opp-on-activation <c>  with --opp-smart: these defender pieces (Veiler,\n"
++				"                     Impermanence) answer only the searcher's monster effect\n"
++				"                     activated on the field, and target that monster (0017)\n"
+ 				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+@@ -2608,7 +2613,7 @@
+ 		} else if(a == "--opp-respond" || a == "--opp-hold" || a == "--no-self-target" ||
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+ 				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key" ||
+-				  a == "--opp-gy-want") {
++				  a == "--opp-gy-want" || a == "--opp-on-activation") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2618,6 +2623,7 @@
+ 				: (a == "--opp-negate") ? o.opp_negate
+ 				: (a == "--opp-negate-mon") ? o.opp_negate_mon
+ 				: (a == "--opp-dead") ? o.opp_dead
++				: (a == "--opp-on-activation") ? o.opp_on_activation
+ 				: (a == "--opp-key") ? o.opp_key
+ 				: (a == "--opp-gy-want") ? o.opp_gy_want : o.opp_respond;
+ 			std::string sv(v);
+@@ -4271,6 +4277,7 @@
+ 	cfg.opp_negate = opt.opp_negate;
+ 	cfg.opp_negate_mon = opt.opp_negate_mon;
+ 	cfg.opp_dead = opt.opp_dead;
++	cfg.opp_on_activation = opt.opp_on_activation;
+ 	cfg.opp_key = opt.opp_key;
+ 	cfg.opp_gy_want = opt.opp_gy_want;
+ 
+diff -ruN combo-solver-rooted/solver-patched/search.cpp combo-solver-next/solver-patched/search.cpp
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-25 18:27:47.036231286 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-26 00:17:38.248552337 -0500
+@@ -681,6 +681,11 @@
+ 					// 12 uses on Angelechy's turn 2, every one a lost game).
+ 					if(cfg.opp_smart && !NegateLive(code))
+ 						continue;
++					// Patch 0017: Veiler / Impermanence wait for a monster's
++					// activation on the field (duel 8 Veilered a Merrli Super Poly
++					// was about to fuse away, at an empty chain).
++					if(cfg.opp_smart && !ActivationLive(code))
++						continue;
+ 					if(ruled && hit(cfg.opp_skip, code))
+ 						continue;
+ 					if(!cfg.opp_smart) {
+@@ -1832,6 +1837,20 @@
+ 	return false;
+ }
+ 
++bool Search::ActivationLive(uint32_t code) {
++	const uint32_t c = duel.Db().Canonical(code);
++	if(std::find(cfg.opp_on_activation.begin(), cfg.opp_on_activation.end(), c) ==
++	   cfg.opp_on_activation.end())
++		return true;
++	Duel::ChainLink l{};
++	const uint8_t who = static_cast<uint8_t>(cfg.target_player);
++	if(duel.ChainLinkFromEnd(0, &l) && l.trig_con == who && (l.trig_loc & LOCATION_MZONE) &&
++	   l.con == who && (l.loc & LOCATION_MZONE) && (l.pos & POS_FACEUP))
++		return true;
++	++stats.activation_holds;
++	return false;
++}
++
+ uint32_t Search::DefenderTrigger() {
+ 	const uint32_t c = duel.LastChainCode();
+ 	return c ? duel.Db().Canonical(c) : 0;
+@@ -1921,6 +1940,20 @@
+ 						 (int64_t(it - cfg.opp_key.begin()) << 32) + val[i];
+ 		}
+ 	}
++	// Patch 0017: its Veiler / Impermanence just chained onto the searcher's
++	// monster effect: the target is THAT monster, over any card worth more.
++	{
++		Duel::ChainLink mine{}, theirs{};
++		if(duel.ChainLinkFromEnd(0, &mine) && mine.trig_con == prompt_player &&
++		   std::find(cfg.opp_on_activation.begin(), cfg.opp_on_activation.end(),
++					 duel.Db().Canonical(mine.code)) != cfg.opp_on_activation.end() &&
++		   duel.ChainLinkFromEnd(1, &theirs) && theirs.con != prompt_player &&
++		   (theirs.loc & LOCATION_MZONE))
++			for(size_t i = 0; i < cands.size(); ++i)
++				if(cands[i].con == theirs.con && (cands[i].loc & LOCATION_MZONE) &&
++				   cands[i].seq == theirs.seq)
++					val[i] = int64_t(1) << 50;
++	}
+ 	size_t best = 0;
+ 	int64_t best_v = 0;
+ 	bool any = false;
+diff -ruN combo-solver-rooted/solver-patched/search.h combo-solver-next/solver-patched/search.h
+--- combo-solver-rooted/solver-patched/search.h	2026-11-25 18:27:47.036231286 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-26 00:17:43.710661579 -0500
+@@ -2746,6 +2746,8 @@
+ 	// --opp-negate / --opp-negate-mon / --opp-dead <codes> (duelroom patch
+ 	// 0011): see Search::NegateLive.
+ 	std::vector<uint32_t> opp_negate, opp_negate_mon, opp_dead;
++	// --opp-on-activation <codes> (duelroom patch 0017): see Search::ActivationLive.
++	std::vector<uint32_t> opp_on_activation;
+ 	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
+ 	// important first; the defender's target pick takes one over any other.
+ 	std::vector<uint32_t> opp_key;
+@@ -3034,6 +3036,7 @@
+ 	uint64_t own_chain_cuts = 0;
+ 	// Defender negates held for want of a live target (patch 0011).
+ 	uint64_t negate_holds = 0;
++	uint64_t activation_holds = 0;   // patch 0017: Veiler / Impermanence held
+ 	// Main-phase activations removed by --guard-keep. Same liveness reading as
+ 	// above: zero with the flag armed means the window never came up, or the
+ 	// wiring is dead.
+@@ -3522,6 +3525,10 @@
+ 	// when every face-up card the searcher controls (monsters only for
+ 	// --opp-negate-mon) is an --opp-dead card.
+ 	bool NegateLive(uint32_t code);
++	// Patch 0017: an --opp-on-activation piece (Effect Veiler, Infinite
++	// Impermanence: negate a face-up monster) answers only the searcher's monster
++	// effect activated in the monster zone, that monster still there face-up.
++	bool ActivationLive(uint32_t code);
+ 	// One ChoiceList per depth, reused between siblings and between passes: the
+ 	// deque guarantees reference stability during the recursion.
+ 	ChoiceList& ChoicesAt(uint32_t depth) {
