@@ -1426,10 +1426,13 @@ def compare_state(row, turn):
                              stdout=open(f.with_name("compare.log"), "a"), stderr=subprocess.STDOUT,
                              start_new_session=True)
         mine = {"running": True}
-    tally = {"duels": 0, "you": 0, "solver": 0}
+    from . import game
+    # only comparisons judged under the LIVE method: a bump changes the kill check (2026-11-26a:
+    # every card answers), so older verdicts do not add up with newer ones
+    tally = {"duels": 0, "you": 0, "solver": 0, "method": game.METHOD}
     for g in DUELS.glob("*/compare.json"):
         d = json.loads(g.read_text())
-        if "solver" in d:
+        if "solver" in d and d.get("method") == game.METHOD:
             tally["duels"] += 1
             tally["you"] += not d["you"]["killed"]
             tally["solver"] += not d["solver"]["killed"]

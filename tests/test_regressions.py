@@ -7869,12 +7869,17 @@ def test_duel_compare_starts_once_after_your_turn_1_and_tallies(tmp_path, monkey
     duel.compare_state(row, 3)
     assert len(started) == 1 and started[0][-2:] == ["compare", "1"]
     assert duel.compare_state({**row, "user_seat": 1, "template": str(tmp_path / "2-6" / "x")}, 2)["this"] is None
-    (d1 / "compare.json").write_text(_json.dumps({"you": {"killed": True}, "solver": {"killed": False}}))
+    from skills import game
+    (d1 / "compare.json").write_text(_json.dumps({"method": game.METHOD, "you": {"killed": True},
+                                                  "solver": {"killed": False}}))
+    d0 = tmp_path / "9-1"; d0.mkdir()                   # judged under an older method: not tallied
+    (d0 / "compare.json").write_text(_json.dumps({"method": "old", "you": {"killed": False},
+                                                  "solver": {"killed": False}}))
     d2 = tmp_path / "3-7"; d2.mkdir()
     (d2 / "compare.json").write_text(_json.dumps({"error": "x"}))
     got = duel.compare_state(row, 3)
     assert got["this"]["solver"] == {"killed": False}
-    assert got["survived"] == {"duels": 1, "you": 0, "solver": 1}
+    assert got["survived"] == {"duels": 1, "you": 0, "solver": 1, "method": game.METHOD}
 
 
 def test_bc_samples_build_in_parallel_with_the_same_rows(monkeypatch):
