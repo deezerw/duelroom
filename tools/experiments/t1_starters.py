@@ -71,7 +71,8 @@ def main(limit=POSITIONS, n=FALLBACKS, mode="missed", enemy=ENEMY, label=DEVICE)
     done = ({(d.get("enemy", ENEMY), d["hand"], d["eseed"]) for d in map(json.loads, res.read_text().splitlines())}
             if res.exists() else set())
     jobs = [r for r in rows if (enemy, r["hand_index"], r["enemy_seed"]) not in done]
-    print(f"{len(rows)} positions missing the full goal, {len(jobs)} to run, {n} fallback(s), "
+    print(f"{enemy}: {len(rows)} positions ({'every turn 1' if always else 'missing the full goal'}), "
+          f"{len(jobs)} to run, {n} fallback(s), "
           f"on {dev.name}", flush=True)
     ms = game.OTK_MS * game.OTK_X
 
@@ -136,18 +137,32 @@ def summary(name="results.jsonl"):
         print("no results yet")
         return
     recs = [json.loads(l) for l in f.read_text().splitlines()]
-    n = max(1, len(recs))
+    groups = {}
+    for d in recs:                         # per enemy, and (always mode) reached or not
+        groups.setdefault(d.get("enemy", ENEMY), []).append(d)
+    for enemy, rs in sorted(groups.items()):
+        parts = [("all", rs)]
+        if any("reached" in d for d in rs):
+            parts += [("full goal reached", [d for d in rs if d.get("reached")]),
+                      ("full goal missed", [d for d in rs if not d.get("reached")])]
+        for label, sub in parts:
+            if sub:
+                _line(f"{enemy} [{label}]", sub)
+
+
+def _line(label, recs):
+    n = len(recs)
     a = sum(d["full_lost"] for d in recs)
     b = sum(d["fallback_lost"] for d in recs)
     saved = sum(1 for d in recs if d["full_lost"] and not d["fallback_lost"])
     worse = sum(1 for d in recs if d["fallback_lost"] and not d["full_lost"])
-    print(f"{len(recs)} positions: killed with the full goal's board {a} ({a / n:.0%}), with the "
-          f"fallback pick {b} ({b / n:.0%}); saved {saved}, newly lost {worse}; a fallback board "
-          f"kept in {sum(1 for d in recs if d['picked'])}; starter boards known per hand "
-          f"{sum(d['fallbacks_known'] for d in recs) / n:.1f}")
+    p = ""
     if saved + worse:
         from scipy.stats import binomtest
-        print(f"  sign p = {binomtest(saved, saved + worse).pvalue:.3f}")
+        p = f", sign p {binomtest(saved, saved + worse).pvalue:.3f}"
+    print(f"{label}: {n} positions; killed with the full goal's board {a} ({a / n:.0%}), with the "
+          f"pick {b} ({b / n:.0%}); saved {saved}, newly lost {worse}{p}; another board kept in "
+          f"{sum(1 for d in recs if d['picked'])}")
 
 
 if __name__ == "__main__":
