@@ -6231,6 +6231,8 @@ def test_defence_scripts_vary_order_and_hold_and_keep_the_default_flags(monkeypa
     # family a kill must beat gets named scripts beside hold-until ints.
     from skills import game
     TRAP, NEG, REST = 100, 200, 300
+    from types import SimpleNamespace
+    NS_CARDS = SimpleNamespace(canonical=lambda c: c)   # a card db: codes are their own canonical
     monkeypatch.setattr(game, "is_hand_trap", lambda c, cards: c == TRAP)
     monkeypatch.setattr(game, "_is_negate", lambda c, cards: c == NEG)
     assert game.respond_order([REST, NEG, TRAP], None) == [TRAP, NEG, REST]
@@ -6238,12 +6240,12 @@ def test_defence_scripts_vary_order_and_hold_and_keep_the_default_flags(monkeypa
     assert game.respond_order([REST, 301, NEG, TRAP], None, "reverse") == [TRAP, NEG, 301, REST]
 
     def flags(d):
-        a = game.defence_args([TRAP, NEG, REST], d, cards=object())
+        a = game.defence_args([TRAP, NEG, REST], d, cards=NS_CARDS)
         return {k: a[a.index(k) + 1] for k in ("--opp-respond", "--opp-hold", "--opp-hold-until")
                 if k in a}
     assert flags(1) == {"--opp-respond": "100|200|300", "--opp-hold": "200|300"}
-    assert game.defence_args([TRAP, NEG, REST], 1, cards=object()) == \
-        game.defender_args([TRAP, NEG, REST], cards=object()), "today's script unchanged"
+    assert game.defence_args([TRAP, NEG, REST], 1, cards=NS_CARDS) == \
+        game.defender_args([TRAP, NEG, REST], cards=NS_CARDS), "today's script unchanged"
     assert flags(2)["--opp-hold-until"] == "2"
     assert "--opp-hold" not in flags(0), "0 = nothing held"
     assert flags("all2") == {"--opp-respond": "100|200|300", "--opp-hold": "100|200|300",
@@ -7006,7 +7008,7 @@ def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
     loc = lambda ctl: NS(controller=ctl, location=4)
     # yours (player 0): Lars (a piece, 2500), Black Luster Soldier (3000, not a piece here)
     acts = [NS(card=NS(code=35103106, loc=loc(0))), NS(card=NS(code=70405001, loc=loc(0)))]
-    live = NS(point=NS(actions=acts), board=lambda: {"players": [{}, {}]})
+    live = NS(point=NS(actions=acts), board=lambda: {"players": [{}, {}]}, chain=[], chain_at=[])
     monkeypatch.setattr(game, "_pieces", lambda b, pl, c: [35103106] if pl == 0 else [])
     assert duel._follow_up(live, 1, cards) == 0
     # only its own (player 1): gives up the non-piece, lower-ATK one
@@ -7043,12 +7045,12 @@ def test_duel_ai_negates_only_a_live_card(monkeypatch):
     assert duel.defend(live, 1, [lars], cards, dead=dead) == 1, "a set card is no target"
     loc = lambda ctl: NS(controller=ctl, location=4)
     pick = [NS(card=NS(code=purulia, loc=loc(0))), NS(card=NS(code=sp, loc=loc(0)))]
-    live2 = NS(point=NS(actions=pick), board=lambda: board)
+    live2 = NS(point=NS(actions=pick), board=lambda: board, chain=[], chain_at=[])
     assert duel._follow_up(live2, 1, cards, dead) == 1, "the live card, not the body"
     engraver = 60764609
     bls = 70405001        # Black Luster Soldier, 3000 ATK over Engraver's 1800
     pick = [NS(card=NS(code=bls, loc=loc(0))), NS(card=NS(code=engraver, loc=loc(0)))]
-    live3 = NS(point=NS(actions=pick), board=lambda: board)
+    live3 = NS(point=NS(actions=pick), board=lambda: board, chain=[], chain_at=[])
     assert duel._follow_up(live3, 1, cards, dead) == 0, "by ATK without keys"
     assert duel._follow_up(live3, 1, cards, dead, [engraver]) == 1, "your kill key over ATK"
 
@@ -7642,3 +7644,59 @@ def test_a_found_kill_stops_the_plans_other_searches(tmp_path):
         assert theirs.poll() is None
     finally:
         mine.kill(); theirs.kill()
+
+
+def test_ai_veiler_answers_your_monsters_activation_and_targets_it(monkeypatch):
+    """Duel 8 (user, 2026-11-26: "using hand traps at stupid times, look at
+    veiler"): it Veilered a Merrli Super Poly was about to fuse away, and a
+    Dragostapelia, both at an EMPTY chain; duel 7 Impermed into a Scream (a Trap)
+    and Veilered into a GY effect. Veiler / Impermanence now answer only your
+    monster's effect activated on the field, and target that monster."""
+    from types import SimpleNamespace as N
+
+    from skills import duel, game
+
+    VEILER, MERRLI, DRAGO, SCREAM = 97268402, 73956664, 69946549, 6767771
+    monkeypatch.setattr(game, "is_hand_trap", lambda c, cards: c == VEILER)
+    board = {"players": [{"mzone": [{"code": MERRLI, "position": 1, "sequence": 0},
+                                    {"code": DRAGO, "position": 1, "sequence": 1}]},
+                         {"mzone": []}]}
+    ai = 1
+
+    def live(chain, at, decision="MSG_SELECT_CHAIN", actions=None):
+        acts = actions or [N(kind="chain", card=N(code=VEILER, loc=N(controller=ai, location=2))),
+                           N(kind="pass", card=None)]
+        return N(point=N(decision=N(name=decision), actions=acts), chain=chain, chain_at=at,
+                 board=lambda: board)
+
+    fire = lambda lv: duel.defend(lv, ai, [VEILER], {}) == 0  # noqa: E731
+    assert not fire(live([], []))                                   # an open window
+    assert not fire(live([(SCREAM, 0)], [0x8]))                      # a Trap's activation
+    assert not fire(live([(MERRLI, 0)], [0x10]))                     # a GY effect
+    assert not fire(live([(MERRLI, 0), (VEILER, 1)], [0x4, 0x2]))    # never onto its own link
+    assert fire(live([(DRAGO, 0)], [0x4]))                           # your monster, on the field
+    # the target: the monster whose effect it answers, not your "best" card
+    tgt = [N(kind="select", card=N(code=c, loc=N(controller=0, location=4))) for c in (MERRLI, DRAGO)]
+    lv = live([(MERRLI, 0), (VEILER, 1)], [0x4, 0x2], "MSG_SELECT_CARD", tgt)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, cards: [DRAGO])
+    monkeypatch.setattr(game, "kill_keys", lambda *a: ())
+    assert duel._follow_up(lv, ai, {}) == 0
+
+
+def test_veiler_waits_for_a_monster_activation_in_the_solvers_defender_too(monkeypatch):
+    """Patch 0017 --opp-on-activation: the games' (and the duel copy's) C++ defender
+    gets Veiler / Impermanence listed, only when the binary has the flag. Measured
+    rooted at duel 8's empty-chain window: the old binary Veilered there in 16 of
+    16 lines, 0017 in 0."""
+    import os
+
+    from skills import engine, game
+    os.environ.update(engine.env())
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    monkeypatch.setattr(game, "_bin_has", lambda flag: False)
+    assert "--opp-on-activation" not in game.defender_args([97268402, 14558127], cards)
+    monkeypatch.setattr(game, "_bin_has", lambda flag: True)
+    args = game.defender_args([97268402, 10045474, 14558127], cards)
+    assert args[args.index("--opp-on-activation") + 1] == "10045474|97268402"

@@ -203,6 +203,7 @@ class Live:
         self.row, self.cards = row, default_cards()
         self.session = DuelSession(Replay.from_yrp(Path(row["template"])).duel(None, cards=self.cards))
         self.chain = []
+        self.chain_at = []        # each chain link's location when activated (0x4: monster zone)
         self.log = []             # [(turn, player, text)], what happened, for the page
         self._seen = None
         self._track()
@@ -222,10 +223,13 @@ class Live:
             k = type(e).__name__
             if k == "Chaining":
                 del self.chain[e.chain_count - 1:]
+                del self.chain_at[e.chain_count - 1:]
                 self.chain.append((e.code, e.loc.controller))
+                self.chain_at.append(e.loc.location)
                 add(e.loc.controller, f"activates {nm(e.code)}", e.code)
             elif k == "ChainEnd":
                 self.chain.clear()
+                self.chain_at.clear()
             elif k in ("Summoning", "SpSummoning", "FlipSummoning"):
                 add(e.loc.controller, f"summons {nm(e.code)}", e.code)
             elif k in ("ChainNegated", "ChainDisabled"):
@@ -359,9 +363,22 @@ def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
         kind = game.NEGATE_ONLY.get(a.card.code)
         if kind and not _negate_live(live.board(), 1 - ai, kind, dead):
             continue
+        # Veiler / Impermanence answer your monster's effect activated on the field
+        if a.card.code in game.ON_MONSTER_ACTIVATION and not _monster_link(live, ai):
+            continue
         if rank[a.card.code] < best_r:
             best, best_r = i, rank[a.card.code]
     return best if "chain" in kinds else passing
+
+
+def _monster_link(live, ai):
+    """The top chain link is YOUR monster's effect activated in the monster zone
+    (and that monster is still there, face-up): what Veiler / Impermanence answer."""
+    if not live.chain or live.chain[-1][1] == ai or live.chain_at[-1] & 0x4 == 0:
+        return False
+    code = live.chain[-1][0]
+    return any(m["code"] == code and m.get("position", 0) & 0x5
+               for m in live.board()["players"][1 - ai].get("mzone") or [])
 
 
 def _follow_up(live, ai, cards, dead=(), keys=()):
@@ -389,6 +406,12 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
 
     opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
     theirs = [(i, c) for i, c in opts if c.loc.controller != ai]
+    # its Veiler / Impermanence just chained onto your monster's effect: target THAT monster
+    if (len(live.chain) >= 2 and live.chain[-1][1] == ai
+            and live.chain[-1][0] in game.ON_MONSTER_ACTIVATION and live.chain[-2][1] != ai):
+        hit = [(i, c) for i, c in theirs if c.code == live.chain[-2][0] and c.loc.location & 0x4]
+        if hit:
+            return hit[0][0]
     if theirs:
         return max(theirs, key=lambda t: worth(t[1]))[0]
     if opts:
