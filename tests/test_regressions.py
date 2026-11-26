@@ -7488,6 +7488,14 @@ def test_duel_log_never_names_the_ais_draws_or_sets_and_piles_hide_order(tmp_pat
         else:
             assert texts[:2] == ["draws card7", "sets card8"], texts
         assert texts[3] == "~card5 is discarded"       # a discard is public
+        # a Set card bounced back to the hand (face-down before it moved), then a face-up one
+        live._move(N(code=6, previous=L(0x8, you_too, 0xA), current=L(0x2, you_too), reason=0x40), 1, nm, add)
+        live._move(N(code=4, previous=L(0x4, you_too, 0x1), current=L(0x2, you_too), reason=0x40), 1, nm, add)
+        assert log[-1][1] == "~card4 is added to the hand"
+        if you_too:
+            assert log[-2][1:] == ("~card is returned to the hand", None), log[-2]
+        else:
+            assert log[-2][1] == "~card6 is returned to the hand"
 
     monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
     conn = db.connect(tmp_path / "t.db")
@@ -7504,8 +7512,10 @@ def test_duel_plan_scoring_reads_a_copy_line_as_far_as_it_fits():
     """Duel 7 (2026-11-25) sat on "thinking" for good: the AI's line was searched
     on a copy holding your assumed hand traps, so its answers for YOUR side index
     the copy's chain options; scoring it (game._damage / usable_gifts) replayed it
-    strictly and raised at response 196. Lenient replay steps over planned passes
-    and reads the line as far as it fits; strict still raises."""
+    strictly and raised at response 196. Lenient replay keeps the real duel (the
+    first 185 responses) strict, answers your prompts passively and skips the
+    copy's answers at the AI's: it reads well past 196,
+    where the first fix stopped dead. Strict still raises."""
     import os
     from pathlib import Path
 
@@ -7517,18 +7527,48 @@ def test_duel_plan_scoring_reads_a_copy_line_as_far_as_it_fits():
     line = Path(__file__).parent / "fixtures" / "lines" / "duel_plan_copy_answers.yrp"
     with pytest.raises(RuntimeError, match="has no action"):
         game.replay(line)
-    pos = game.replay(line, lenient=True, until_turn=3)
-    assert pos.turn >= 2
-    assert game.usable_gifts(line, 0, engine.DECKS / "imported.ydk", 3, lenient=True) >= 0
+    pos = game.replay(line, lenient=(1, 185))
+    assert len(pos.responses) > 200, len(pos.responses)     # the first fix stopped at 196
+    assert game.replay(line, lenient=(1, 185), until_turn=3).turn == 3
+    assert game.usable_gifts(line, 0, engine.DECKS / "imported.ydk", 3, lenient=(1, 185)) >= 0
 
 
-def test_a_crashed_duel_planner_passes_the_turn_instead_of_hanging():
-    """The planner's __main__ must catch a crash and close the AI's turn (plan [])
-    rather than leave the duel on "thinking" -- checked in the source, the
-    subprocess is not run here."""
-    import inspect
+def test_a_crashed_duel_planner_passes_the_turn_instead_of_hanging(tmp_path, monkeypatch):
+    """plan_or_pass: a planner that raises leaves the duel playable (status moves
+    on, the note says why), never on "thinking"."""
+    from skills import db, duel
 
-    from skills import duel
-    src = inspect.getsource(duel)
-    main = src[src.index('if __name__ == "__main__":'):]
-    assert "except Exception" in main and 'plan="[]"' in main and "advance(" in main
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+
+    def boom(conn, did):
+        raise RuntimeError("scoring replay raised")
+    monkeypatch.setattr(duel, "plan", boom)
+    assert duel.plan_or_pass(conn, did) == "your move"
+    row = duel.get(conn, did)
+    assert row["status"] == "your move" and "planner failed" in row["note"]
+
+
+def test_a_duel_whose_planner_died_plans_again_once(tmp_path, monkeypatch):
+    """revive: "thinking" older than twice the solver's hard limit and a minute
+    (a planner killed by a reboot) plans again -- once, however many polls see it."""
+    from datetime import datetime, timedelta, timezone
+
+    from skills import db, duel
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    spawned = []
+    monkeypatch.setattr(duel, "_spawn_plan", spawned.append)
+    duel._save(conn, did, status="thinking")
+    assert not duel.revive(conn, did) and not spawned           # just started thinking
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+    conn.execute("UPDATE duels SET updated=? WHERE id=?", (old, did))
+    conn.commit()
+    assert duel.revive(conn, did) and spawned == [did]
+    assert not duel.revive(conn, did) and spawned == [did]      # the second poll does nothing
+    conn.execute("UPDATE duels SET status='your move', updated=? WHERE id=?", (old, did))
+    conn.commit()
+    assert not duel.revive(conn, did)                            # only "thinking" is revived

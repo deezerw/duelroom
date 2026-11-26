@@ -640,8 +640,9 @@ def _damage(prefix, approach, player, lenient=False):
     `prefix` reaches (0 without an approach). `lenient`: see `replay`."""
     if not approach:
         return 0
-    before = replay(prefix).lp[1 - player]
-    pos = replay(approach, lenient=lenient)
+    start = replay(prefix)
+    before = start.lp[1 - player]
+    pos = replay(approach, lenient=(player, len(start.responses)) if lenient else None)
     low = (pos.min_lp[1 - player] if pos.min_lp[1 - player] is not None
            else pos.lp[1 - player])
     return max(0, before - low)
@@ -665,7 +666,10 @@ def _continuous_spell(code):
     return bool(card is not None and card.type & 0x2 and card.type & 0x20000)
 
 
-def replay(source, responses=None, until_turn=None, free_set=None, lenient=False):
+LENIENT_SKIP = 16   # how far ahead a copy's line may hold answers the real duel skips
+
+
+def replay(source, responses=None, until_turn=None, free_set=None, lenient=None):
     """Replay `responses` (default: the file's own) from `source`'s start.
 
     `until_turn`: then play PASSIVELY (end phase, pass, no) until that turn
@@ -675,12 +679,14 @@ def replay(source, responses=None, until_turn=None, free_set=None, lenient=False
     `free_set`: (player, codes) -- while closing, that player SETS each of
     these cards still in its hand during its own turn (`free_sets`).
 
-    `lenient`: a line searched on a COPY of the duel (the duel AI's plan, with your
-    assumed hand traps added by --opp-hand-root) answers prompts the real duel
-    never asks. As duel._plan_step plays it: a planned pass that fits nowhere is
-    dropped, an answer at a chain window is a pass there; any other misfit ends
-    the line there (scored as far as it went, then closed by `until_turn`).
-    Strict replays raise.
+    `lenient`: (seat, start) -- the line from response `start` on is SEAT's plan,
+    searched on a COPY of the duel (the duel AI's, your assumed hand traps added
+    by --opp-hand-root); the responses before `start` are the real duel, strict.
+    The copy's answers for the other seat index the copy's options, so that seat
+    answers passively instead; at the searcher's prompts the copy's extra
+    answers are skipped to the next planned move that fits (at most
+    LENIENT_SKIP ahead), else the line is read as far as it went. None: strict,
+    a misfit raises.
     """
     from ygorl.engine.branch import actions_for_response
     from ygorl.engine.duel import DuelSession
@@ -691,6 +697,7 @@ def replay(source, responses=None, until_turn=None, free_set=None, lenient=False
 
     rep = Replay.from_yrp(Path(source))
     wanted = list(rep.responses if responses is None else responses)
+    seat, start = lenient if lenient is not None else (None, len(wanted))
     session = DuelSession(rep.duel())
     tracker = session.tracker
     low = [None, None]
@@ -700,30 +707,42 @@ def replay(source, responses=None, until_turn=None, free_set=None, lenient=False
             v = tracker.lp[p]
             low[p] = v if low[p] is None else min(low[p], v)
 
+    def fit(point, raw):
+        try:
+            return actions_for_response(point.state, canonical_response(point.decision, raw))
+        except Exception:  # noqa: BLE001 -- a response this prompt cannot take
+            return None
+
     try:
-        for k, raw in enumerate(wanted):
+        k = passive = 0
+        while k < len(wanted):
+            raw = wanted[k]
             point = session.point
             if point is None:
                 break      # the duel ended inside the line: a win, read below
-            try:
+            if k < start:
                 plan = actions_for_response(point.state,
                                             canonical_response(point.decision, raw))
-            except Exception:  # noqa: BLE001 -- a response this prompt cannot take
-                if not lenient:
-                    raise
-                plan = None
-            if plan is None and lenient and raw == b"\xff\xff\xff\xff":
-                continue
-            if plan is None and lenient and point.decision.name == "MSG_SELECT_CHAIN":
-                plan = [next((i for i, a in enumerate(point.actions) if a.kind == "pass"),
-                             len(point.actions) - 1)]
-            if plan is None and lenient:
-                # the copy's line no longer fits (its defender's answers index the
-                # copy's chain options): it is read as far as it went
-                break
-            if plan is None:
-                raise RuntimeError(f"response {k} ({raw.hex()}) has no action "
-                                   f"for {point.decision.name}")
+                if plan is None:
+                    raise RuntimeError(f"response {k} ({raw.hex()}) has no action "
+                                       f"for {point.decision.name}")
+                k += 1
+            elif point.player != seat:
+                # the real defender answers passively, never with the copy's answers
+                # (they index the copy's chain options: "option 2" is another card here)
+                passive += 1
+                if passive > MAX_CLOSING_STEPS:
+                    break
+                kinds = [a.kind for a in point.actions]
+                plan = [next((kinds.index(x) for x in PASSIVE_KINDS if x in kinds), 0)]
+            else:
+                # the searcher's prompt: skip the copy's defender answers to the next
+                # planned move that fits here; none near -> the line is read this far
+                nxt = next((m for m in range(k, min(k + LENIENT_SKIP, len(wanted)))
+                            if fit(point, wanted[m])), None)
+                if nxt is None:
+                    break
+                plan, k = fit(point, wanted[nxt]), nxt + 1
             for idx in plan:
                 session.act(idx)
             watch()
@@ -1358,7 +1377,7 @@ def gifts(board, player, deck_path):
     return [c for c in codes if c and c not in mine]
 
 
-def usable_gifts(source, player, receiver_deck, until_turn, lenient=False):
+def usable_gifts(source, player, receiver_deck, until_turn, lenient=None):
     """Of the `gifts` on `player`'s field when `until_turn` begins, the
     activations they offer that player at its first main-phase prompt (the
     engine's own list: monster-zone `activate` actions of gifted codes).
@@ -1428,7 +1447,7 @@ def _regift(tpl, args, scratch, ms, seed, our_deck, first):
     return pool[min(score)[1]]
 
 
-def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2, lenient=False):
+def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2, lenient=None):
     """The solution line whose gifts the RECEIVER can use least (`usable_gifts`),
     ties in the solver's order (a deck that never gives monsters away plays
     exactly its first line; a gift the receiver cannot use, Seneschal, is not

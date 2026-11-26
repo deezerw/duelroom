@@ -254,9 +254,14 @@ class Live:
                     add(who, "draws a card")
                 else:
                     add(who, f"draws {nm(e.code)}", e.code)
-            else:
-                # a search is revealed at a real table; from the field or GY it is public anyway
+            elif src in (0x1, 0x10) or (src in (0x4, 0x8, 0x20) and e.previous.position & 0x5):
+                # a search is revealed at a real table; a face-up card or one from the GY is public
                 add(who, f"~{nm(e.code)} is added to the hand", e.code)
+            elif who == ai:
+                # its face-down card bounced (a Set Trap returned): it stays hidden
+                add(who, "~card is returned to the hand")
+            else:
+                add(who, f"~{nm(e.code)} is returned to the hand", e.code)
         elif dst == 0x8 and not up and src == 0x2:   # a Spell/Trap Set from the hand
             if who == ai:
                 add(who, "sets a card")
@@ -643,6 +648,42 @@ def hand_pieces(conn, row, live):
     return out
 
 
+def plan_or_pass(conn, did):
+    """`plan`, but a crash never leaves the duel on "thinking" (duel 7,
+    2026-11-25: a scoring replay raised and the page waited for good): the AI
+    passes the rest of its turn, the note says why, the traceback goes to
+    plan.log."""
+    try:
+        return plan(conn, did)
+    except Exception:  # noqa: BLE001 -- any failure: the duel must go on
+        import traceback
+        traceback.print_exc()
+        _save(conn, did, plan="[]", status="thinking",
+              note="the AI's planner failed (see plan.log); it passes this turn")
+        return advance(conn, did, spawn=False)
+
+
+def revive(conn, did):
+    """A planner killed outright (a reboot, out of memory) leaves the duel on
+    "thinking" with nobody thinking. Past twice the solver's hard limit and a
+    minute (each plan is at most two rounds of searches) it plans again; the
+    conditional UPDATE lets only one of two polling requests spawn it."""
+    from . import game
+    row = get(conn, did)
+    if row["status"] != "thinking":
+        return False
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["updated"])).total_seconds()
+    if age < 2 * game._hard_limit(row["think_ms"]) + 60:
+        return False
+    with conn:
+        n = conn.execute("UPDATE duels SET updated=?, note=? WHERE id=? AND status='thinking' "
+                         "AND updated=?", (_now(), "the AI's planner had stopped; thinking again",
+                                           int(did), row["updated"])).rowcount
+    if n:
+        _spawn_plan(did)
+    return bool(n)
+
+
 def _spawn_plan(did):
     from . import db
     folder = Path(get(db.connect(), did)["template"]).parent
@@ -760,7 +801,8 @@ def plan(conn, did):
                 for lab, x in tried:
                     if x["approach"]:
                         dmg = game._damage(prefix, x["approach"], 1 - you, lenient=True)
-                        gift = game.usable_gifts(x["approach"], you, user_deck, turn + 1, lenient=True)
+                        gift = game.usable_gifts(x["approach"], you, user_deck, turn + 1,
+                                                 lenient=(1 - you, len(live.responses)))
                         scored.append((gift, -dmg, lab, x))
                 scored.sort(key=lambda g: g[:2])
                 r = scored[0][3] if scored and scored[0][1] < 0 else None
@@ -775,7 +817,8 @@ def plan(conn, did):
             # of the lines reaching its board, the one handing you the least you can use
             # (game.fewest_gifts: Opposition put Castellan, a banish, on your field)
             r = {**r, "solution": game.fewest_gifts(r.get("solutions") or [], user_deck, player=you,
-                                                    until_turn=turn + 1, lenient=True) or r["solution"]}
+                                                    until_turn=turn + 1,
+                                                    lenient=(1 - you, len(live.responses))) or r["solution"]}
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []
@@ -914,16 +957,4 @@ def view(conn, did):
 if __name__ == "__main__":
     from . import db
     if sys.argv[1:2] == ["plan"]:
-        did = int(sys.argv[2])
-        try:
-            plan(db.connect(), did)
-        except Exception:
-            # never leave the duel on "thinking" forever (duel 7, 2026-11-25: a scoring
-            # replay raised and the page waited for good): the AI passes the rest of
-            # its turn, the page says why, the traceback stays in plan.log
-            import traceback
-            traceback.print_exc()
-            c = db.connect()
-            _save(c, did, plan="[]", status="thinking",
-                  note="the AI's planner failed (see plan.log); it passes this turn")
-            advance(c, did, spawn=False)
+        plan_or_pass(db.connect(), int(sys.argv[2]))

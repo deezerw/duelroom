@@ -1593,6 +1593,7 @@ def duel_new():
 def _duel_state(did):
     from skills import duel
     c = conn()
+    duel.revive(c, did)        # a planner that died without a trace plans again
     v = duel.view(c, did)
     codes = set()
     for p in v["board"]["players"]:
