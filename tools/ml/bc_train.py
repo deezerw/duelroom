@@ -58,6 +58,48 @@ def turns_of(demo, cards):
     return out
 
 
+def both_steps(demo, vocab, cards, first):
+    """ygorl's `line_steps` for BOTH seats in ONE replay ({player: steps}, turn per
+    step): a PointObserver per seat, fed every point as line_steps feeds its one. A
+    seat's observation is encoded only where the sample builder can keep it -- its
+    own non-forced decision on its own turn (the defender's answers are dropped) --
+    so every kept step's observation is the one line_steps gives. Was: one replay for
+    the turns plus one encoding replay per seat (80% of the build in two)."""
+    from ygorl.engine.duel import DuelSession
+    from ygorl.env.events import DEFAULT_EVENT_LENGTH
+    from ygorl.env.observer import PointObserver
+    from ygorl.train.bc import DemoError, DemoStep, action_key
+
+    ln = demo.lines[0]
+    session = DuelSession(demo.replay(0).duel(None, cards=cards))
+    obs = {p: PointObserver(cards, vocab, DEFAULT_EVENT_LENGTH) for p in (0, 1)}
+    out, turns = {0: [], 1: []}, []
+    try:
+        for step, idx in enumerate(ln.actions):
+            point = session.point
+            if point is None:
+                raise DemoError(f"step {step}: the duel stopped before the line ended")
+            turn = session.tracker.turn
+            turns.append(turn)
+            act = point.actions[idx]
+            card = (act.card.code, act.card.loc) if act.card is not None else None
+            key = action_key(point, idx)
+            for p in (0, 1):
+                obs[p].observe(point)
+                o = None
+                if (point.player == p and len(point.actions) > 1
+                        and (turn - 1 + first) % 2 == p):
+                    o = obs[p].encode(point, session.core)
+                out[p].append(DemoStep(step, point.player, idx, len(point.actions), act.kind,
+                                       card, o, key))
+            session.act(idx)
+            for p in (0, 1):
+                obs[p].on_decision(point, idx)
+    finally:
+        session.close()
+    return out, turns
+
+
 def samples(demo, vocab, cards, seen, skipped):
     """(obs, action, meta) of the turn player's real decisions in line 0, new ones only."""
     out = []
@@ -74,16 +116,16 @@ def candidates(demo, vocab, cards, skipped):
     """[(key, (obs, action, meta))] of line 0's turn-player decisions; `samples`
     drops the keys already seen (repeats are only known across lines)."""
     from ygorl.env.encoding import MAX_OPTIONS, canonical_action
-    from ygorl.train.bc import line_steps, undone_steps
+    from ygorl.train.bc import undone_steps
 
     ln = demo.lines[0]
-    turns = turns_of(demo, cards)
     start = hashlib.sha1(json.dumps(demo.start["core_seed"]).encode()
                          + json.dumps(demo.start["decks"]).encode()).hexdigest()[:12]
     first = demo.start.get("first", 0) if isinstance(demo.start, dict) else 0
+    by_player, turns = both_steps(demo, vocab, cards, first)
     out = []
     for player in (0, 1):
-        steps = line_steps(demo, 0, vocab, cards=cards, player=player)
+        steps = by_player[player]
         undone = undone_steps(steps)
         for st in steps:
             if st.player != player:
