@@ -26,6 +26,7 @@ of one, it may plan against two. Effects that touch your hand at random
 (discard / reveal) use the real cards; the page says so when one resolves.
 """
 
+import hashlib
 import json
 import random
 import re
@@ -741,6 +742,10 @@ def _winner_note(res, lp, you):
     return f"winner: {'you' if w == you else 'the AI'} ({res.reason})"
 
 
+class _Reuse(Exception):
+    """plan(): this position was planned before."""
+
+
 def plan(conn, did):
     """Search the AI's turn from the current position and store the plan:
     turn 2 on, the --goal-win search (lethal, else its line that hurts you
@@ -753,6 +758,14 @@ def plan(conn, did):
     row = get(conn, did)
     live = Live(row)
     try:
+        # the same position again (an undo, a move made again): the plan it got
+        # before, at once -- as undo cannot reroll luck, it cannot reroll the AI
+        cache = Path(row["template"]).parent / "plans.json"
+        known = json.loads(cache.read_text()) if cache.exists() else {}
+        key = hashlib.sha1(f"{row['think_ms']}|".encode() + b"".join(live.responses)).hexdigest()
+        if key in known:
+            line, t0 = known[key], time.time()
+            raise _Reuse
         turn = live.session.tracker.turn
         root = Path(row["template"]).parent / f"plan-{len(json.loads(row['actions']))}"
         start, prefix = breaking.split_position(Replay.from_yrp(Path(row["template"])),
@@ -761,8 +774,17 @@ def plan(conn, did):
         base = ["--start", str(start), "--root", str(prefix)] + plan_args(row, cards, turn)
         targets = [a for t in deck_target(conn, row["ai_deck"]) for a in ("--target", t)]
         t0 = time.time()
-        r = None
+        r = building = None
         you = row["user_seat"]
+        # the board: its target AND every interruption piece its hand can reach
+        # (the trainer's breadth, on the AI's OWN hand -- it knows that). A lone
+        # target stopped at the first line placing it: a thin board (Endgame
+        # Problem alone). The conjunction is rarely all reachable; the search's
+        # best approach keeps the line placing the most.
+        build = targets + [a for t in hand_pieces(conn, row, live) for a in ("--target", t)]
+
+        def build_board():
+            return game._solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
         user_deck = engine.DECKS / f"{row['user_deck']}.ydk"
         if turn > 1:
             # Its turn, searched several ways AT ONCE: plain lethal (no build target:
@@ -789,7 +811,12 @@ def plan(conn, did):
                 return label, game._solve(prefix, base + neutral + extra + ["--goal-win", "--stop-on-win",
                                                                   str(game.STOP_ON_WIN)],
                                           root, label, row["think_ms"], int(t0) + k)
-            with ThreadPoolExecutor(len(variants)) as ex:
+            # the build search runs BESIDE the kill searches, not after them: it is
+            # needed whenever no kill turns up (every plan of duel 7), and budgets are
+            # CPU work (patch 0015), so running at once searches exactly as much and
+            # saves a whole think_ms of waiting (~160 s -> ~100 s at 90 s)
+            with ThreadPoolExecutor(len(variants) + 1) as ex:
+                building = ex.submit(build_board)
                 tried = list(ex.map(one, enumerate(variants)))
             won = [(lab, x) for lab, x in tried if x["solution"]]
             if won:
@@ -807,13 +834,7 @@ def plan(conn, did):
                 scored.sort(key=lambda g: g[:2])
                 r = scored[0][3] if scored and scored[0][1] < 0 else None
         if r is None:
-            # the board: its target AND every interruption piece its hand can reach
-            # (the trainer's breadth, on the AI's OWN hand -- it knows that). A lone
-            # target stopped at the first line placing it: a thin board (Endgame
-            # Problem alone). The conjunction is rarely all reachable; the search's
-            # best approach keeps the line placing the most.
-            build = targets + [a for t in hand_pieces(conn, row, live) for a in ("--target", t)]
-            r = game._solve(prefix, base + build, root, "build", row["think_ms"], int(t0))
+            r = building.result() if building is not None else build_board()
             # of the lines reaching its board, the one handing you the least you can use
             # (game.fewest_gifts: Opposition put Castellan, a banish, on your field)
             r = {**r, "solution": game.fewest_gifts(r.get("solutions") or [], user_deck, player=you,
@@ -822,10 +843,13 @@ def plan(conn, did):
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []
+        cache.write_text(json.dumps({**known, key: line}))
+        note = f"planned {len(line)} step(s) in {time.time() - t0:.0f} s"
+    except _Reuse:
+        note = f"same position as before: its plan of {len(line)} step(s) again"
     finally:
         live.close()
-    _save(conn, did, plan=json.dumps(line), status="your move" if not line else "thinking",
-          note=f"planned {len(line)} step(s) in {time.time() - t0:.0f} s")
+    _save(conn, did, plan=json.dumps(line), status="your move" if not line else "thinking", note=note)
     return advance(conn, did, spawn=False if not line else True)
 
 

@@ -7572,3 +7572,24 @@ def test_a_duel_whose_planner_died_plans_again_once(tmp_path, monkeypatch):
     conn.execute("UPDATE duels SET status='your move', updated=? WHERE id=?", (old, did))
     conn.commit()
     assert not duel.revive(conn, did)                            # only "thinking" is revived
+
+
+def test_duel_ai_reuses_its_plan_for_a_position_it_has_planned(tmp_path, monkeypatch):
+    """Speed (user, 2026-11-25: "more speed improvements on the ai"): a position
+    planned before (an undo, the same move made again) gets its stored plan at
+    once -- no second search."""
+    from skills import db, duel, game
+
+    monkeypatch.setattr(duel, "DUELS", tmp_path / "duels")
+    conn = db.connect(tmp_path / "t.db")
+    did = duel.create(conn, "imported", "Angelechy-Meta", user_first=True, seed=11, spawn=False)
+    calls = []
+    monkeypatch.setattr(duel, "deck_target", lambda conn, deck: ["1"])
+    monkeypatch.setattr(duel, "hand_pieces", lambda conn, row, live: [])
+    monkeypatch.setattr(game, "_solve", lambda *a, **k: calls.append(a[3]) or {
+        "solution": None, "solutions": [], "approach": None, "log": "l"})
+    duel.plan(conn, did)
+    assert calls == ["build"] and "planned 0 step" in duel.get(conn, did)["note"]
+    duel.plan(conn, did)
+    assert calls == ["build"], "searched the same position twice"
+    assert "same position" in duel.get(conn, did)["note"]
