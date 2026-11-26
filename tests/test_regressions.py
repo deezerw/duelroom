@@ -7800,6 +7800,44 @@ def test_ai_follows_a_plan_that_opens_with_answers_only_the_copy_had(tmp_path, m
     assert calls == ["build"], "a stored line that does not fit was reused"
 
 
+def test_turn1_pick_always_replaces_a_reached_goal_that_dies(monkeypatch, tmp_path):
+    """game.T1_PICK_ALWAYS (user, 2026-11-26: "better than me"): a REACHED full goal
+    is one candidate too -- kept when it survives (it comes first), replaced by the
+    first board that does when it dies; reached stays the full goal's."""
+    from skills import game
+
+    monkeypatch.setattr(game, "turn1_vs_scripts",
+                        lambda *a, **kw: {"board": a[3], "start": "s", "prefix": a[3], "reached": True})
+    monkeypatch.setattr(game, "live_goal", lambda g, d: g)
+    monkeypatch.setattr(game, "_pieces", lambda b, p, c: [])
+    alive = {"g1"}
+    monkeypatch.setattr(game, "kill_check", lambda start, prefix, *a, **kw: prefix not in alive)
+    monkeypatch.setattr(game, "T1_PICK_ALWAYS", True)
+    full = {"board": "full", "start": "s", "prefix": "full", "reached": True}
+    kw = dict(our_deck="d", enemy_deck="e", hand=[], enemy_seed=1000, scratch=tmp_path, ms=1,
+              seed=1000, enemy_respond=[], enemy_target="t", our_respond=[], cards=object())
+    t = game.turn1_fallbacks(full, ["g1"], n=2, **kw)
+    assert t["prefix"] == "g1" and t["fallback"] == 1 and t["reached"] is False
+    alive.add("full")
+    t = game.turn1_fallbacks(full, ["g1"], n=2, **kw)
+    assert t["prefix"] == "full" and t["fallback"] == 0 and t["reached"] is True
+
+
+def test_turn1_candidates_add_breadth_shapes_and_drop_the_full_goal(monkeypatch):
+    """game.t1_candidates: starter boards first, then (T1_PICK_ALWAYS) base + one
+    piece per breadth goal; the full goal itself and repeats are left out."""
+    from skills import game, trainer
+
+    monkeypatch.setattr(trainer, "starter_goals", lambda c, dh, h: [((3,), ["1", "2"]), ((2,), ["3"])])
+    monkeypatch.setattr(trainer, "prefs", lambda c, n: {})
+    monkeypatch.setattr(trainer, "breadth_goals", lambda d, h, p: (
+        [], [(["3"], "piece:3"), (["4"], "piece:4"), (["2", "1"], "piece:x"), (["9"], "base")]))
+    monkeypatch.setattr(game, "T1_PICK_ALWAYS", False)
+    assert game.t1_candidates(None, "dh", "deck.ydk", [], ["2", "1"]) == [["3"]]
+    monkeypatch.setattr(game, "T1_PICK_ALWAYS", True)
+    assert game.t1_candidates(None, "dh", "deck.ydk", [], ["9"]) == [["1", "2"], ["3"], ["4"]]
+
+
 def test_respond_all_lists_every_card_of_the_deck(tmp_path, monkeypatch):
     """game.RESPOND_ALL: the defender may answer with any main or Extra Deck card
     (Mind Shuffle, Perlereino, the Tearlaments' GY Fusions were never listed);

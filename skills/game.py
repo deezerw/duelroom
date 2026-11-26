@@ -922,6 +922,13 @@ def enemy_script_args(respond, script, cards=None):
 # measures it. The look-ahead's seed is never the game's turn-2 seed, so a board it
 # keeps is not one the game's own search was already seen to miss.
 T1_FALLBACKS = 0            # fallback goals tried (best first); 0 = off
+# The pick runs on EVERY turn 1, not only one that missed the full goal (user, 2026-11-26:
+# "i want it to be better than me"): a reached goal is just one candidate, kept when it
+# survives the look-ahead -- it comes first -- and replaced by a board that does when it
+# does not. Candidates also take the hand's breadth goals (base + one piece: trainer.
+# breadth_goals), so board SHAPES the full goal never asks for are tried. Off until
+# tools/experiments/t1_starters.py `--always` measures it.
+T1_PICK_ALWAYS = False
 FALLBACK_PICK_X = 4         # the look-ahead kill check, x OTK_MS per defence
 FALLBACK_SEED = 7           # added to the game's seed * 100: a seed no game uses
 
@@ -941,6 +948,28 @@ def kill_check(start, prefix, enemy_target, our_respond, enemy_deck, scratch, ms
     return True
 
 
+def t1_candidates(conn, dh, deck_path, hand, full_goal):
+    """turn1_fallbacks' goals, best first: what the starter tables know this
+    hand's parts make, then (T1_PICK_ALWAYS) the hand's breadth goals -- base +
+    one piece each. The full goal itself and repeats left out."""
+    from . import trainer
+    out = [trainer.split_goal(g)[0] for _, g in trainer.starter_goals(conn, dh, hand)]
+    if T1_PICK_ALWAYS:
+        try:
+            _b, goals = trainer.breadth_goals(deck_path, hand, trainer.prefs(conn, Path(deck_path).stem))
+            out += [g for g, label in goals if label.startswith("piece:")]
+        except Exception:  # noqa: BLE001 -- no blocking plan for this hand: starters only
+            pass
+    full = trainer.split_goal(full_goal)[0]
+    seen, keep = {tuple(sorted(full))}, []
+    for g in out:
+        k = tuple(sorted(g))
+        if k not in seen:
+            seen.add(k)
+            keep.append(g)
+    return keep
+
+
 def turn1_fallbacks(t1, goals, our_deck, enemy_deck, hand, enemy_seed, scratch, ms, seed,
                     enemy_respond, enemy_target, our_respond, start=None, sets=None,
                     cards=None, n=None):
@@ -949,7 +978,7 @@ def turn1_fallbacks(t1, goals, our_deck, enemy_deck, hand, enemy_seed, scratch, 
     `n`, default T1_FALLBACKS) that a look-ahead kill check leaves alive.
     None alive: `t1`. The kept one carries `fallback` (0 = the full goal)."""
     n = T1_FALLBACKS if n is None else n
-    if t1 is None or t1["reached"] or not n or not goals:
+    if t1 is None or (t1["reached"] and not T1_PICK_ALWAYS) or not n or not goals:
         return t1
     if cards is None:
         from ygorl.engine.duel import default_cards
@@ -1616,8 +1645,8 @@ def run(conn, deck_path, name, enemy_name, hands=None, enemy_hands=ENEMY_HANDS,
                                   eseed, scratch, ms, eseed, theirs, start=start,
                                   sets=free_sets(deck_path, cards, ours_extra), cards=cards)
             if T1_FALLBACKS:
-                fb = [trainer.split_goal(g)[0]
-                      for _, g in trainer.starter_goals(conn, dh, json.loads(row["hand"]))]
+                fb = t1_candidates(conn, dh, deck_path, json.loads(row["hand"]),
+                                   json.loads(row["best_goal"]))
                 t1 = turn1_fallbacks(t1, fb, Path(deck_path), enemy_deck, json.loads(row["hand"]),
                                      eseed, scratch, ms, eseed, theirs, enemy_target, ours_hand,
                                      start=start, sets=free_sets(deck_path, cards, ours_extra),

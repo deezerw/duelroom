@@ -14,6 +14,9 @@ it. Both through the games' kill check at the games' budget and the GAME'S seed
 
     DUELROOM_DEVICE=duelpc venv/bin/python tools/experiments/t1_starters.py [positions] [fallbacks]
     venv/bin/python tools/experiments/t1_starters.py summary
+    # every turn 1 (game.T1_PICK_ALWAYS, starter + breadth goals), any enemy / device label:
+    venv/bin/python tools/experiments/t1_starters.py 40 6 always blue_eyes_oct_2026 server
+    venv/bin/python tools/experiments/t1_starters.py summary results-always.jsonl
 Needs the starter tables (starters 1 and 2). Resumable (results.jsonl).
 """
 
@@ -36,33 +39,38 @@ POSITIONS, FALLBACKS = 40, 2
 _lock = threading.Lock()
 
 
-def main(limit=POSITIONS, n=FALLBACKS):
+def main(limit=POSITIONS, n=FALLBACKS, mode="missed", enemy=ENEMY, label=DEVICE):
+    """mode "missed": positions that missed the full goal, starter goals only (the
+    original question). "always" (game.T1_PICK_ALWAYS): every position, starter +
+    breadth goals; results go to results-always.jsonl."""
+    always = mode == "always"
+    game.T1_PICK_ALWAYS = always
     from ygorl.engine.duel import default_cards
     dev = remote.current()
     remote.prepare(dev)
     conn = db.connect()
     cards = default_cards()
-    deck, enemy_deck = engine.DECKS / f"{DECK}.ydk", engine.DECKS / f"{ENEMY}.ydk"
+    deck, enemy_deck = engine.DECKS / f"{DECK}.ydk", engine.DECKS / f"{enemy}.ydk"
     dh = trainer.deck_hash(deck)
     if not conn.execute("SELECT COUNT(*) FROM trainer_hands WHERE deck_hash IN (?,?) AND best_goal "
                         "IS NOT NULL", (trainer.starter_key(dh, 1), trainer.starter_key(dh, 2))).fetchone()[0]:
         raise SystemExit("no starter tables yet: daemon.py starters imported 1 / 2")
-    enemy_target = game.scenarios.target_for(ENEMY)
+    enemy_target = game.scenarios.target_for(enemy) or _neutral(enemy, cards)
     theirs = game.enemy_respond_codes(enemy_deck, cards)
     prefs = trainer.prefs(conn, DECK)["interrupters"]
     ours_hand = set(game.respond_codes(deck, cards, extra=prefs))
     hands = {r["hand_index"]: dict(r) for r in conn.execute(
-        "SELECT hand_index, hand, best_record FROM trainer_hands WHERE deck_hash=?", (dh,))}
+        "SELECT hand_index, hand, best_goal, best_record FROM trainer_hands WHERE deck_hash=?", (dh,))}
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM game_turn1 WHERE deck_hash=? AND enemy=? AND first=1 AND device=? AND ok=1 "
-        "AND reached=0 ORDER BY hand_index, enemy_seed", (dh, ENEMY, DEVICE))
+        + ("" if always else "AND reached=0 ") + "ORDER BY hand_index, enemy_seed", (dh, enemy, label))
             if r["prefix"] and Path(r["prefix"]).exists() and r["hand_index"] in hands]
     rows = random.Random(21).sample(rows, min(int(limit), len(rows)))
     OUT.mkdir(parents=True, exist_ok=True)
-    res = OUT / "results.jsonl"
-    done = ({(d["hand"], d["eseed"]) for d in map(json.loads, res.read_text().splitlines())}
+    res = OUT / ("results-always.jsonl" if always else "results.jsonl")
+    done = ({(d.get("enemy", ENEMY), d["hand"], d["eseed"]) for d in map(json.loads, res.read_text().splitlines())}
             if res.exists() else set())
-    jobs = [r for r in rows if (r["hand_index"], r["enemy_seed"]) not in done]
+    jobs = [r for r in rows if (enemy, r["hand_index"], r["enemy_seed"]) not in done]
     print(f"{len(rows)} positions missing the full goal, {len(jobs)} to run, {n} fallback(s), "
           f"on {dev.name}", flush=True)
     ms = game.OTK_MS * game.OTK_X
@@ -74,13 +82,14 @@ def main(limit=POSITIONS, n=FALLBACKS):
         scratch = OUT / "scratch" / f"h{r['hand_index']}-e{e}"
         try:
             board = game.replay(r["prefix"], until_turn=2).board
-            t1 = {"start": r["start"], "prefix": r["prefix"], "board": board, "reached": False}
-            fb = [trainer.split_goal(g)[0] for _, g in trainer.starter_goals(conn_local(), dh, hand)]
+            t1 = {"start": r["start"], "prefix": r["prefix"], "board": board, "reached": bool(r["reached"])}
+            fb = game.t1_candidates(conn_local(), dh, deck, hand, json.loads(h["best_goal"]))
             t = game.turn1_fallbacks(t1, fb, deck, enemy_deck, hand, e, scratch / "fb",
                                      engine.SOLVE_MS, e, theirs, enemy_target, ours_hand,
                                      start=trainer.hand_start(h["best_record"]),
                                      sets=game.free_sets(deck, cards, prefs), cards=cards, n=int(n))
-            rec = {"hand": r["hand_index"], "eseed": e, "fallbacks_known": len(fb),
+            rec = {"enemy": enemy, "reached": int(t1["reached"]), "hand": r["hand_index"], "eseed": e,
+                   "fallbacks_known": len(fb),
                    "picked": t.get("fallback", 0), "device": dev.name, "ms": ms}
             for arm, b in (("full", t1), ("fallback", t)):
                 if arm == "fallback" and b is t1:
@@ -115,8 +124,14 @@ def conn_local():
     return _tls.c
 
 
-def summary():
-    f = OUT / "results.jsonl"
+def _neutral(enemy, cards):
+    from skills.deck import Deck
+    main = Deck.from_ydk(engine.DECKS / f"{enemy}.ydk").main
+    return f"{next(x for x in main if cards.get(x) is not None and cards.get(x).type & 0x2)}@mzone"
+
+
+def summary(name="results.jsonl"):
+    f = OUT / name
     if not f.exists():
         print("no results yet")
         return
@@ -137,6 +152,6 @@ def summary():
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["summary"]:
-        summary()
+        summary(*sys.argv[2:3])
     else:
-        main(*sys.argv[1:3])
+        main(*sys.argv[1:6])
