@@ -1263,6 +1263,114 @@ def _act(i, a, cards, you, hidden):
     return out
 
 
+# --- your turn 1 vs the solver's, on the same hand (user, 2026-11-26) ----------------
+# "i dont want it to just copy my boards i want it to be better than me": once you have
+# played turn 1 going first, the solver plays the SAME opening hand from the duel's start
+# (same deck order, the AI's real hand traps answering it, COMPARE_MS like the trainer's
+# tries) and both boards go through the games' kill check (game.kill_check at OTK_X, one
+# seed for both). Measurement only: it never changes the duel. Caveat shown on the page:
+# the solver's search sees the AI's hand, as the games' turn 1 does.
+COMPARE_MS = 180_000
+
+
+def _compare_file(row):
+    return Path(row["template"]).parent / "compare.json"
+
+
+def compare(conn, did):
+    """compare.json for duel `did`: {you, solver: {pieces, monsters, backrow, killed}}.
+    None while your turn 1 is not over (or you went second)."""
+    from ygorl.engine.replay import Replay
+
+    from . import breaking, engine, game, scenarios, trainer
+    row = get(conn, did)
+    out = _compare_file(row)
+    if row["user_seat"] != 0:
+        return None
+    live = Live(dict(row, actions="[]"))
+    try:
+        cards = live.cards
+        hand = live.codes(0, 0x2)
+        for a in json.loads(row["actions"]):
+            live.act(a)
+            if live.session.tracker.turn > 1:
+                break
+        if live.session.tracker.turn < 2:
+            return None
+        yours, you_board = live.responses, live.board()
+    finally:
+        live.close()
+    ours_deck, ai_deck = engine.DECKS / f"{row['user_deck']}.ydk", engine.DECKS / f"{row['ai_deck']}.ydk"
+    prefs = trainer.prefs(conn, row["user_deck"])
+    root = out.parent / "compare"
+    tpl = Replay.from_yrp(Path(row["template"]))
+    start, prefix = breaking.split_position(tpl, [], root / "solver")
+    _b, goals = trainer.breadth_goals(ours_deck, hand, prefs)
+    build = [a for t in dict.fromkeys(deck_target(conn, row["user_deck"])
+                                      + [g[-1] for g, lab in goals if lab.startswith("piece:")])
+             for a in ("--target", t)]
+    args = (["--start", str(start), "--root", str(prefix), "--player", "0", "--turns", "1", "--no-ref"]
+            + build + game.defender_args(game.respond_codes(ai_deck, cards), cards)
+            + game.gy_want_args(ai_deck) + game.self_target_args() + game.own_turn_args(ours_deck))
+    seed = row["seed"] % 100_000
+    r = game._solve(prefix, args, root / "solver", "t1", COMPARE_MS, seed)
+    src = r["solution"] or r["approach"]
+    sets = (0, set(game.free_sets(ours_deck, cards, prefs["interrupters"])))
+    boards = {"you": (yours, you_board)}
+    if src:
+        pos = game.replay(src, until_turn=2, free_set=sets)
+        boards["solver"] = (pos.responses, pos.board)
+    target = scenarios.target_for(row["ai_deck"]) or _neutral_target(ai_deck, cards)
+    respond = set(game.respond_codes(ours_deck, cards, extra=prefs["interrupters"]))
+    res = {"method": game.METHOD, "kill_ms": game.OTK_MS * game.OTK_X, "turn1_ms": COMPARE_MS}
+    for who, (resp, board) in boards.items():
+        st, pre = breaking.split_position(tpl, resp, root / who)
+        pieces = game._pieces(board, 0, cards)
+        killed = game.kill_check(st, pre, target, set(pieces) | respond, ai_deck,
+                                 root / who / "kill", game.OTK_MS * game.OTK_X, seed * 100)
+        pl = board["players"][0]
+        res[who] = {"pieces": [cards.get(c).name for c in pieces],
+                    "monsters": [cards.get(m["code"]).name for m in pl.get("mzone") or [] if m],
+                    "backrow": [cards.get(m["code"]).name for m in pl.get("szone") or [] if m],
+                    "killed": bool(killed)}
+    out.write_text(json.dumps(res))
+    return res
+
+
+def _neutral_target(deck_path, cards):
+    # no payoff target: a board target nothing can match (one of its Spells in the
+    # monster zone), as the duel's own lethal search uses
+    from .deck import Deck
+    main = Deck.from_ydk(deck_path).main
+    return f"{next(x for x in main if cards.get(x) is not None and cards.get(x).type & 0x2)}@mzone"
+
+
+def compare_state(row, turn):
+    """What the page shows: this duel's comparison (or "running"), plus every duel's so
+    far. Starts the background job once your turn 1 is over. Cheap: file reads."""
+    f = _compare_file(row)
+    lock = f.with_name("compare.lock")
+    mine = None
+    if f.exists():
+        mine = json.loads(f.read_text())
+    elif row["user_seat"] == 0 and turn >= 2:
+        if not lock.exists():
+            lock.write_text(str(time.time()))
+            subprocess.Popen(["nice", "-n", "19", sys.executable, "-m", "skills.duel", "compare",
+                              str(row["id"])], cwd=str(ROOT),
+                             stdout=open(f.with_name("compare.log"), "a"), stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        mine = {"running": True}
+    tally = {"duels": 0, "you": 0, "solver": 0}
+    for g in DUELS.glob("*/compare.json"):
+        d = json.loads(g.read_text())
+        if "solver" in d:
+            tally["duels"] += 1
+            tally["you"] += not d["you"]["killed"]
+            tally["solver"] += not d["solver"]["killed"]
+    return {"this": mine, "survived": tally}
+
+
 def view(conn, did):
     """Your side of the table: the board with the AI's hand as a count, your
     legal actions (labels), the chain, the status."""
@@ -1302,6 +1410,7 @@ def view(conn, did):
                 # your own Deck (sorted: you know its cards, never its order) and whole
                 # Extra Deck; the AI's stay a count and its face-up Extra cards
                 "my_deck": sorted(live.codes(you, 0x1)), "my_extra": live.codes(you, 0x40),
+                "compare": compare_state(row, live.session.tracker.turn),
                 "prompt": p.decision.name if mine else None,
                 "actions": [_act(i, a, live.cards, you, hidden)
                             for i, a in enumerate(p.actions)] if mine else []}
@@ -1315,3 +1424,13 @@ if __name__ == "__main__":
         plan_or_pass(db.connect(), int(sys.argv[2]))
     elif sys.argv[1:2] == ["defend"]:
         decide_or_rule(db.connect(), int(sys.argv[2]))
+    elif sys.argv[1:2] == ["compare"]:
+        c, did = db.connect(), int(sys.argv[2])
+        try:
+            print(json.dumps(compare(c, did)), flush=True)
+        except Exception as e:  # noqa: BLE001 -- written, so the page does not start it again
+            import traceback
+            traceback.print_exc()
+            _compare_file(get(c, did)).write_text(json.dumps({"error": f"{type(e).__name__}: {e}"}))
+        finally:
+            _compare_file(get(c, did)).with_name("compare.lock").unlink(missing_ok=True)

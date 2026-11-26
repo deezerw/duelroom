@@ -7851,3 +7851,26 @@ def test_respond_all_lists_every_card_of_the_deck(tmp_path, monkeypatch):
     monkeypatch.setattr(game, "RESPOND_ALL", True)
     assert set(game.respond_codes(ydk, extra=[5])) == {14558127, 77103950, 69946549, 5}
 
+
+def test_duel_compare_starts_once_after_your_turn_1_and_tallies(tmp_path, monkeypatch):
+    """duel.compare_state: going first, once turn 2 begins, the comparison job starts
+    ONCE (a lock); going second never; the tally counts every finished duel."""
+    import json as _json
+
+    from skills import duel
+    monkeypatch.setattr(duel, "DUELS", tmp_path)
+    started = []
+    monkeypatch.setattr(duel.subprocess, "Popen", lambda *a, **kw: started.append(a[0]))
+    d1 = tmp_path / "1-5"; d1.mkdir()
+    row = {"id": 1, "user_seat": 0, "template": str(d1 / "duel.yrpX")}
+    assert duel.compare_state(row, 1)["this"] is None and not started
+    assert duel.compare_state(row, 2)["this"] == {"running": True}
+    duel.compare_state(row, 3)
+    assert len(started) == 1 and started[0][-2:] == ["compare", "1"]
+    assert duel.compare_state({**row, "user_seat": 1, "template": str(tmp_path / "2-6" / "x")}, 2)["this"] is None
+    (d1 / "compare.json").write_text(_json.dumps({"you": {"killed": True}, "solver": {"killed": False}}))
+    d2 = tmp_path / "3-7"; d2.mkdir()
+    (d2 / "compare.json").write_text(_json.dumps({"error": "x"}))
+    got = duel.compare_state(row, 3)
+    assert got["this"]["solver"] == {"killed": False}
+    assert got["survived"] == {"duels": 1, "you": 0, "solver": 1}
