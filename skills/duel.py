@@ -759,8 +759,8 @@ def plan(conn, did):
                 scored = []
                 for lab, x in tried:
                     if x["approach"]:
-                        dmg = game._damage(prefix, x["approach"], 1 - you)
-                        gift = game.usable_gifts(x["approach"], you, user_deck, turn + 1)
+                        dmg = game._damage(prefix, x["approach"], 1 - you, lenient=True)
+                        gift = game.usable_gifts(x["approach"], you, user_deck, turn + 1, lenient=True)
                         scored.append((gift, -dmg, lab, x))
                 scored.sort(key=lambda g: g[:2])
                 r = scored[0][3] if scored and scored[0][1] < 0 else None
@@ -775,7 +775,7 @@ def plan(conn, did):
             # of the lines reaching its board, the one handing you the least you can use
             # (game.fewest_gifts: Opposition put Castellan, a banish, on your field)
             r = {**r, "solution": game.fewest_gifts(r.get("solutions") or [], user_deck, player=you,
-                                                    until_turn=turn + 1) or r["solution"]}
+                                                    until_turn=turn + 1, lenient=True) or r["solution"]}
         src = r["solution"] or r["approach"]
         n = len(live.responses)
         line = [x.hex() for x in Replay.from_yrp(src).responses[n:]] if src else []
@@ -914,4 +914,16 @@ def view(conn, did):
 if __name__ == "__main__":
     from . import db
     if sys.argv[1:2] == ["plan"]:
-        plan(db.connect(), int(sys.argv[2]))
+        did = int(sys.argv[2])
+        try:
+            plan(db.connect(), did)
+        except Exception:
+            # never leave the duel on "thinking" forever (duel 7, 2026-11-25: a scoring
+            # replay raised and the page waited for good): the AI passes the rest of
+            # its turn, the page says why, the traceback stays in plan.log
+            import traceback
+            traceback.print_exc()
+            c = db.connect()
+            _save(c, did, plan="[]", status="thinking",
+                  note="the AI's planner failed (see plan.log); it passes this turn")
+            advance(c, did, spawn=False)

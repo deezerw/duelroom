@@ -635,13 +635,13 @@ def defence_args(respond, defence, cards=None):
     return defender_args(respond, cards, hold_until=defence)
 
 
-def _damage(prefix, approach, player):
+def _damage(prefix, approach, player, lenient=False):
     """LP the opponent of `player` lost along `approach`, from the position
-    `prefix` reaches (0 without an approach)."""
+    `prefix` reaches (0 without an approach). `lenient`: see `replay`."""
     if not approach:
         return 0
     before = replay(prefix).lp[1 - player]
-    pos = replay(approach)
+    pos = replay(approach, lenient=lenient)
     low = (pos.min_lp[1 - player] if pos.min_lp[1 - player] is not None
            else pos.lp[1 - player])
     return max(0, before - low)
@@ -665,7 +665,7 @@ def _continuous_spell(code):
     return bool(card is not None and card.type & 0x2 and card.type & 0x20000)
 
 
-def replay(source, responses=None, until_turn=None, free_set=None):
+def replay(source, responses=None, until_turn=None, free_set=None, lenient=False):
     """Replay `responses` (default: the file's own) from `source`'s start.
 
     `until_turn`: then play PASSIVELY (end phase, pass, no) until that turn
@@ -674,6 +674,13 @@ def replay(source, responses=None, until_turn=None, free_set=None):
 
     `free_set`: (player, codes) -- while closing, that player SETS each of
     these cards still in its hand during its own turn (`free_sets`).
+
+    `lenient`: a line searched on a COPY of the duel (the duel AI's plan, with your
+    assumed hand traps added by --opp-hand-root) answers prompts the real duel
+    never asks. As duel._plan_step plays it: a planned pass that fits nowhere is
+    dropped, an answer at a chain window is a pass there; any other misfit ends
+    the line there (scored as far as it went, then closed by `until_turn`).
+    Strict replays raise.
     """
     from ygorl.engine.branch import actions_for_response
     from ygorl.engine.duel import DuelSession
@@ -698,8 +705,22 @@ def replay(source, responses=None, until_turn=None, free_set=None):
             point = session.point
             if point is None:
                 break      # the duel ended inside the line: a win, read below
-            plan = actions_for_response(point.state,
-                                        canonical_response(point.decision, raw))
+            try:
+                plan = actions_for_response(point.state,
+                                            canonical_response(point.decision, raw))
+            except Exception:  # noqa: BLE001 -- a response this prompt cannot take
+                if not lenient:
+                    raise
+                plan = None
+            if plan is None and lenient and raw == b"\xff\xff\xff\xff":
+                continue
+            if plan is None and lenient and point.decision.name == "MSG_SELECT_CHAIN":
+                plan = [next((i for i, a in enumerate(point.actions) if a.kind == "pass"),
+                             len(point.actions) - 1)]
+            if plan is None and lenient:
+                # the copy's line no longer fits (its defender's answers index the
+                # copy's chain options): it is read as far as it went
+                break
             if plan is None:
                 raise RuntimeError(f"response {k} ({raw.hex()}) has no action "
                                    f"for {point.decision.name}")
@@ -1337,7 +1358,7 @@ def gifts(board, player, deck_path):
     return [c for c in codes if c and c not in mine]
 
 
-def usable_gifts(source, player, receiver_deck, until_turn):
+def usable_gifts(source, player, receiver_deck, until_turn, lenient=False):
     """Of the `gifts` on `player`'s field when `until_turn` begins, the
     activations they offer that player at its first main-phase prompt (the
     engine's own list: monster-zone `activate` actions of gifted codes).
@@ -1348,7 +1369,7 @@ def usable_gifts(source, player, receiver_deck, until_turn):
     from ygorl.engine.replay import Replay
     from ygorl.solver.demo import MAX_CLOSING_STEPS, PASSIVE_KINDS, canonical_response
 
-    pos = replay(source, until_turn=until_turn)
+    pos = replay(source, until_turn=until_turn, lenient=lenient)
     given = set(gifts(pos.board, player, receiver_deck))
     if not given or pos.winner is not None:
         return 0
@@ -1407,7 +1428,7 @@ def _regift(tpl, args, scratch, ms, seed, our_deck, first):
     return pool[min(score)[1]]
 
 
-def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
+def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2, lenient=False):
     """The solution line whose gifts the RECEIVER can use least (`usable_gifts`),
     ties in the solver's order (a deck that never gives monsters away plays
     exactly its first line; a gift the receiver cannot use, Seneschal, is not
@@ -1422,9 +1443,9 @@ def fewest_gifts(solutions, receiver_deck, player=1, until_turn=2):
     most given (8 of 19): a banish for us, where Seneschal gives nothing."""
     if len(solutions) < 2:
         return solutions[0] if solutions else None
-    n = [len(gifts(replay(s, until_turn=until_turn).board, player, receiver_deck))
+    n = [len(gifts(replay(s, until_turn=until_turn, lenient=lenient).board, player, receiver_deck))
          for s in solutions]
-    use = [usable_gifts(s, player, receiver_deck, until_turn) if n[i] else 0
+    use = [usable_gifts(s, player, receiver_deck, until_turn, lenient) if n[i] else 0
            for i, s in enumerate(solutions)]
     # a gift the receiver cannot use is NOT avoided: Angelechy GIVES Seneschal
     # (the black king) on purpose -- attacking it swaps it back (user,

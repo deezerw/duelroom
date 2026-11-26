@@ -7498,3 +7498,37 @@ def test_duel_log_never_names_the_ais_draws_or_sets_and_piles_hide_order(tmp_pat
     assert len(v["my_extra"]) == me["extra_count"]
     assert v["log_total"] >= len(v["log"]) and all("own" in x and "code" in x for x in v["log"])
     assert not any(k.startswith("ai_deck_") or k == "ai_deck_list" for k in v)
+
+
+def test_duel_plan_scoring_reads_a_copy_line_as_far_as_it_fits():
+    """Duel 7 (2026-11-25) sat on "thinking" for good: the AI's line was searched
+    on a copy holding your assumed hand traps, so its answers for YOUR side index
+    the copy's chain options; scoring it (game._damage / usable_gifts) replayed it
+    strictly and raised at response 196. Lenient replay steps over planned passes
+    and reads the line as far as it fits; strict still raises."""
+    import os
+    from pathlib import Path
+
+    import pytest
+
+    from skills import engine, game
+    os.environ.update(engine.env())
+
+    line = Path(__file__).parent / "fixtures" / "lines" / "duel_plan_copy_answers.yrp"
+    with pytest.raises(RuntimeError, match="has no action"):
+        game.replay(line)
+    pos = game.replay(line, lenient=True, until_turn=3)
+    assert pos.turn >= 2
+    assert game.usable_gifts(line, 0, engine.DECKS / "imported.ydk", 3, lenient=True) >= 0
+
+
+def test_a_crashed_duel_planner_passes_the_turn_instead_of_hanging():
+    """The planner's __main__ must catch a crash and close the AI's turn (plan [])
+    rather than leave the duel on "thinking" -- checked in the source, the
+    subprocess is not run here."""
+    import inspect
+
+    from skills import duel
+    src = inspect.getsource(duel)
+    main = src[src.index('if __name__ == "__main__":'):]
+    assert "except Exception" in main and 'plan="[]"' in main and "advance(" in main
