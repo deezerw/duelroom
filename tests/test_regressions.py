@@ -7874,3 +7874,29 @@ def test_duel_compare_starts_once_after_your_turn_1_and_tallies(tmp_path, monkey
     got = duel.compare_state(row, 3)
     assert got["this"]["solver"] == {"killed": False}
     assert got["survived"] == {"duels": 1, "you": 0, "solver": 1}
+
+
+def test_bc_samples_build_in_parallel_with_the_same_rows(monkeypatch):
+    """tools/ml/bc_train.build: the lines are read by several processes, the repeat
+    check runs in order in the parent -- the same rows as one process, the first
+    copy of a repeated decision kept; a broken line is counted, not fatal."""
+    import importlib.util
+    from collections import Counter
+    spec = importlib.util.spec_from_file_location("bc_train", Path(__file__).resolve().parent.parent / "tools" / "ml" / "bc_train.py")
+    bc = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "bc_train", bc)     # the pool pickles its functions by module
+    spec.loader.exec_module(bc)
+
+    def fake(demo, vocab, cards, skipped):
+        if demo == "bad":
+            raise ValueError("no replay")
+        skipped["forced"] += 1
+        return [((k,), (demo, k)) for k in demo.split(",")]
+    monkeypatch.setattr(bc, "candidates", fake)
+    raws = ["a,b", "b,c", "bad", "c,d"] * 5
+    one = bc.build(raws, lambda r: r, lambda: (None, None), 1, log=lambda m: None)
+    many = bc.build(raws, lambda r: r, lambda: (None, None), 3, log=lambda m: None)
+    assert one == many
+    rows, skipped, failed = one
+    assert rows == [("a,b", "a"), ("a,b", "b"), ("b,c", "c"), ("c,d", "d")]
+    assert failed == 5 and skipped == Counter({"forced": 15, "repeat": 26})

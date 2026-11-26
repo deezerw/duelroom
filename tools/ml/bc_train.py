@@ -19,6 +19,7 @@ kind and seat (the baseline to beat: uniform over the legal options).
 
 import argparse
 import hashlib
+import os
 import json
 import random
 import time
@@ -45,6 +46,19 @@ def turns_of(demo, cards):
 
 def samples(demo, vocab, cards, seen, skipped):
     """(obs, action, meta) of the turn player's real decisions in line 0, new ones only."""
+    out = []
+    for key, row in candidates(demo, vocab, cards, skipped):
+        if key in seen:
+            skipped["repeat"] += 1
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def candidates(demo, vocab, cards, skipped):
+    """[(key, (obs, action, meta))] of line 0's turn-player decisions; `samples`
+    drops the keys already seen (repeats are only known across lines)."""
     from ygorl.env.encoding import MAX_OPTIONS, canonical_action
     from ygorl.train.bc import line_steps, undone_steps
 
@@ -74,16 +88,73 @@ def samples(demo, vocab, cards, seen, skipped):
                 skipped["undo"] += 1
             else:
                 key = (start, player, tuple(ln.actions[:st.step + 1]))
+                out.append((key, (st.obs, canonical_action(st.obs, st.action),
+                            {"kind": demo.solver["kind"], "seat": player, "turn": turn,
+                             "n_choices": int(np.count_nonzero(st.obs["action_mask"])),
+                             "group": f"{demo.solver.get('deck_hash') or demo.deck['name']}:"
+                                      f"{demo.hand_index}"})))
+    return out
+
+
+_W = {}
+
+
+def _cards_vocab():
+    from ygorl.cards.cdb import CardVocab
+    from ygorl.engine.duel import default_cards
+    cards = default_cards()
+    return cards, CardVocab.from_db(cards)
+
+
+def _init(load_cards):
+    _W["cards"], _W["vocab"] = load_cards()
+
+
+def _one(raw):
+    """A worker's lines: (candidates, skipped, error) per line, in order."""
+    skipped = Counter()
+    try:
+        return candidates(_W["load"](raw), _W["vocab"], _W["cards"], skipped), skipped, None
+    except Exception as exc:  # noqa: BLE001 -- counted, the line is left out
+        return [], skipped, f"{type(exc).__name__}: {exc}"
+
+
+def build(raws, load, load_cards, workers, log=print):
+    """(rows, skipped, failed) over the demonstration lines `raws`, IN ORDER, so the
+    first copy of a repeated decision is kept exactly as one process kept it. Was 22
+    min on one core for 204k samples (2026-11-20); the lines are independent, only
+    the repeat check spans them, and it runs here."""
+    import multiprocessing as mp
+    import time as _t
+    seen, skipped, rows, failed, t0 = set(), Counter(), [], 0, _t.time()
+    _W["load"] = load
+    if workers > 1:
+        # fork: the workers inherit `load`; nothing has touched CUDA yet
+        pool = mp.get_context("fork").Pool(workers, _init, (load_cards,))
+        it = pool.imap(_one, raws, chunksize=8)
+    else:
+        _init(load_cards)
+        pool, it = None, map(_one, raws)
+    try:
+        for i, (cands, sk, err) in enumerate(it):
+            skipped.update(sk)
+            if err is not None:
+                failed += 1
+                if failed <= 5:
+                    log(f"line {i}: {err}")
+            for key, row in cands:
                 if key in seen:
                     skipped["repeat"] += 1
                     continue
                 seen.add(key)
-                out.append((st.obs, canonical_action(st.obs, st.action),
-                            {"kind": demo.solver["kind"], "seat": player, "turn": turn,
-                             "n_choices": int(np.count_nonzero(st.obs["action_mask"])),
-                             "group": f"{demo.solver.get('deck_hash') or demo.deck['name']}:"
-                                      f"{demo.hand_index}"}))
-    return out
+                rows.append(row)
+            if (i + 1) % 250 == 0:
+                log(f"{i + 1}/{len(raws)} lines, {len(rows)} samples ({_t.time() - t0:.0f}s)")
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+    return rows, skipped, failed
 
 
 def stack(rows):
@@ -114,6 +185,8 @@ def main():
     ap.add_argument("--heldout", type=float, default=0.2, help="share of (deck, hand) groups held out")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
+                    help="processes building samples (the result is the same for any count)")
     args = ap.parse_args()
 
     import torch
@@ -134,18 +207,10 @@ def main():
         d.pop("key", None)          # tools/ml/demos.py's resume key, not a ygorl field
         return Demonstration.from_json(d)
 
-    demos = [load(l) for l in Path(args.demos).read_text().splitlines()]
+    demos = Path(args.demos).read_text().splitlines()
     t0 = time.time()
-    seen, skipped, rows, failed = set(), Counter(), [], 0
-    for i, d in enumerate(demos):
-        try:
-            rows += samples(d, vocab, cards, seen, skipped)
-        except Exception as exc:  # noqa: BLE001 -- counted, the line is left out
-            failed += 1
-            if failed <= 5:
-                print(f"line {i} ({d.solver.get('kind')}): {type(exc).__name__}: {exc}", flush=True)
-        if (i + 1) % 250 == 0:
-            print(f"{i + 1}/{len(demos)} lines, {len(rows)} samples ({time.time() - t0:.0f}s)", flush=True)
+    rows, skipped, failed = build(demos, load, _cards_vocab, args.workers,
+                                  log=lambda m: print(m, flush=True))
     rng = random.Random(args.seed)
     if len(rows) > args.max_samples:
         rows = rng.sample(rows, args.max_samples)
