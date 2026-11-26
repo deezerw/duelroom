@@ -1323,17 +1323,11 @@ def compare(conn, did):
             + build + game.defender_args(game.respond_codes(ai_deck, cards), cards)
             + game.gy_want_args(ai_deck) + game.self_target_args() + game.own_turn_args(ours_deck))
     seed = row["seed"] % 100_000
-    r = game._solve(prefix, args, root / "solver", "t1", COMPARE_MS, seed)
-    src = r["solution"] or r["approach"]
-    sets = (0, set(game.free_sets(ours_deck, cards, prefs["interrupters"])))
-    boards = {"you": (yours, you_board)}
-    if src:
-        pos = game.replay(src, until_turn=2, free_set=sets)
-        boards["solver"] = (pos.responses, pos.board)
     target = scenarios.target_for(row["ai_deck"]) or _neutral_target(ai_deck, cards)
     respond = set(game.respond_codes(ours_deck, cards, extra=prefs["interrupters"]))
     res = {"method": game.METHOD, "kill_ms": game.OTK_MS * game.OTK_X, "turn1_ms": COMPARE_MS}
-    for who, (resp, board) in boards.items():
+
+    def judge(who, resp, board):
         st, pre = breaking.split_position(tpl, resp, root / who)
         pieces = game._pieces(board, 0, cards, prefs["interrupters"])
         killed = game.kill_check(st, pre, target, set(pieces) | respond, ai_deck,
@@ -1343,6 +1337,22 @@ def compare(conn, did):
                     "monsters": [cards.get(m["code"]).name for m in pl.get("mzone") or [] if m],
                     "backrow": [cards.get(m["code"]).name for m in pl.get("szone") or [] if m],
                     "killed": bool(killed)}
+
+    def solver_side():
+        r = game._solve(prefix, args, root / "solver", "t1", COMPARE_MS, seed)
+        src = r["solution"] or r["approach"]
+        if src:
+            pos = game.replay(src, until_turn=2,
+                              free_set=(0, set(game.free_sets(ours_deck, cards, prefs["interrupters"]))))
+            judge("solver", pos.responses, pos.board)
+
+    # your board's kill check needs nothing from the solver: both sides at once (budgets
+    # are CPU work, so the searches are the same; ~3 searches in a row -> ~2)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(2) as ex:
+        for f in [ex.submit(judge, "you", yours, you_board), ex.submit(solver_side)]:
+            f.result()
+    res = {k: res[k] for k in ("method", "kill_ms", "turn1_ms", "you", "solver") if k in res}
     out.write_text(json.dumps(res))
     return res
 
