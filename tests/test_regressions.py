@@ -7798,3 +7798,18 @@ def test_ai_follows_a_plan_that_opens_with_answers_only_the_copy_had(tmp_path, m
         "solution": None, "solutions": [], "approach": None, "log": "l"})
     duel.plan(conn, did)
     assert calls == ["build"], "a stored line that does not fit was reused"
+
+
+def test_respond_all_lists_every_card_of_the_deck(tmp_path, monkeypatch):
+    """game.RESPOND_ALL: the defender may answer with any main or Extra Deck card
+    (Mind Shuffle, Perlereino, the Tearlaments' GY Fusions were never listed);
+    off by default, so today's list is unchanged."""
+    from skills import game
+    ydk = tmp_path / "d.ydk"
+    ydk.write_text("#main\n14558127\n14558127\n77103950\n#extra\n69946549\n!side\n")
+    assert game.RESPOND_ALL is False
+    today = set(game.respond_codes(ydk))
+    assert 14558127 in today and 69946549 not in today
+    monkeypatch.setattr(game, "RESPOND_ALL", True)
+    assert set(game.respond_codes(ydk, extra=[5])) == {14558127, 77103950, 69946549, 5}
+

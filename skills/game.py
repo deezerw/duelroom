@@ -560,6 +560,13 @@ def is_hand_trap(code, cards):
 # 480 games and Kashtira (a Main Phase Quick Effect summon) once -- the very Aqua-
 # to-GY that sets off Kaleido-Heart. Off until an A/B says listing them helps.
 QUICK_RESPOND = False
+# Every card of the deck may answer (user, 2026-11-26: the counter missed how their board plays
+# on the opponent's turn -- Sulliek -> a Tearlament fused -> shuffled -> Perlereino destroys;
+# Mind Shuffle's swap; the Tearlaments' GY Fusion triggers were PASSED, never listed). The
+# core offers only what is legal where the card sits; the smart defender still ranks hand
+# traps first and holds the rest until the attacker has a monster. Off until
+# tools/experiments/quick_respond_ab.py's "all" arm measures it (both sides use it).
+RESPOND_ALL = False
 _THEIR_TURN_QUICK = re.compile(r"\(Quick Effect\): You can Special Summon this card from your hand|"
                                r"When your opponent activates[^.]*\(Quick Effect\): You can Special Summon "
                                r"this card from your hand", re.I)
@@ -584,7 +591,10 @@ def respond_codes(deck, cards=None, extra=()):
     if cards is None:
         from ygorl.engine.duel import default_cards
         cards = default_cards()
-    main = set(Deck.from_ydk(Path(deck)).main)
+    d = Deck.from_ydk(Path(deck))
+    if RESPOND_ALL:
+        return sorted(set(d.main) | set(d.extra) | {int(c) for c in extra})
+    main = set(d.main)
     quick = set(quick_codes(deck)) if QUICK_RESPOND else set()
     return sorted({c for c in main if c in scenarios.HANDTRAPS or _interrupts(c, cards)}
                   | {int(c) for c in extra} | quick)
