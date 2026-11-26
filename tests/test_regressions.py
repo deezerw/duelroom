@@ -8147,3 +8147,23 @@ def test_duel_ai_plans_with_your_face_up_board_answering(monkeypatch):
     assert drago in responded(duel.plan_args(row, cards, 2, your_hand=1, your_board=board))
     monkeypatch.setattr(game, "RESPOND_ALL", True)         # live since 2026-11-26a: every card
     assert drago in responded(duel.plan_args(row, cards, 2, your_hand=1))
+
+
+def test_bc_method_eras_keep_only_the_live_methods_games(monkeypatch):
+    """bc_train --eras method: only games of the live method (devices server / duelpc),
+    every relabelled era and board_data out; prior_ab follows the report's mode."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent / "tools" / "ml"
+    monkeypatch.syspath_prepend(str(root))
+    spec = importlib.util.spec_from_file_location("bc_train", root / "bc_train.py")
+    bc = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "bc_train", bc)
+    spec.loader.exec_module(bc)
+    raws = [{"solver": {"kind": "kill", "device": d}} for d in ("m25c", "m21c", "duelpc", "server")]
+    raws.append({"solver": {"kind": "board_kill", "tag": "h0-e1000-x"}})
+    live = [r for r in raws if bc.keep_demo(r, live_only=True)]
+    assert [r["solver"]["device"] for r in live] == ["duelpc", "server"]
+    spec2 = importlib.util.spec_from_file_location("prior_ab", root / "prior_ab.py")
+    ab = importlib.util.module_from_spec(spec2)
+    spec2.loader.exec_module(ab)
+    assert ab.trained_raws(raws, {"eras": "method"}) == live

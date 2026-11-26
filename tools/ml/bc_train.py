@@ -57,10 +57,19 @@ def demo_groups(raw):
                            raw.get("hand_index")).values())
 
 
-def keep_demo(raw, skip=SKIP_ERAS):
+# --eras method: only games of the LIVE method -- the devices games are played under
+# (server, duelpc); every relabelled era (m21b, m21c, m25c ...) and board_data left out. Each
+# bump changes how the defence answers (2026-11-26a: every card), so a kill line or a label
+# from an older era is a search against a weaker or different defender.
+LIVE_DEVICES = ("server", "duelpc")
+
+
+def keep_demo(raw, skip=SKIP_ERAS, live_only=False):
     """Train on this demonstration (a parsed demos.jsonl record)? Its era is the game's
     device label; board_data's kill lines carry kind board_kill."""
     solver = raw.get("solver") or {}
+    if live_only:
+        return solver.get("device") in LIVE_DEVICES and solver.get("kind") != "board_kill"
     return solver.get("device") not in skip and solver.get("kind") not in skip
 
 
@@ -262,8 +271,9 @@ def main():
     ap.add_argument("--heldout", type=float, default=0.2, help="share of (deck, hand) groups held out")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--eras", default="current", choices=("current", "all"),
-                    help="current: leave out lines from before the 2026-11-20 fixes (SKIP_ERAS)")
+    ap.add_argument("--eras", default="current", choices=("current", "method", "all"),
+                    help="current: leave out lines from before the 2026-11-20 fixes (SKIP_ERAS); "
+                         "method: only the live method's games (LIVE_DEVICES)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
                     help="processes building samples (the result is the same for any count)")
     args = ap.parse_args()
@@ -288,7 +298,9 @@ def main():
 
     skip = () if args.eras == "all" else SKIP_ERAS
     every = Path(args.demos).read_text().splitlines()
-    demos = [l for l in every if keep_demo(json.loads(l), skip)]
+    demos = [l for l in every if keep_demo(json.loads(l), skip, live_only=args.eras == "method")]
+    if args.eras == "method":
+        skip = ("every era but " + "/".join(LIVE_DEVICES),)
     print(f"{len(demos)} of {len(every)} lines kept (skipped eras: {', '.join(skip) or 'none'})", flush=True)
     t0 = time.time()
     rows, skipped, failed = build(demos, load, _cards_vocab, args.workers,
@@ -307,7 +319,7 @@ def main():
     held = set(groups[:max(1, int(len(groups) * args.heldout))])
     train = stack([r for r in rows if r[2]["group"] not in held])
     test = stack([r for r in rows if r[2]["group"] in held])
-    report = {"lines": len(demos), "skip_eras": list(skip), "failed_lines": failed, "skipped": dict(skipped),
+    report = {"lines": len(demos), "eras": args.eras, "skip_eras": list(skip), "failed_lines": failed, "skipped": dict(skipped),
               "train_samples": len(train), "heldout_samples": len(test),
               "groups": {"train": len(groups) - len(held), "heldout": len(held)},
               "by": dict(Counter((m["kind"], m["seat"], m["turn"]) for m in train.meta + test.meta)

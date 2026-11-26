@@ -143,8 +143,9 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--features", default="context+globals+history",
                     help="trunk outputs fed to the head: context, or context+globals+history")
-    ap.add_argument("--eras", default="current", choices=("current", "all"),
-                    help="current: leave out positions from before the 2026-11-20 fixes")
+    ap.add_argument("--eras", default="current", choices=("current", "method", "all"),
+                    help="current: leave out positions from before the 2026-11-20 fixes; "
+                         "method: only the live method's games")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
                     help="processes replaying the positions (same result for any count)")
     args = ap.parse_args()
@@ -161,7 +162,12 @@ def main():
     from skills import net_prior
 
     rows = [json.loads(l) for l in Path(args.positions).read_text().splitlines()]
-    if args.eras != "all":
+    if args.eras == "method":
+        from bc_train import LIVE_DEVICES
+        n = len(rows)
+        rows = [r for r in rows if r.get("device") in LIVE_DEVICES]
+        print(f"  {len(rows)} of {n} positions from the live method's games", flush=True)
+    elif args.eras != "all":
         # bc_train's era filter, BEFORE the budget is chosen (the old eras' 1x kill checks
         # were the most common budget, and nothing was left after it): no position from
         # before the 2026-11-20 fixes (board_data's 2026-11-19 boards are one of those eras)

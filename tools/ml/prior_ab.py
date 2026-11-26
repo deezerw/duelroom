@@ -39,6 +39,9 @@ def group_of(raw, seat=1):
 
 def trained_raws(raws, report):
     """The lines bc_train read: its era filter (a report without one kept every line)."""
+    if report.get("eras") == "method":
+        from bc_train import keep_demo
+        return [r for r in raws if keep_demo(r, live_only=True)]
     skip = set(report.get("skip_eras") or ())
     return [r for r in raws if (r.get("solver") or {}).get("device") not in skip
             and (r.get("solver") or {}).get("kind") not in skip]
