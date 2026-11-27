@@ -556,6 +556,9 @@ def _enemy_decks(name):
 
 
 OLD_SECTIONS = {
+    "m26a": "older settings (2026-11-26a): the defender gave its hand traps (Ash, Fuwalos) to a cost "
+            "before other cards, and Ghost Ogre could target a card already gone from the field",
+    "m26a-pc": "older settings (2026-11-26a, the PC's games): as m26a",
     "endgame-t1": "older settings: the enemy's turn 1 aimed at one card (Endgame Problem)",
     "brk1x": "older settings: your going-second break searched 1x (now 8x)",
     "kill1x": "older settings: their kill check searched 1x (now 16x), one-target turn 2",

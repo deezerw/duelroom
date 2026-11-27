@@ -113,9 +113,11 @@ FIRST_METHOD_SINCE = "2026-11-19T16:05:00"     # + OTK_X
 # to add games beside any of another method (or, for rows from before the
 # stamp, created before METHOD_SINCE) -- so a process that started on older
 # code and is still writing can never pass as the new method.
-METHOD = "2026-11-26a"
-METHOD_SINCE = {False: "2026-11-26T22:09:48",    # 2026-11-26a (user chose "bump with both"): every card
-                True: "2026-11-26T22:09:48"}     # answers (RESPOND_ALL), turn 1 picked by survival
+METHOD = "2026-11-27a"
+METHOD_SINCE = {False: "2026-11-27T21:20:51",    # 2026-11-27a (user: "fix everything you can so we can get
+                True: "2026-11-27T21:20:51"}     # some good data"): patches 0019 (Ghost Ogre only onto a card
+# still on the field) + 0020 (hand traps the last cards given to a cost) live in the rooted solver.
+# 2026-11-26a (user chose "bump with both"): every card answers (RESPOND_ALL), turn 1 picked by survival
 # (T1_PICK_ALWAYS, T1_FALLBACKS 6), Field Spells activated at end of turn, Super Poly dead with
 # an empty hand, patches 0016-0018 in the rooted solver (0017: Veiler / Imperm only onto a
 # monster's on-field effect). 2026-11-25c: + patch 0015, budgets count CPU work.
