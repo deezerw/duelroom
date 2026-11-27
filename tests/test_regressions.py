@@ -8468,3 +8468,10 @@ def test_defender_gives_a_floating_card_to_a_cost_first(monkeypatch):
              3: "Negate the activation."}
     monkeypatch.setattr(game, "card_text", lambda c: texts.get(c, ""))
     assert game.float_codes([3, 2, 1]) == ([1], [2])
+
+
+def test_duel_answer_search_runs_the_binary_its_flags_come_from():
+    """game.defender_args emits whatever ROOTED_BIN supports; duel's answer search pinned the
+    0018 build, which exited 2 on --opp-keep once 0020 went live (2026-11-27)."""
+    from skills import duel, game
+    assert duel.DEFEND_BIN == game.ROOTED_BIN

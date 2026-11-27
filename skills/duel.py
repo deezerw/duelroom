@@ -478,7 +478,10 @@ DEFEND_SAMPLES = 4
 # each: the budget is CPU work per thread, so two threads doubled the CPU per search.
 DEFEND_MS = 3_000
 DEFEND_THREADS = 1
-DEFEND_BIN = ROOT / "vendor" / "ygorl" / "build" / "combo-solver-0018" / "bin" / "combosolver"
+# The live rooted solver (it has 0018 --self-hand-root since METHOD 2026-11-26a): game.defender_args
+# emits the flags ROOTED_BIN has, so a pinned older build died on them -- 0018 exited 2 on
+# --opp-keep once 0020 went live (2026-11-27a) and every answer search failed.
+DEFEND_BIN = (ROOT / "vendor" / "ygorl" / "build" / "combo-solver-rooted" / "bin" / "combosolver")
 
 
 def defence_ctx(row, cards):
