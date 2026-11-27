@@ -299,6 +299,13 @@ def main():
     skip = () if args.eras == "all" else SKIP_ERAS
     every = Path(args.demos).read_text().splitlines()
     demos = [l for l in every if keep_demo(json.loads(l), skip, live_only=args.eras == "method")]
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from skills import quarantine
+    bad = quarantine.load()
+    n_kept = len(demos)
+    demos = [l for l in demos if not quarantine.demo_bad(bad, json.loads(l))]
+    print(f"  quarantine: {n_kept - len(demos)} lines from {len(bad)} pairings with a bad game left out", flush=True)
     if args.eras == "method":
         skip = ("every era but " + "/".join(LIVE_DEVICES),)
     print(f"{len(demos)} of {len(every)} lines kept (skipped eras: {', '.join(skip) or 'none'})", flush=True)

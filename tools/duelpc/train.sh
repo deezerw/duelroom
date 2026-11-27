@@ -19,8 +19,26 @@ say "data: label new games, convert lines, value positions"
 nice venv/bin/python tools/ml/demos.py | tail -4
 nice venv/bin/python tools/ml/value_data.py | tail -4
 
+say "quarantine: games a play audit found a misplay in (whole pairings left out)"
+# audit EVERY live section first: a game nobody audited must not reach training unchecked
+venv/bin/python - <<'PY'
+import sqlite3, subprocess
+from skills import game
+conn = sqlite3.connect("data/duelroom.db")
+for enemy, first, device in conn.execute(
+        "SELECT DISTINCT enemy, first, device FROM game_results WHERE method=? "
+        "AND device IN ('server','duelpc')", (game.METHOD,)):
+    out = subprocess.run(["venv/bin/python", "tools/experiments/play_audit.py", enemy,
+                          "first" if first else "second", device], capture_output=True, text=True)
+    if out.returncode:
+        raise SystemExit(f"play_audit {enemy} {device} failed:\n{out.stderr[-2000:]}")
+    print(f"  {enemy} going {'first' if first else 'second'} [{device}]:",
+          next((l.strip() for l in out.stdout.splitlines() if "quarantined" in l), "?"))
+PY
+venv/bin/python -c "from skills import db, quarantine; quarantine.dump(db.connect(), quarantine.FILE)"
+
 say "ship code + data to duelpc"
-rsync -aR tools/ml skills results/ml/demos/demos.jsonl results/ml/value/positions.jsonl "$H:duelroom/"
+rsync -aR tools/ml skills results/ml/demos/demos.jsonl results/ml/value/positions.jsonl results/ml/bad_pairings.json "$H:duelroom/"
 # the value positions replay from their game files: send the ones the PC lacks
 python3 -c "import json,sys; [print(json.loads(l)['prefix'].removeprefix('/home/deezer/duelroom/')) for l in open('results/ml/value/positions.jsonl')]" \
   | sort -u > /tmp/duelroom-train-prefixes.txt

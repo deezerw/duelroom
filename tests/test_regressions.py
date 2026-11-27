@@ -8428,3 +8428,26 @@ def test_duel_ai_searches_which_of_its_deck_cards_to_take():
     yours = [NS(kind="select", card=NS(code=bewd, loc=loc(1, 0x4)))]
     assert duel.own_picks(live(acts + yours), 0) == []                    # your card in it: a target pick
     assert duel.own_picks(live(acts, "MSG_SELECT_CHAIN"), 0) == []
+
+
+def test_quarantine_drops_every_line_and_position_of_a_bad_pairing(tmp_path):
+    """User, 2026-11-27: "if you find a problem with games then i dont want any of it in the
+    data set" -- play_audit's flagged games go to bad_games, and the trainers drop the whole
+    pairing (kill lines carry no run number)."""
+    import sqlite3
+    from skills import db, quarantine
+    conn = db.connect(tmp_path / "q.db")
+    conn.row_factory = sqlite3.Row
+    g = {"deck_hash": "dh", "hand_index": 4, "board": 0, "enemy_seed": 1000, "run": 1}
+    quarantine.record(conn, "Angelechy-Meta", True, "duelpc", [(g, ["trap_to_cost"])])
+    quarantine.dump(conn, tmp_path / "bad.json")
+    bad = quarantine.load(tmp_path / "bad.json")
+    hit = {"solver": {"kind": "kill", "deck_hash": "dh", "hand": 4, "eseed": 1000, "device": "duelpc"}}
+    assert quarantine.demo_bad(bad, hit)
+    assert not quarantine.demo_bad(bad, {"solver": {**hit["solver"], "eseed": 1001}})
+    assert not quarantine.demo_bad(bad, {"solver": {**hit["solver"], "device": "server"}})
+    assert quarantine.position_bad(bad, {"source": "games", "group": "dh:4", "eseed": 1000, "device": "duelpc"})
+    assert not quarantine.position_bad(bad, {"source": "games", "group": "dh:5", "eseed": 1000, "device": "duelpc"})
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        quarantine.load(tmp_path / "missing.json")      # never train on everything by accident

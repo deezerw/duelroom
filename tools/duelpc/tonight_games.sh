@@ -25,6 +25,8 @@ fi
 # a stopped run leaves its solvers running on the PC under their own timeout (up to ~25 min):
 # end them, so the PC is free when the user wants it back
 ssh -o ConnectTimeout=10 deezer@duelpc.local 'pkill -f "[c]ombosolver"' 2>/dev/null || true
-say "games stopped, PC solvers ended; labelling them for training"
+say "games stopped, PC solvers ended; audit (bad games quarantined) + labelling them for training"
+$P tools/experiments/play_audit.py Angelechy-Meta first duelpc | grep -v '^    '
+[ "${POWEROFF:-0}" = 1 ] && ssh -o ConnectTimeout=10 deezer@duelpc.local 'sudo -n systemctl poweroff' && say "duelpc powered off"
 $P tools/ml/demos.py | tail -3
 say "done"

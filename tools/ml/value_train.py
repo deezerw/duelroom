@@ -176,6 +176,11 @@ def main():
         rows = [r for r in rows if r.get("device") not in SKIP_ERAS
                 and not (r["source"] == "board_data" and "board_kill" in SKIP_ERAS)]
         print(f"  {len(rows)} of {n} positions after the pre-2026-11-20 eras", flush=True)
+    from skills import quarantine
+    bad = quarantine.load()
+    n = len(rows)
+    rows = [r for r in rows if not quarantine.position_bad(bad, r)]
+    print(f"  quarantine: {n - len(rows)} positions from pairings with a bad game left out", flush=True)
     budgets = Counter(r["otk_ms"] for r in rows)
     otk = args.otk_ms or budgets.most_common(1)[0][0]
     rows = [r for r in rows if r["otk_ms"] == otk and Path(r["prefix"]).exists()]

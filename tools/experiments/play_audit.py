@@ -37,6 +37,10 @@ sys.path.insert(0, str(ROOT))
 DECK = "imported"
 
 
+# every problem a game can be quarantined for (user, 2026-11-27: "if you find a problem with
+# games then i dont want any of it in the data set"): the gate's lines AND trap-to-a-cost
+PROBLEMS = ("own_turn_waste", "self_negate", "free_left", "hand_discards", "trap_to_cost",
+            "avoidable_gift")
 GATE_SHARE = 0.02     # --gate: a must-be-zero line over this share of the games fails
 
 
@@ -63,7 +67,7 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
     from ygorl.engine.duel import default_cards
     from ygorl.engine.replay import Replay
 
-    from skills import card_db, db, drill, engine, game, impact, trainer
+    from skills import card_db, db, drill, engine, game, impact, quarantine, trainer
 
     first = side == "first"
     cards = default_cards()
@@ -93,7 +97,10 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
     marked = trainer.prefs(conn, DECK if first else enemy)["interrupters"]
     counted, fired = Counter(), Counter()
     outcomes = Counter(g["outcome"] for g in games)
+    flagged = []          # (game row, [problems]): every game with a must-be-zero hit
     for g in games:
+        before = (sum(c_waste.values()), sum(c_selfneg.values()), sum(c_free.values()),
+                  sum(c_disc.values()), sum(c_costtrap.values()), avoidable)
         src = impact.source(DECK, enemy, g)
         t1 = conn.execute("SELECT prefix FROM game_turn1 WHERE deck_hash=? AND enemy=? AND hand_index=? "
                           "AND board=? AND enemy_seed=? AND first=? AND device=?",
@@ -177,8 +184,12 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                         if first else ((0, 1),)):
             pos = start if turn == 1 else None
             if turn == 2:
+                # the position turn 3 STARTED from (the game's closed turn 2): replaying the
+                # final line read the hand at the END of our turn 3, where cards it added there
+                # (a Verdict returned on our turn) were counted as left on turn 2 (2026-11-27)
+                t3 = Path(src).parent.parent / "t2" / "prefix.yrpX"
                 try:
-                    pos = game.replay(src, until_turn=3).board
+                    pos = game.replay(t3 if t3.exists() else src, until_turn=3).board
                 except Exception:  # noqa: BLE001 -- a game that ended on turn 2
                     continue
             hand = (pos["players"][p].get("hand") or []) if pos else []
@@ -193,6 +204,11 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                 # could not be activated: not left by choice
                 if c in free[p] and not (game._field_spell(c) and (fzone or c in on)):
                     c_free[(who(p), nm(c))] += 1
+        after = (sum(c_waste.values()), sum(c_selfneg.values()), sum(c_free.values()),
+                 sum(c_disc.values()), sum(c_costtrap.values()), avoidable)
+        probs = [k for k, a, b in zip(PROBLEMS, before, after) if b > a]
+        if probs:
+            flagged.append((g, probs))
 
     goals = [r for r in conn.execute("SELECT hand_index, best_goal FROM trainer_hands WHERE deck_hash=? "
                                      "AND best_goal IS NOT NULL", (dh,))]
@@ -215,10 +231,12 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
               f"avoidable at the same goal progress: {avoidable})")
     line("free left", c_free)
     line("hand discards", c_disc)
-    line("trap to a cost", c_costtrap, "  (informational: the defender's 0-ATK pick, patch 0020)")
+    line("trap to a cost", c_costtrap)
     say(f"  {'dead targets':15} {len(dead_t):4} in stored goals {dead_t[:4]} (the games strip them: live_goal)")
     bad = {"own-turn waste": sum(c_waste.values()), "self-negate": sum(c_selfneg.values()),
-           "free left": sum(c_free.values()), "hand discards": sum(c_disc.values())}
+           "free left": sum(c_free.values()), "hand discards": sum(c_disc.values()),
+           # must-be-zero since patch 0020 went live (METHOD 2026-11-27a)
+           "trap to a cost": sum(c_costtrap.values())}
     if not first:
         bad["avoidable usable gifts"] = avoidable
     say(f"  pieces (start of turn 2, the {'our' if first else 'enemy'} board): counted -> fired there")
@@ -230,7 +248,10 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
               "free_left": sum(c_free.values()), "hand_discards": sum(c_disc.values()),
               "gifts": gifts if not first else None, "usable_gifts": usable if not first else None,
               "avoidable_gifts": avoidable if not first else None,
-              "pieces_counted": sum(counted.values()), "pieces_fired": sum(fired.values())}
+              "pieces_counted": sum(counted.values()), "pieces_fired": sum(fired.values()),
+              "flagged": len(flagged)}
+    quarantine.record(conn, enemy, first, device, flagged)
+    say(f"  quarantined     {len(flagged):4} games kept out of training (bad_games)")
     if gate:
         over = {k: v for k, v in bad.items() if n and v > GATE_SHARE * n}
         if not n:

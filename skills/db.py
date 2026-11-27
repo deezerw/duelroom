@@ -340,6 +340,20 @@ CREATE TABLE IF NOT EXISTS game_stops (
     PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
 );
 
+CREATE TABLE IF NOT EXISTS bad_games (       -- games a play audit found a misplay in (2026-11-27)
+    deck_hash   TEXT NOT NULL,
+    enemy       TEXT NOT NULL,
+    hand_index  INTEGER NOT NULL,
+    board       INTEGER NOT NULL,
+    enemy_seed  INTEGER NOT NULL,
+    first       INTEGER NOT NULL,
+    device      TEXT NOT NULL,
+    run         INTEGER NOT NULL,
+    problems    TEXT NOT NULL,          -- comma list (play_audit.PROBLEMS)
+    found       TEXT NOT NULL,
+    PRIMARY KEY (deck_hash, enemy, hand_index, board, enemy_seed, first, device, run)
+);
+
 CREATE TABLE IF NOT EXISTS trainer_prefs (
     deck   TEXT NOT NULL,
     kind   TEXT NOT NULL,

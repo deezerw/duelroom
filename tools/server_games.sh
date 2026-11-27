@@ -18,6 +18,7 @@ if $P tools/experiments/play_audit.py "$ENEMY" "$SIDE" server --gate; then
 else
   say "smoke audit FAILED: long run skipped (fix first)"
 fi
-say "labelling the games for training"
+say "audit (bad games quarantined) + labelling the games for training"
+$P tools/experiments/play_audit.py "$ENEMY" "$SIDE" server | grep -v '^    '
 $P tools/ml/demos.py | tail -3
 say "done"
