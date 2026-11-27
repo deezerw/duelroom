@@ -139,7 +139,9 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       (build/combo-solver-0020 = 0002-0020, in build_rooted_solver.sh; game.defender_args
       emits it for is_hand_trap cards once the binary has it): its hand traps go last. Left:
       the paired kill-check A/B (RESPOND_ALL's +10 / -0 of 59 was measured WITHOUT it).
-- [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
+- [x] 2026-11-27: METHOD 2026-11-27a -- 0019 + 0020 live (36351a2), 26a sections -> m26a / m26a-pc.
+      Quarantine (d4bc192): play_audit's flagged games -> bad_games; train.sh audits every live
+      section and the trainers drop whole bad pairings (user: "dont include any games with bad data").
 
 - [ ] The games' C++ smart defender (patch 0004 DefenderPick) has the cost bug fixed in the duel
       2026-11-27 (`duel._floats`): it gives up its lowest-ATK own card, never the one that floats
