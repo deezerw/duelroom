@@ -8292,3 +8292,43 @@ def test_demos_drop_records_whose_replay_a_relabel_moved(tmp_path):
     assert dm.prune_moved(f) == 1
     assert [_json.loads(l)["key"] for l in f.read_text().splitlines()] == ["a"]
     assert dm.prune_moved(f) == 0
+
+
+def test_duel_keeps_its_plan_when_you_pass_where_it_expected_an_answer(monkeypatch):
+    """Speed (user, 2026-11-27: "does it really need to search twice ... if i am just
+    going to activate it or not"): declining where the plan had you answer keeps the
+    AI's line while its next step fits (`_still_fits`); a different answer re-plans."""
+    import json
+
+    from skills import duel
+
+    PASS, ASH, AI1, AI2 = duel._PASS.hex(), "00000000", "01000000", "02000000"
+    saved = {}
+
+    class Point:
+        player, actions = 0, [object(), object()]
+
+    class FakeLive:
+        def __init__(self, row):
+            self.responses, self.point = [], Point()
+
+        def act(self, i):
+            self.responses.append(bytes.fromhex(PASS if i == 0 else "05000000"))
+
+        def close(self):
+            pass
+
+    row = {"status": "your move", "user_seat": 0, "actions": "[]",
+           "plan": json.dumps([ASH, AI1, AI2])}
+    monkeypatch.setattr(duel, "get", lambda conn, did: row)
+    monkeypatch.setattr(duel, "Live", FakeLive)
+    monkeypatch.setattr(duel, "_save", lambda conn, did, **c: saved.update(c))
+    monkeypatch.setattr(duel, "advance", lambda conn, did: "ok")
+    monkeypatch.setattr(duel, "_still_fits", lambda live, rest, you: rest)
+    duel.user_act(None, 1, 0)                       # you pass instead of the planned Ash
+    assert json.loads(saved["plan"]) == [AI1, AI2]
+    monkeypatch.setattr(duel, "_still_fits", lambda live, rest, you: None)
+    duel.user_act(None, 1, 0)                       # ... and its next step no longer fits
+    assert saved["plan"] is None
+    duel.user_act(None, 1, 1)                       # a different answer than planned
+    assert saved["plan"] is None

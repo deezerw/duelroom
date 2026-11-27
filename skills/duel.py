@@ -713,6 +713,22 @@ def _plan_step(live, plan):
 _PASS = b"\xff\xff\xff\xff"      # a declined chain window
 
 
+def _still_fits(live, rest, you):
+    """`rest` if its first AI step plays here as planned, else None (re-plan). Your
+    own next decision is judged when it comes (user_act)."""
+    from ygorl.engine.branch import actions_for_response
+    from ygorl.solver.demo import canonical_response
+    p = live.point
+    if not rest or p is None:
+        return None
+    if p.player == you:
+        return rest
+    try:
+        return rest if actions_for_response(p.state, canonical_response(p.decision, bytes.fromhex(rest[0]))) else None
+    except Exception:  # noqa: BLE001 -- a response this prompt cannot take
+        return None
+
+
 def advance(conn, did, spawn=True):
     """Play every AI decision until it is your move, the AI must think, or the
     duel is over. Returns the new status."""
@@ -842,7 +858,17 @@ def user_act(conn, did, idx):
             # the plan assumed an answer of yours: the same one moves it on, any
             # other makes it stale (None: the AI re-plans at its next decision)
             new = [r.hex() for r in live.responses[n:]]
-            plan = plan[len(new):] if new and plan[:len(new)] == new else (plan if not new else None)
+            if new and plan[:len(new)] == new:
+                plan = plan[len(new):]
+            elif new == [_PASS.hex()] and _PASS.hex() != plan[0]:
+                # you declined where it planned around your answer: its line usually
+                # still holds, so keep it while its NEXT step fits here exactly; a
+                # changed position (the effect you let resolve asks something new)
+                # re-plans as before (user, 2026-11-27: "does it really need to search
+                # twice ... if i am just going to activate it or not")
+                plan = _still_fits(live, plan[1:], row["user_seat"])
+            elif new:
+                plan = None
         _save(conn, did, actions=json.dumps(acts), plan=json.dumps(plan) if plan is not None else None)
     finally:
         live.close()
@@ -1190,8 +1216,19 @@ def plan(conn, did):
             main = Deck.from_ydk(engine.DECKS / f"{row['ai_deck']}.ydk").main
             spell = next((x for x in main if cards.get(x) is not None and cards.get(x).type & 0x2), None)
             neutral = ["--target", f"{spell}@mzone"] if spell else targets
-            variants = [("lethal", [])] + [(f"answer-{c}", ["--resolve", str(c), "--hint", str(c)])
-                                           for c in answer_cards(row, live, cards)]
+            # "lethal using answer X" only when your field changed since this turn's last
+            # plan: a re-plan after your hand trap / pass faces the same cards of yours
+            # (stored duels to 2026-11-27: 66 answer searches, 0 kills; plain lethal 13 of 42)
+            mine = board_now["players"][you]
+            sig = json.dumps(sorted(m["code"] for z in ("mzone", "szone")
+                                    for m in mine.get(z) or [] if m and m.get("code")))
+            seen_f = Path(row["template"]).parent / "answer_fields.json"
+            seen = json.loads(seen_f.read_text()) if seen_f.exists() else {}
+            again = seen.get(str(turn)) == sig
+            seen_f.write_text(json.dumps({**seen, str(turn): sig}))
+            variants = [("lethal", [])] + ([] if again else
+                        [(f"answer-{c}", ["--resolve", str(c), "--hint", str(c)])
+                         for c in answer_cards(row, live, cards)])
             def one(kv):
                 k, (label, extra) = kv
                 return k, label, solve(prefix, base + neutral + extra + ["--goal-win", "--stop-on-win",

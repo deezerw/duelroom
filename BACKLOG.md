@@ -167,6 +167,7 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       first: on 2026-11-19 only 4 of 1063 boards survived a 16x kill check.
 
 ### Pinned (user, 2026-11-26: "lets pin that for now") -- duel AI: smarter AND less think time
+- [x] 2026-11-27: answer searches now skipped on a re-plan with your field unchanged, and a pass where the plan expected your answer keeps the plan if its next step fits (`duel._still_fits`). Stored duels: answer variants 0 kills in 66 searches, plain lethal 13 of 42 -- dropping them outright is the next step if more duels agree.
 - [ ] (3) Measure which of the AI turn's kill searches find kills (plain lethal vs "lethal
       using answer X") on the 31 stored positions; if the answer variants add nothing, give
       their cores to extra plain-lethal seeds (randomized search: more seeds = kill sooner).
