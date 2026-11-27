@@ -8333,3 +8333,19 @@ def test_duel_keeps_its_plan_when_you_pass_where_it_expected_an_answer(monkeypat
     monkeypatch.setattr(duel, "_still_fits", lambda live, rest, you: rest)
     duel.user_act(None, 1, 1)                       # a different answer, still on course
     assert json.loads(saved["plan"]) == [AI1, AI2]
+
+
+def test_duel_ai_pays_a_cost_with_the_card_that_floats():
+    """Duel 11 (user, 2026-11-27: "heavenly spheres didnt activate right"): it tributed
+    Blue-Eyes White Phantom Beast from hand for Hieratic Seal of the Heavenly Spheres'
+    cost; Spheres itself floats ("If this card is Tributed": a Dragon from the Deck)."""
+    from types import SimpleNamespace as NS
+
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    card = lambda code, where: NS(code=code, loc=NS(controller=0, location=where))  # noqa: E731
+    assert duel._floats(card(24361622, 0x4), cards)            # Heavenly Spheres
+    assert not duel._floats(card(14558127, 0x2), cards)        # Ash Blossom
+    assert not duel._floats(card(30397786, 0x2), cards)        # Phantom Beast

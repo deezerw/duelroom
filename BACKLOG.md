@@ -141,6 +141,11 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       the paired kill-check A/B (RESPOND_ALL's +10 / -0 of 59 was measured WITHOUT it).
 - [ ] Rebuild both binaries, regression tests, bump METHOD, relabel 2026-11-25c.
 
+- [ ] The games' C++ smart defender (patch 0004 DefenderPick) has the cost bug fixed in the duel
+      2026-11-27 (`duel._floats`): it gives up its lowest-ATK own card, never the one that floats
+      (duel 11: Phantom Beast tributed for Heavenly Spheres, not Spheres itself). Port to the solver
+      with the next METHOD bump.
+
 ### Phase 2 -- calibration (duelpc days)
 - [ ] Run `day.sh` on the new METHOD (going-first baseline, starters A/B, t3 plateau,
       side gate, board data) -- plus one hidden-hand sample of the going-first baseline,

@@ -618,6 +618,18 @@ def _solver(conn, binary=None):
     return solve
 
 
+_FLOAT = re.compile(r"If this card is (Tributed|sent to the GY)\b|"
+                    r"If this card (in your possession )?is sent from the field to the GY", re.I)
+
+
+def _floats(c, cards):
+    """A card whose own effect fires as it is tributed / sent to the GY: the cheapest cost.
+    "sent from the field" only counts where it is on the field (0x4 monster, 0x8 S/T)."""
+    from . import game
+    m = _FLOAT.search(game.card_text(c.code) or "") if c.code else None
+    return bool(m) and ("field" not in m.group(0) or bool(c.loc.location & 0xC))
+
+
 def _follow_up(live, ai, cards, dead=(), keys=()):
     """Targets / costs of the AI's own effect. Where one of YOUR cards can be
     chosen: your most valuable -- an interruption piece first, then the
@@ -640,6 +652,11 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
         if owner != ai and c.code in keys:
             # your deck's kill keys first, most important first (patch 0012 in Python)
             return (2 + len(keys) - list(keys).index(c.code), 0)
+        if owner == ai and _floats(c, cards):
+            # its own card that pays itself back when it goes (duel 11: it tributed Blue-Eyes
+            # White Phantom Beast from hand for Heavenly Spheres' cost, not Spheres itself,
+            # whose "If this card is Tributed" summons a Dragon from the Deck)
+            return (-1, 0)
         return (1 if c.code in pieces[owner] else 0, (card.attack if card is not None else 0) or 0)
 
     opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
