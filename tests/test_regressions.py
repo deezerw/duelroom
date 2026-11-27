@@ -8475,3 +8475,17 @@ def test_duel_answer_search_runs_the_binary_its_flags_come_from():
     0018 build, which exited 2 on --opp-keep once 0020 went live (2026-11-27)."""
     from skills import duel, game
     assert duel.DEFEND_BIN == game.ROOTED_BIN
+
+
+def test_solve_refuses_a_flag_its_binary_does_not_take(tmp_path):
+    """A solver exits 2 on an unknown flag, which read as "no line found" -- duel mode's
+    pinned 0018 build got --opp-keep (2026-11-27). _solve names the flag instead."""
+    from skills import game
+    fake = tmp_path / "combosolver"
+    fake.write_text("#!/bin/sh\necho '  --root <p>  --opp-keep <c>'\n")
+    fake.chmod(0o755)
+    assert game._unknown_flags(["--root", "x", "--opp-keep", "1"], fake) == []
+    assert game._unknown_flags(["--root", "x", "--opp-float", "1"], fake) == ["--opp-float"]
+    assert game._unknown_flags(["--opp-float"], tmp_path / "missing") == []    # nothing to read
+    with pytest.raises(ValueError, match="--opp-float"):
+        game._solve("ref", ["--opp-float", "1"], tmp_path / "s", "t", 1, 1, binary=fake)

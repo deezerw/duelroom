@@ -219,12 +219,25 @@ NEGATE_LIVE = None
 _bin_help = {}
 
 
-def _bin_has(flag):
-    key = str(ROOTED_BIN)
+def _bin_has(flag, binary=None):
+    b = Path(binary or ROOTED_BIN)
+    key = str(b)
     if key not in _bin_help:
-        _bin_help[key] = subprocess.run([key, "--help"], capture_output=True,
-                                        text=True).stdout if ROOTED_BIN.exists() else ""
+        try:
+            _bin_help[key] = subprocess.run([key, "--help"], capture_output=True, text=True,
+                                            timeout=30).stdout if b.exists() else ""
+        except (OSError, subprocess.SubprocessError):
+            return False            # unreadable help: not cached, nothing claimed
     return flag in _bin_help[key]
+
+
+def _unknown_flags(args, binary=None):
+    """The flags in `args` the binary's --help does not list (none checked when there is no
+    binary / help to read). A solver exits 2 on one, which read as "no line" (2026-11-27:
+    duel mode's pinned 0018 build got 0020's --opp-keep and every answer search failed)."""
+    if not _bin_has("--", binary):
+        return []
+    return [a for a in map(str, args) if a.startswith("--") and not _bin_has(a, binary)]
 
 
 # Futures (patch 0014 --reseed; user chose, 2026-11-25, from the flaw audit "the AI
@@ -411,6 +424,9 @@ def _solve(ref, args, scratch, label, ms, seed, threads=2, binary=None,
     wd = Workdir.create(scratch / f"wd-{label}")
     out = scratch / f"out-{label}"
     out.mkdir(parents=True, exist_ok=True)
+    bad = _unknown_flags(args, binary)
+    if bad:
+        raise ValueError(f"{label}: {binary or ROOTED_BIN} does not take {bad}")
     cmd = [str(binary or ROOTED_BIN), str(ref), "--workdir", str(wd.path)]
     for d in wd.scriptdirs:
         cmd += ["--scriptdir", str(d)]
