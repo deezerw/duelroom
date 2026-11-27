@@ -5,7 +5,6 @@
 # /duelpc/boot with "linux" for a boot it asked for, "windows" otherwise. Anything but
 # "linux" -- the user's power button, or no server -- reboots straight into Windows.
 SERVER=${DUELPC_SERVER:-https://10.0.0.96:8446}
-WINDOWS="Windows Boot Manager (on /dev/nvme0n1p1)"
 answer=""
 i=0
 while [ $i -lt 12 ]; do                   # up to a minute for the network to come up
@@ -15,4 +14,8 @@ while [ $i -lt 12 ]; do                   # up to a minute for the network to co
 done
 logger -t boot-choice "server says: ${answer:-nothing}"
 [ "$answer" = "linux" ] && exit 0
-grub-reboot "$WINDOWS" && systemctl reboot
+# The firmware boots Windows itself (BootNext), not GRUB chainloading it: BitLocker seals its key
+# to the firmware -> Windows Boot Manager path, and a GRUB chainload changes the TPM measurements,
+# so Windows asked for the recovery key every time (user, 2026-11-26).
+WIN=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\* Windows Boot Manager.*/\1/p' | head -1)
+[ -n "$WIN" ] && efibootmgr --bootnext "$WIN" >/dev/null && systemctl reboot
