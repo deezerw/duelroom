@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 def record(conn, enemy, first, device, flagged):
     """Store the audit's flagged games [(game_results row, [problem, ...])]."""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # the audit covers the whole section: its last verdict replaces the one before
+    conn.execute("DELETE FROM bad_games WHERE enemy=? AND first=? AND device=?",
+                 (enemy, int(bool(first)), device))
     conn.executemany(
         "INSERT OR REPLACE INTO bad_games VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(g["deck_hash"], enemy, g["hand_index"], g["board"], g["enemy_seed"], int(bool(first)),

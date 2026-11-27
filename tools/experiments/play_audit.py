@@ -41,7 +41,8 @@ DECK = "imported"
 # games then i dont want any of it in the data set"): the gate's lines AND trap-to-a-cost
 PROBLEMS = ("own_turn_waste", "self_negate", "free_left", "hand_discards", "trap_to_cost",
             "avoidable_gift")
-GATE_SHARE = 0.02     # --gate: a must-be-zero line over this share of the games fails
+GATE_SHARE = 0.02
+DEBUG = bool(__import__("os").environ.get("AUDIT_DEBUG"))     # --gate: a must-be-zero line over this share of the games fails
 
 
 def _avoidable(t1_dir, deck):
@@ -121,7 +122,8 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
             if u and _avoidable(Path(t1["prefix"]).parent.parent, deck):
                 avoidable += 1
         rep = Replay.from_yrp(Path(src))
-        state = {"turn": 0, "tp": None, "chain": [], "fired": set(), "solving": None}
+        state = {"turn": 0, "tp": None, "chain": [], "fired": set(), "solving": None,
+                 "prompt": {}}     # player -> its last card prompt: (min, own non-hand-trap choices)
         last_turn = 3 if first else 2        # the game's final searched turn
         hands = {}
 
@@ -133,6 +135,13 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                 for raw in M.split_messages(buf):
                     m = M.decode_message(raw)
                     k = type(m).__name__
+                    if k in ("SelectCard", "SelectUnselectCard", "SelectTribute"):
+                        opts = m.cards if k != "SelectUnselectCard" else m.selectable
+                        state["prompt"][m.player] = (max(1, m.min), sum(
+                            1 for o in opts if o.loc.controller == m.player
+                            and not game.is_hand_trap(o.code, cards)))
+                    if k in ("Chaining", "ChainSolved", "ChainEnd", "NewTurn"):
+                        state["prompt"].clear()   # a cost's prompt follows its Chaining: no stale one
                     if k == "NewTurn":
                         state["turn"] += 1
                         state["tp"] = m.player
@@ -173,7 +182,15 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
                         # unless it is the card's OWN activation cost (Ash discards itself): held
                         # until the next chain link says which
                         ch = state["chain"]
-                        if not (ch and ch[-1][0] == m.code):     # not its own activation's cost
+                        # forced (2026-11-27): the cost prompt offered fewer of its other
+                        # cards than the cost needed -- patch 0020 gives a hand trap only then
+                        need, other = state["prompt"].get(m.previous.controller, (1, 1))
+                        if DEBUG:
+                            print("  cost", nm(m.code), "game", g["hand_index"], g["enemy_seed"], g["run"],
+                                  "need", need, "other own choices", other, file=sys.stderr)
+                        if other < need:
+                            pass
+                        elif not (ch and ch[-1][0] == m.code):     # not its own activation's cost
                             c_costtrap[(who(m.previous.controller), nm(m.code))] += 1
 
         rep.duel().replay(rep.responses, observer=O())
