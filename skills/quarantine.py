@@ -9,7 +9,11 @@ for none of it."""
 from datetime import datetime, timezone
 
 
-def record(conn, enemy, first, device, flagged):
+def audit_key(enemy, first, device):
+    return f"audit:{enemy}:{int(bool(first))}:{device}"
+
+
+def record(conn, enemy, first, device, flagged, games=None):
     """Store the audit's flagged games [(game_results row, [problem, ...])]."""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     # the audit covers the whole section: its last verdict replaces the one before
@@ -19,6 +23,10 @@ def record(conn, enemy, first, device, flagged):
         "INSERT OR REPLACE INTO bad_games VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(g["deck_hash"], enemy, g["hand_index"], g["board"], g["enemy_seed"], int(bool(first)),
           device, g["run"], ",".join(p), now) for g, p in flagged])
+    # when this section was last audited, and over how many games: "0 quarantined" and
+    # "never audited" must not read the same (tools/night_report.py)
+    conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)",
+                 (audit_key(enemy, first, device), f"{now} {games}"))
     conn.commit()
 
 

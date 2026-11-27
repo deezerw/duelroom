@@ -267,7 +267,7 @@ def main(enemy, side, device="server", since=None, gate=False, quiet=False):
               "avoidable_gifts": avoidable if not first else None,
               "pieces_counted": sum(counted.values()), "pieces_fired": sum(fired.values()),
               "flagged": len(flagged)}
-    quarantine.record(conn, enemy, first, device, flagged)
+    quarantine.record(conn, enemy, first, device, flagged, games=n)
     say(f"  quarantined     {len(flagged):4} games kept out of training (bad_games)")
     if gate:
         over = {k: v for k, v in bad.items() if n and v > GATE_SHARE * n}

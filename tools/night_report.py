@@ -58,6 +58,27 @@ def main():
         extra = f", killed on turn 2 {l2 / n:.0%}" if first else ""
         print(f"  vs {enemy:20} going {side:6} [{dev:10}] {n:5} games, won {w / n:.0%}{extra}")
 
+    # training data (user, 2026-11-27: "dont include any games with bad data"): the live
+    # method's games, the quarantined ones and why, and where tonight's runs got to
+    sys.path.insert(0, str(ROOT))
+    from skills import game
+    print(f"\n== training data: METHOD {game.METHOD} games, quarantine (bad_games) ==")
+    for enemy, first, dev, n in conn.execute(
+            "SELECT enemy, first, device, COUNT(*) FROM game_results WHERE method=? "
+            "GROUP BY 1, 2, 3", (game.METHOD,)):
+        bad = conn.execute("SELECT problems, COUNT(*) FROM bad_games WHERE enemy=? AND first=? "
+                           "AND device=? GROUP BY 1", (enemy, first, dev)).fetchall()
+        why = ", ".join(f"{p} {k}" for p, k in bad) or "none"
+        seen = conn.execute("SELECT value FROM meta WHERE key=?",
+                            (f"audit:{enemy}:{first}:{dev}",)).fetchone()
+        audit = (f"audited {seen[0].split()[0][:16]} over {seen[0].split()[1]} games" if seen
+                 else "NOT AUDITED YET")
+        print(f"  vs {enemy:20} going {'first' if first else 'second':6} [{dev:7}] {n:4} games, "
+              f"quarantined {sum(k for _, k in bad)} ({why}); {audit}")
+    for log in sorted((ROOT / "results/ml").glob("*_games_*.log"), key=lambda p: p.stat().st_mtime)[-2:]:
+        steps = [l.strip("= ") for l in log.read_text(errors="replace").splitlines() if l.startswith("===")]
+        print(f"  {log.name}: " + (" | ".join(steps[-3:]) or "no steps yet"))
+
     print("\n== server jobs ==")
     for row in conn.execute("SELECT id, kind, state, finished_at FROM jobs ORDER BY id DESC LIMIT 6"):
         print("  ", *row)

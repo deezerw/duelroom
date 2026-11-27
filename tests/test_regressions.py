@@ -8443,6 +8443,8 @@ def test_quarantine_drops_every_line_and_position_of_a_bad_pairing(tmp_path):
     conn.row_factory = sqlite3.Row
     g = {"deck_hash": "dh", "hand_index": 4, "board": 0, "enemy_seed": 1000, "run": 1}
     quarantine.record(conn, "Angelechy-Meta", True, "duelpc", [(g, ["trap_to_cost"])])
+    assert conn.execute("SELECT value FROM meta WHERE key=?",
+                        (quarantine.audit_key("Angelechy-Meta", True, "duelpc"),)).fetchone()
     quarantine.dump(conn, tmp_path / "bad.json")
     bad = quarantine.load(tmp_path / "bad.json")
     hit = {"solver": {"kind": "kill", "deck_hash": "dh", "hand": 4, "eseed": 1000, "device": "duelpc"}}
