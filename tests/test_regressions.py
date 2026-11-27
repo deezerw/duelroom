@@ -8297,7 +8297,7 @@ def test_demos_drop_records_whose_replay_a_relabel_moved(tmp_path):
 def test_duel_keeps_its_plan_when_you_pass_where_it_expected_an_answer(monkeypatch):
     """Speed (user, 2026-11-27: "does it really need to search twice ... if i am just
     going to activate it or not"): declining where the plan had you answer keeps the
-    AI's line while its next step fits (`_still_fits`); a different answer re-plans."""
+    AI's line while its next step fits (`_still_fits`), as does any off-plan move."""
     import json
 
     from skills import duel
@@ -8330,5 +8330,6 @@ def test_duel_keeps_its_plan_when_you_pass_where_it_expected_an_answer(monkeypat
     monkeypatch.setattr(duel, "_still_fits", lambda live, rest, you: None)
     duel.user_act(None, 1, 0)                       # ... and its next step no longer fits
     assert saved["plan"] is None
-    duel.user_act(None, 1, 1)                       # a different answer than planned
-    assert saved["plan"] is None
+    monkeypatch.setattr(duel, "_still_fits", lambda live, rest, you: rest)
+    duel.user_act(None, 1, 1)                       # a different answer, still on course
+    assert json.loads(saved["plan"]) == [AI1, AI2]

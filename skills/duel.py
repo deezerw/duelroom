@@ -860,15 +860,12 @@ def user_act(conn, did, idx):
             new = [r.hex() for r in live.responses[n:]]
             if new and plan[:len(new)] == new:
                 plan = plan[len(new):]
-            elif new == [_PASS.hex()] and _PASS.hex() != plan[0]:
-                # you declined where it planned around your answer: its line usually
-                # still holds, so keep it while its NEXT step fits here exactly; a
-                # changed position (the effect you let resolve asks something new)
-                # re-plans as before (user, 2026-11-27: "does it really need to search
-                # twice ... if i am just going to activate it or not")
-                plan = _still_fits(live, plan[1:], row["user_seat"])
             elif new:
-                plan = None
+                # off its plan (you declined where it planned around your answer, or
+                # answered where it expected none): "if things havent gone off course
+                # then continue with the plan" (user, 2026-11-27) -- kept while its NEXT
+                # step plays here exactly; a position that asks something new re-plans
+                plan = _still_fits(live, plan[len(new):], row["user_seat"])
         _save(conn, did, actions=json.dumps(acts), plan=json.dumps(plan) if plan is not None else None)
     finally:
         live.close()
