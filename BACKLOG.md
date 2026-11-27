@@ -121,6 +121,11 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       activatable Traps, a Field Spell with its zone taken, five full S/T zones and a hand trap
       paying its OWN activation cost were counted as misplays (64 -> 1 "trap to a cost": patch
       0020 matters in ~1 game in 44).
+- [ ] **Read 2026-11-27 (METHOD 27a, duelpc Angelechy smoke, game_turn1.fallback joined to the
+      games): DO NOT cap at 2 yet.** Boards kept at candidate 3 / 5 / 6: 5 games, 0 killed on turn
+      2, 4 won; candidate 1: 10 games, 6 killed; full board (0): 26 games, 21 killed. Blue-Eyes
+      (m26a): candidates 3 / 4: 2 games, 0 killed. Small (7 late saves), but every one a save the
+      cap would drop; re-read on Monday's long run before deciding.
 - [ ] **T1_FALLBACKS 6 -> 2 (speed, next bump; measure on tonight's games first):** vs
       Angelechy ~94% of boards die, so the survival pick nearly always runs its worst case (full
       + 6 candidates, 7 look-ahead kill checks). In the 23 A/B positions (results-always.jsonl)
