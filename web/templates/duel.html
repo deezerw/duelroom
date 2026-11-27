@@ -104,6 +104,11 @@
   .feed .new{color:var(--ink);animation:flash 1.6s ease-out}
   .feed .sep{color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.03em}
   @keyframes flash{from{background:#7aa2f733}to{background:transparent}}
+  /* a card in flight from where it was to where it went (user, 2026-11-27: "the animations of
+     where things are coming from more clear"), captioned with where it is going */
+  .fly{position:fixed;left:0;top:0;inset:auto;margin:0;z-index:40;pointer-events:none;box-shadow:0 8px 22px #000d}
+  .fly span{position:absolute;left:50%;bottom:-16px;transform:translateX(-50%);white-space:nowrap;font-size:10.5px;
+            font-weight:800;color:#111;background:#e0af68;border-radius:999px;padding:1px 6px}
   .recent{box-shadow:0 0 0 3px #7aa2f7,0 0 14px #7aa2f7aa !important;z-index:2}
   #log .t{color:var(--ink);font-weight:700;margin-top:6px}
   #log .you{color:#9ece6a}
@@ -343,7 +348,39 @@ function logs() {
     if (ring.has(el.dataset.code) && !el.classList.contains('glow') && !el.classList.contains('pick')) el.classList.add('recent'); });
   if (TURN !== null && S.turn !== TURN) toast(S.turn_player === S.you ? `Turn ${S.turn} — your turn` : `Turn ${S.turn} — the AI's turn`,
                                                S.turn_player === S.you ? '#9ece6a' : '#f7768e');
+  fly(L.map((x, i) => [x, i]).filter(([x, i]) => fresh(i) && x.mv).slice(-8).map(([x]) => x));
   SEEN = S.log_total || L.length; TURN = S.turn;
+}
+const TO = {h: 'to hand', g: 'to GY', b: 'banished', x: 'to Extra Deck', d: 'to Deck', m: 'to field', s: 'to field'};
+function place([p, z, s]) {        // the element a move starts or ends at
+  if (z === 'm' || z === 's')
+    return document.querySelector(`.mat .cell[data-k="${p}-${z}-${s}"]`) || (z === 'm' ? document.getElementById('emz') : null);
+  if (z === 'h') return p === S.you ? (document.querySelector(`#hand [data-k="${p}-h-${s}"]`) || document.getElementById('hand'))
+                                    : document.getElementById('aihand');
+  return document.querySelector(`.mat [data-pile="${p}-${z}"]`);
+}
+function fly(moves) {
+  const cell = document.querySelector('.mat .cell');
+  if (!cell || !moves.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const W = cell.getBoundingClientRect();
+  moves.forEach((x, j) => {
+    const a = place(x.mv.fr), b = place(x.mv.to);
+    if (!a || !b || a === b) return;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const at = r => `translate(${r.left + r.width / 2 - W.width / 2}px,${r.top + r.height / 2 - W.height / 2}px)`;
+    const g = document.createElement('div'), u = x.code ? ART.get(img(x.code)) : null;
+    g.className = 'c fly' + (x.code ? '' : ' back');
+    g.style.width = W.width + 'px'; g.style.height = W.height + 'px';
+    if (u) g.style.backgroundImage = `url(${u})`;
+    g.innerHTML = `<span>${TO[x.mv.to[1]] || ''}</span>`;
+    document.body.appendChild(g);
+    const d = j * 260;
+    g.animate([{transform: at(ra) + ' scale(.8)', opacity: 0}, {transform: at(ra), opacity: 1, offset: .15},
+               {transform: at(rb), opacity: 1, offset: .85}, {transform: at(rb), opacity: 0}],
+              {duration: 900, delay: d, easing: 'ease-in-out', fill: 'both'}).onfinish = () => g.remove();
+    b.animate([{boxShadow: '0 0 0 3px #e0af68'}, {boxShadow: '0 0 0 0 transparent'}],
+              {duration: 700, delay: d + 750});
+  });
 }
 function toast(msg, colour) {
   const t = document.getElementById('toast');

@@ -189,6 +189,12 @@ def get(conn, did):
     return dict(r)
 
 
+_FROM = {0x1: "the Deck", 0x2: "the hand", 0x4: "the field", 0x8: "the field", 0x10: "the GY",
+         0x20: "banishment", 0x40: "the Extra Deck"}
+_ZC = {0x1: "d", 0x2: "h", 0x4: "m", 0x8: "s", 0x10: "g", 0x20: "b", 0x40: "x"}   # the page's zone letters
+_ZL = {v: k for k, v in _ZC.items()}
+
+
 class Live:
     """The duel replayed to now: `session`, `chain` [(code, controller)], and
     `responses` (raw, from the duel's start). Close it."""
@@ -204,7 +210,9 @@ class Live:
         self.session = DuelSession(Replay.from_yrp(Path(row["template"])).duel(None, cards=self.cards))
         self.chain = []
         self.chain_at = []        # each chain link's location when activated (0x4: monster zone)
-        self.log = []             # [(turn, player, text)], what happened, for the page
+        self.log = []             # [(turn, player, text, code, move)], what happened, for the page
+        self.solving = False      # a chain link is resolving (its picks are not targets)
+        self._pend = {}           # code -> the move that just put it on the field (for its summon / activation line)
         self._seen = None
         self._track()
         for idx in json.loads(row["actions"]):
@@ -218,7 +226,7 @@ class Live:
         t = self.session.tracker.turn
         nm = lambda c: (self.cards.get(c).name if c and self.cards.get(c) is not None else "a card")  # noqa: E731
         ai = 1 - self.row["user_seat"]
-        add = lambda pl, txt, code=None: self.log.append((t, pl, txt, code))  # noqa: E731
+        add = lambda pl, txt, code=None, mv=None: self.log.append((t, pl, txt, code, mv))  # noqa: E731
         for e in p.events or ():
             k = type(e).__name__
             if k == "Chaining":
@@ -226,14 +234,28 @@ class Live:
                 del self.chain_at[e.chain_count - 1:]
                 self.chain.append((e.code, e.loc.controller))
                 self.chain_at.append(e.loc.location)
-                add(e.loc.controller, f"activates {nm(e.code)}", e.code)
-            elif k == "ChainEnd":
-                self.chain.clear()
-                self.chain_at.clear()
+                self.solving = False
+                # where from, and that it answers something: "chains X (link 2) from the GY"
+                where = _FROM.get(e.loc.location, "")
+                verb = f"chains {nm(e.code)} (link {e.chain_count})" if e.chain_count > 1 else f"activates {nm(e.code)}"
+                add(e.loc.controller, verb + (f" from {where}" if where else ""), e.code, self._pend.pop(e.code, None))
+            elif k == "ChainSolving":
+                self.solving = True
+                if len(self.chain) > 1 and e.chain_count <= len(self.chain):
+                    c, pl = self.chain[e.chain_count - 1]
+                    add(None, f"link {e.chain_count} resolves: {nm(c)}", c)
+            elif k in ("ChainSolved", "ChainEnd"):
+                self.solving = False
+                if k == "ChainEnd":
+                    self.chain.clear()
+                    self.chain_at.clear()
             elif k in ("Summoning", "SpSummoning", "FlipSummoning"):
-                add(e.loc.controller, f"summons {nm(e.code)}", e.code)
+                mv = self._pend.pop(e.code, None)
+                where = f" from {_FROM[_ZL[mv['fr'][1]]]}" if mv and mv["fr"][1] in "dhgbx" else ""
+                add(e.loc.controller, f"summons {nm(e.code)}{where}", e.code, mv)
             elif k in ("ChainNegated", "ChainDisabled"):
-                add(None, f"chain link {e.chain_count} is negated")
+                c = self.chain[e.chain_count - 1][0] if e.chain_count <= len(self.chain) else None
+                add(None, f"{nm(c)} (link {e.chain_count}) is negated" if c else f"chain link {e.chain_count} is negated", c)
             elif k == "Attack":
                 add(None, "attacks")
             elif k == "Damage":
@@ -251,33 +273,50 @@ class Live:
         cards are never named -- the session sees everything, the page must not."""
         src, dst, who = e.previous.location, e.current.location, e.current.controller
         up = e.current.position & 0x5           # POS_FACEUP
+        r = e.reason
+        mv = {"fr": [e.previous.controller, _ZC.get(src, ""), e.previous.sequence],
+              "to": [e.current.controller, _ZC.get(dst, ""), e.current.sequence]}
+        if not (mv["fr"][1] and mv["to"][1]):
+            mv = None                            # an Xyz material's own place: not drawn
+        cost = " (cost)" if r & 0x80 else ""     # REASON_COST
+        if dst in (0x4, 0x8) and (up or src != 0x2):
+            self._pend[e.code] = mv              # its summon / activation line carries the move
         if dst == 0x10:                          # GY
-            # from the field, a summon's material or a resolved Spell: only the notable ones
-            if src in (0x2, 0x1, 0x40) or e.reason & 0x4000:
-                add(who, "~" + f"{nm(e.code)} is " + ("discarded" if e.reason & 0x4000 else "sent to the GY"), e.code)
-            elif src in (0x4, 0x8):              # off the field
-                add(who, f"~{nm(e.code)} goes to the GY", e.code)
+            how = ("discarded" if r & 0x4000 else "tributed" if r & 0x2 else
+                   "destroyed by battle" if r & 0x20 and r & 0x1 else "destroyed" if r & 0x1 else
+                   "used as material" if r & 0x8 else "sent to the GY")
+            where = "" if how == "discarded" else f" from {_FROM.get(src, 'somewhere')}"
+            add(who, f"~{nm(e.code)} is {how}{where}{cost}", e.code, mv)
         elif dst == 0x20:                        # banished
-            add(who, f"~{nm(e.code)} is banished" if up else "~card is banished face-down", e.code if up else None)
+            if up:
+                add(who, f"~{nm(e.code)} is banished from {_FROM.get(src, 'somewhere')}{cost}", e.code, mv)
+            else:
+                add(who, "~card is banished face-down", None, mv)
         elif dst == 0x2 and src != 0x2:          # to a hand
-            if e.reason & 0x2000000:             # REASON_DRAW
+            if r & 0x2000000:                    # REASON_DRAW
                 if who == ai:
-                    add(who, "draws a card")
+                    add(who, "draws a card", None, mv)
                 else:
-                    add(who, f"draws {nm(e.code)}", e.code)
-            elif src in (0x1, 0x10) or (src in (0x4, 0x8, 0x20) and e.previous.position & 0x5):
-                # a search is revealed at a real table; a face-up card or one from the GY is public
-                add(who, f"~{nm(e.code)} is added to the hand", e.code)
+                    add(who, f"draws {nm(e.code)}", e.code, mv)
+            elif src in (0x1, 0x10):
+                # a search is revealed at a real table; one from the GY is public
+                add(who, f"~{nm(e.code)} is added to the hand from {_FROM[src]}", e.code, mv)
+            elif src in (0x4, 0x8, 0x20) and e.previous.position & 0x5:
+                add(who, f"~{nm(e.code)} is returned to the hand from {_FROM[src]}", e.code, mv)
             elif who == ai:
                 # its face-down card bounced (a Set Trap returned): it stays hidden
-                add(who, "~card is returned to the hand")
+                add(who, "~card is returned to the hand", None, mv)
             else:
-                add(who, f"~{nm(e.code)} is returned to the hand", e.code)
+                add(who, f"~{nm(e.code)} is returned to the hand", e.code, mv)
+        elif dst == 0x1 and src in (0x4, 0x8, 0x10, 0x20) and (src == 0x10 or e.previous.position & 0x5):
+            add(who, f"~{nm(e.code)} is shuffled into the Deck from {_FROM[src]}", e.code, mv)
+        elif dst == 0x40 and src in (0x4, 0x10, 0x20):
+            add(who, f"~{nm(e.code)} returns to the Extra Deck", e.code, mv)
         elif dst == 0x8 and not up and src == 0x2:   # a Spell/Trap Set from the hand
             if who == ai:
-                add(who, "sets a card")
+                add(who, "sets a card", None, mv)
             else:
-                add(who, f"sets {nm(e.code)}", e.code)
+                add(who, f"sets {nm(e.code)}", e.code, mv)
 
     def act(self, idx):
         self.session.act(int(idx))
@@ -622,6 +661,20 @@ _FLOAT = re.compile(r"If this card is (Tributed|sent to the GY)\b|"
                     r"If this card (in your possession )?is sent from the field to the GY", re.I)
 
 
+_IMMUNE = re.compile(r"[Uu]naffected by (your opponent's|other cards'|card effects|"
+                     r"(the )?effects of (cards|other cards)|your opponent's card effects)[^.]*")
+
+
+def _immune(c, cards, solving):
+    """Your card the AI's effect cannot touch: "Unaffected by your opponent's activated
+    effects, unless they target this card" only while an effect resolves (its picks are not
+    targets); a plain immunity always. A condition ("While you have a Ritual Spell in your
+    GY") is taken as met: picking a maybe-immune card wastes the effect either way."""
+    from . import game
+    m = _IMMUNE.search(game.card_text(c.code) or "") if c.code else None
+    return bool(m) and (solving or "unless" not in m.group(0))
+
+
 def _floats(c, cards):
     """A card whose own effect fires as it is tributed / sent to the GY: the cheapest cost.
     "sent from the field" only counts where it is on the field (0x4 monster, 0x8 S/T)."""
@@ -652,6 +705,8 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
         if owner != ai and c.code in keys:
             # your deck's kill keys first, most important first (patch 0012 in Python)
             return (2 + len(keys) - list(keys).index(c.code), 0)
+        if owner != ai and _immune(c, cards, getattr(live, "solving", False)):
+            return (-2, 0)          # duel 11: Heavenly Spheres "returned" an unaffected Black Chaos
         if owner == ai and _floats(c, cards):
             # its own card that pays itself back when it goes (duel 11: it tributed Blue-Eyes
             # White Phantom Beast from hand for Heavenly Spheres' cost, not Spheres itself,
@@ -1538,8 +1593,8 @@ def view(conn, did):
                 # what happened lately -- the AI's face-down cards stay unnamed (its
                 # activations reveal them, as at a real table)
                 "log": [{"turn": t, "who": "you" if pl == you else ("AI" if pl == ai else ""),
-                         "text": txt.lstrip("~"), "own": txt.startswith("~"), "code": code}
-                        for t, pl, txt, code in live.log[-60:]],
+                         "text": txt.lstrip("~"), "own": txt.startswith("~"), "code": code, "mv": mv}
+                        for t, pl, txt, code, mv in live.log[-60:]],
                 "log_total": len(live.log),        # which entries are new since the page last looked
                 # your own Deck (sorted: you know its cards, never its order) and whole
                 # Extra Deck; the AI's stay a count and its face-up Extra cards

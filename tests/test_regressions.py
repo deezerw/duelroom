@@ -7474,10 +7474,11 @@ def test_duel_log_never_names_the_ais_draws_or_sets_and_piles_hide_order(tmp_pat
     from skills import db, duel
 
     log = []
-    add = lambda pl, txt, code=None: log.append((pl, txt, code))  # noqa: E731
+    add = lambda pl, txt, code=None, mv=None: log.append((pl, txt, code))  # noqa: E731
     nm = lambda c: f"card{c}"  # noqa: E731
     live = duel.Live.__new__(duel.Live)
-    L = lambda loc, con=1, pos=0: N(location=loc, controller=con, position=pos)  # noqa: E731
+    live._pend = {}
+    L = lambda loc, con=1, pos=0: N(location=loc, controller=con, position=pos, sequence=0)  # noqa: E731
     for you_too in (1, 0):        # the AI is player 1; the same moves made by you name the card
         log.clear()
         live._move(N(code=7, previous=L(0x1, you_too), current=L(0x2, you_too), reason=0x2000000), 1, nm, add)
@@ -7494,7 +7495,7 @@ def test_duel_log_never_names_the_ais_draws_or_sets_and_piles_hide_order(tmp_pat
         # a Set card bounced back to the hand (face-down before it moved), then a face-up one
         live._move(N(code=6, previous=L(0x8, you_too, 0xA), current=L(0x2, you_too), reason=0x40), 1, nm, add)
         live._move(N(code=4, previous=L(0x4, you_too, 0x1), current=L(0x2, you_too), reason=0x40), 1, nm, add)
-        assert log[-1][1] == "~card4 is added to the hand"
+        assert log[-1][1] == "~card4 is returned to the hand from the field"
         if you_too:
             assert log[-2][1:] == ("~card is returned to the hand", None), log[-2]
         else:
@@ -8349,3 +8350,19 @@ def test_duel_ai_pays_a_cost_with_the_card_that_floats():
     assert duel._floats(card(24361622, 0x4), cards)            # Heavenly Spheres
     assert not duel._floats(card(14558127, 0x2), cards)        # Ash Blossom
     assert not duel._floats(card(30397786, 0x2), cards)        # Phantom Beast
+
+
+def test_duel_ai_never_picks_your_card_its_effect_cannot_touch():
+    """Duel 11 (user, 2026-11-27: "i dont think the effect is happening right"): Heavenly
+    Spheres' non-targeting bounce chose Magician of Dark Chaos - Black Chaos, "Unaffected by
+    your opponent's activated effects, unless they target this card" -- nothing happened."""
+    from types import SimpleNamespace as NS
+
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    black_chaos = NS(code=44001993, loc=NS(controller=1, location=0x4))
+    assert duel._immune(black_chaos, cards, solving=True)        # a pick while the effect resolves
+    assert not duel._immune(black_chaos, cards, solving=False)   # a target: it is affected
+    assert not duel._immune(NS(code=14558127, loc=black_chaos.loc), cards, solving=True)   # Ash
