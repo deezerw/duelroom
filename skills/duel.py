@@ -418,6 +418,29 @@ def defend(live, ai, respond, cards, wasted=(), dead=(), keys=()):
     return min(ok, key=lambda i: rank[p.actions[i].card.code], default=passing)
 
 
+def own_picks(live, ai):
+    """At a pick of the AI's own cards from its Deck / Extra Deck on YOUR turn (Heavenly
+    Spheres' "Special Summon 1 Dragon monster from your hand or Deck"): one option per card,
+    the rule's pick first (a tie keeps it); [] where it is not that, or one card is all.
+    Searched like an answer (user, 2026-11-27: Spheres "wants to be tributed ... to search
+    something like that new blue eyes card that wipes the field when summoned or bystial
+    magnamhut" -- the rule took the lowest ATK, and Spheres makes ATK 0 anyway)."""
+    p = live.point
+    if p.decision.name not in ("MSG_SELECT_CARD", "MSG_SELECT_UNSELECT_CARD"):
+        return []
+    picks = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
+    if (not picks or any(c.loc.controller != ai for _i, c in picks)
+            or not any(c.loc.location & 0x41 for _i, c in picks)):
+        return []
+    first = _follow_up(live, ai, live.cards)
+    out, codes = [], set()
+    for i, c in sorted(picks, key=lambda t: t[0] != first):
+        if c.code not in codes:
+            codes.add(c.code)
+            out.append(i)
+    return out if len(out) > 1 else []
+
+
 def _monster_link(live, ai):
     """The top chain link is YOUR monster's effect activated in the monster zone
     (and that monster is still there, face-up): what Veiler / Impermanence answer."""
@@ -555,20 +578,25 @@ def decide(conn, did):
         ai, you = 1 - row["user_seat"], row["user_seat"]
         cards = live.cards
         respond, wasted, dead, _keys = defence_ctx(row, cards)
-        passing, ok = answers(live, ai, respond, cards, wasted, dead)
         key, p = _key(live), live.point
-        opts, codes = [passing], set()
-        for i in ok:                      # one per card: two copies are one choice
-            if p.actions[i].card.code not in codes:
-                codes.add(p.actions[i].card.code)
-                opts.append(i)
+        if p.decision.name == "MSG_SELECT_CHAIN":
+            passing, ok = answers(live, ai, respond, cards, wasted, dead)
+            opts, codes = [passing], set()
+            for i in ok:                      # one per card: two copies are one choice
+                if p.actions[i].card.code not in codes:
+                    codes.add(p.actions[i].card.code)
+                    opts.append(i)
+        else:
+            # which of its own Deck cards to take (own_picks): no pass, the rule's pick first
+            passing, opts = None, own_picks(live, ai)
         names = {o: "pass" if o == passing else cards.get(p.actions[o].card.code).name for o in opts}
         # "draw each time you Special Summon" cards (Mulcharmies, Maxx "C"): your rest of turn
         # scores your PIECES, which a draw never changes, so the search always tied them with
         # a pass and the AI never fired one (2026-11-26). Not searched: played whenever the
         # search would pass, as a real player drops one at your first summon.
         opts, drawers = split_drawers(opts, passing, lambda o: p.actions[o].card.code,
-                                      game.own_turn_dead(engine.DECKS / f"{row['ai_deck']}.ydk"))
+                                      game.own_turn_dead(engine.DECKS / f"{row['ai_deck']}.ydk")
+                                      if passing is not None else ())
         hand_n = len(live.board()["players"][you].get("hand") or [])
         pool = unseen_pool(row, live)
     finally:
@@ -610,7 +638,7 @@ def decide(conn, did):
     best = with_drawer(best, passing, drawers)
     f = tpl.parent / "defends.json"
     f.write_text(json.dumps({**_decided(row), key: best}))
-    _save(conn, did, note="answered by search (" + ", ".join(
+    _save(conn, did, note=("answered" if passing is not None else "picked") + " by search (" + ", ".join(
         f"{names[o]} {mean[o]:.1f}" for o in opts) + f" of {len(pieces)} pieces left you"
         + (f"; then {names[best]}, a draw card" if best in drawers else "") + f") in {time.time() - t0:.0f} s")
     return advance(conn, did)
@@ -859,6 +887,15 @@ def advance(conn, did, spawn=True):
                         _save(conn, did, actions=json.dumps(acts), status="thinking",
                               plan=json.dumps(plan) if plan is not None else None,
                               note="weighing whether to answer your play")
+                        _spawn_plan(did, "defend")
+                        return "thinking"
+                    idxs = [got]
+                elif DEFEND_BIN.exists() and own_picks(live, ai):
+                    got = _decided(row).get(_key(live))
+                    if got is None:
+                        _save(conn, did, actions=json.dumps(acts), status="thinking",
+                              plan=json.dumps(plan) if plan is not None else None,
+                              note="weighing which card to take")
                         _spawn_plan(did, "defend")
                         return "thinking"
                     idxs = [got]

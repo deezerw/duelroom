@@ -8400,3 +8400,31 @@ def test_duel_ai_rule_picks_hide_your_set_cards_and_choose_a_sensible_position()
                          for v in (0x1, 0x4)]
     assert pick("MSG_SELECT_POSITION", posn(ogre)) == 1
     assert pick("MSG_SELECT_POSITION", posn(89631139)) == 0
+
+
+def test_duel_ai_searches_which_of_its_deck_cards_to_take():
+    """Heavenly Spheres' float (user, 2026-11-27: it "wants to be tributed ... to search
+    something like that new blue eyes card ... or bystial magnamhut"): a pick of its own
+    Deck / hand cards is searched like an answer -- one option per card, the rule's first."""
+    from types import SimpleNamespace as NS
+
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    loc = lambda con, l: NS(controller=con, location=l, position=0, sequence=0)  # noqa: E731
+    bewd, magnamhut, deep = 89631139, 33854624, 22804410
+    acts = [NS(kind="select", card=NS(code=c, loc=loc(0, l)))
+            for c, l in ((bewd, 0x1), (magnamhut, 0x1), (bewd, 0x1), (deep, 0x2))]
+
+    def live(actions, name="MSG_SELECT_CARD"):
+        return NS(point=NS(decision=NS(name=name), actions=actions), cards=cards, chain=[],
+                  solving=True, board=lambda: {"players": [{}, {}]})
+
+    got = duel.own_picks(live(acts), 0)
+    assert sorted(got) == [0, 1, 3] and got[0] == duel._follow_up(live(acts), 0, cards)
+    assert duel.own_picks(live(acts[3:]), 0) == []                        # one card: nothing to weigh
+    assert duel.own_picks(live([a for a in acts if a.card.loc.location == 0x2] * 2), 0) == []  # hand only
+    yours = [NS(kind="select", card=NS(code=bewd, loc=loc(1, 0x4)))]
+    assert duel.own_picks(live(acts + yours), 0) == []                    # your card in it: a target pick
+    assert duel.own_picks(live(acts, "MSG_SELECT_CHAIN"), 0) == []
