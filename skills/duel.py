@@ -700,6 +700,11 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
     def worth(c):
         card = cards.get(c.code) if c.code else None
         owner = c.loc.controller
+        if owner != ai and c.loc.location & 0xC and not c.loc.location & 0x80 and c.loc.position & 0xA:
+            # your face-down card: the engine names it, a real opponent cannot (it read your
+            # Set cards' identities before 2026-11-27). A Set Spell/Trap counts as an
+            # interruption (the duel assumes Set cards are one); a face-down monster as nothing
+            return (1, 0) if c.loc.location & 0x8 else (0, 0)
         if owner != ai and c.code in dead:
             return (-1, 0)          # your hand-trap body: the least worth taking
         if owner != ai and c.code in keys:
@@ -714,6 +719,14 @@ def _follow_up(live, ai, cards, dead=(), keys=()):
             return (-1, 0)
         return (1 if c.code in pieces[owner] else 0, (card.attack if card is not None else 0) or 0)
 
+    if p.decision.name == "MSG_SELECT_POSITION":
+        # its monster summoned on your turn: defense where that is the stronger side (it
+        # took face-up attack, the first choice, always)
+        pos = {a.value: i for i, a in enumerate(p.actions) if a.kind == "position"}
+        card = next((cards.get(a.card.code) for a in p.actions if a.card is not None and a.card.code), None)
+        if card is not None and (card.defense or 0) > (card.attack or 0) and 0x4 in pos:
+            return pos[0x4]
+        return pos.get(0x1, 0)
     opts = [(i, a.card) for i, a in enumerate(p.actions) if a.card is not None and a.card.loc is not None]
     theirs = [(i, c) for i, c in opts if c.loc.controller != ai]
     # its Veiler / Impermanence just chained onto your monster's effect: target THAT monster
@@ -862,7 +875,11 @@ def advance(conn, did, spawn=True):
                     # if it ran out, re-plan if the position moved off it
                     if plan == []:
                         kinds = [a.kind for a in p.actions]
-                        idxs = [next((kinds.index(k) for k in PASSIVE_KINDS if k in kinds), 0)]
+                        # a card / target prompt (its own late trigger, your effect making it
+                        # choose) has no passive choice: pick as on your turn, not the first one
+                        idxs = [next((kinds.index(k) for k in PASSIVE_KINDS if k in kinds), None)]
+                        if idxs[0] is None:
+                            idxs = [_follow_up(live, ai, cards, dead, keys)]
                     else:
                         _save(conn, did, actions=json.dumps(acts), status="thinking", plan=None)
                         if spawn:

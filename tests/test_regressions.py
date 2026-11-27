@@ -7006,16 +7006,16 @@ def test_duel_ai_targets_your_best_card_and_pays_with_its_worst(monkeypatch):
     from ygorl.engine.duel import default_cards
 
     cards = default_cards()
-    loc = lambda ctl: NS(controller=ctl, location=4)
+    loc = lambda ctl: NS(controller=ctl, location=4, position=1)
     # yours (player 0): Lars (a piece, 2500), Black Luster Soldier (3000, not a piece here)
     acts = [NS(card=NS(code=35103106, loc=loc(0))), NS(card=NS(code=70405001, loc=loc(0)))]
-    live = NS(point=NS(actions=acts), board=lambda: {"players": [{}, {}]}, chain=[], chain_at=[])
+    live = NS(point=NS(actions=acts, decision=NS(name="MSG_SELECT_CARD")), board=lambda: {"players": [{}, {}]}, chain=[], chain_at=[])
     monkeypatch.setattr(game, "_pieces", lambda b, pl, c, *x: [35103106] if pl == 0 else [])
     assert duel._follow_up(live, 1, cards) == 0
     # only its own (player 1): gives up the non-piece, lower-ATK one
     own = [NS(card=NS(code=35103106, loc=loc(1))), NS(card=NS(code=14558127, loc=loc(1)))]
     monkeypatch.setattr(game, "_pieces", lambda b, pl, c, *x: [35103106] if pl == 1 else [])
-    live.point = NS(actions=own)
+    live.point = NS(actions=own, decision=NS(name="MSG_SELECT_CARD"))
     assert duel._follow_up(live, 1, cards) == 1
 
 
@@ -7044,14 +7044,14 @@ def test_duel_ai_negates_only_a_live_card(monkeypatch):
     assert duel.defend(live, 1, [lars], cards, dead=dead) == 0, "fires: Problem is face-up"
     board["players"][0]["szone"] = [{"code": problem, "position": 10}]
     assert duel.defend(live, 1, [lars], cards, dead=dead) == 1, "a set card is no target"
-    loc = lambda ctl: NS(controller=ctl, location=4)
+    loc = lambda ctl: NS(controller=ctl, location=4, position=1)
     pick = [NS(card=NS(code=purulia, loc=loc(0))), NS(card=NS(code=sp, loc=loc(0)))]
-    live2 = NS(point=NS(actions=pick), board=lambda: board, chain=[], chain_at=[])
+    live2 = NS(point=NS(actions=pick, decision=NS(name="MSG_SELECT_CARD")), board=lambda: board, chain=[], chain_at=[])
     assert duel._follow_up(live2, 1, cards, dead) == 1, "the live card, not the body"
     engraver = 60764609
     bls = 70405001        # Black Luster Soldier, 3000 ATK over Engraver's 1800
     pick = [NS(card=NS(code=bls, loc=loc(0))), NS(card=NS(code=engraver, loc=loc(0)))]
-    live3 = NS(point=NS(actions=pick), board=lambda: board, chain=[], chain_at=[])
+    live3 = NS(point=NS(actions=pick, decision=NS(name="MSG_SELECT_CARD")), board=lambda: board, chain=[], chain_at=[])
     assert duel._follow_up(live3, 1, cards, dead) == 0, "by ATK without keys"
     assert duel._follow_up(live3, 1, cards, dead, [engraver]) == 1, "your kill key over ATK"
 
@@ -8366,3 +8366,37 @@ def test_duel_ai_never_picks_your_card_its_effect_cannot_touch():
     assert duel._immune(black_chaos, cards, solving=True)        # a pick while the effect resolves
     assert not duel._immune(black_chaos, cards, solving=False)   # a target: it is affected
     assert not duel._immune(NS(code=14558127, loc=black_chaos.loc), cards, solving=True)   # Ash
+
+
+def test_duel_ai_rule_picks_hide_your_set_cards_and_choose_a_sensible_position():
+    """Rule picks on your turn (2026-11-27 audit of every stored duel): your face-down cards
+    are judged without their real names (the engine names them, a real opponent cannot), and
+    its monster takes defense where DEF beats ATK (it always took face-up attack)."""
+    from types import SimpleNamespace as NS
+
+    from skills import duel
+    from ygorl.engine.duel import default_cards
+
+    cards = default_cards()
+    ash, ogre = 14558127, 59438930        # Ash Blossom 0/1800, Ghost Ogre 0/1800
+
+    def pick(name, actions):
+        live = NS(point=NS(decision=NS(name=name), actions=actions), chain=[], solving=False,
+                  board=lambda: {"players": [{}, {}]})
+        return duel._follow_up(live, 0, cards)
+
+    loc = lambda con, l, pos: NS(controller=con, location=l, position=pos, sequence=0)  # noqa: E731
+    # your face-up Ash vs your face-down Set card (really Ash too): the Set card is assumed
+    # an interruption, not read
+    up = NS(kind="select", card=NS(code=ash, loc=loc(1, 0x4, 0x1)))
+    setc = NS(kind="select", card=NS(code=ash, loc=loc(1, 0x8, 0xA)))
+    assert pick("MSG_SELECT_CARD", [up, setc]) == 1
+    # a face-down monster of yours is not ranked by its hidden ATK
+    big = NS(kind="select", card=NS(code=89631139, loc=loc(1, 0x4, 0x8)))   # Set Blue-Eyes
+    small = NS(kind="select", card=NS(code=46986414, loc=loc(1, 0x4, 0x1)))   # Dark Magician 2500
+    assert pick("MSG_SELECT_CARD", [big, small]) == 1
+    # position: 0 ATK / 1800 DEF goes to defense; Blue-Eyes 3000/2500 attacks
+    posn = lambda code: [NS(kind="position", value=v, card=NS(code=code, loc=loc(0, 0, 0)))  # noqa: E731
+                         for v in (0x1, 0x4)]
+    assert pick("MSG_SELECT_POSITION", posn(ogre)) == 1
+    assert pick("MSG_SELECT_POSITION", posn(89631139)) == 0
