@@ -303,7 +303,8 @@ function cmp() {
   document.getElementById('cmp').innerHTML = t.running
     ? '<div>The solver is playing your opening hand, then both boards face the AI deck\'s full-strength kill search (takes ~20 min).</div>'
     : t.error ? `<div>${esc(t.error)}</div>`
-    : side('You', t.you) + (t.solver ? side('Solver, same hand', t.solver) : '<div>Solver: found no line</div>')
+    : side('You', t.you) + (t.solver ? side('Solver, same hand', t.solver)
+        + `<div><a href="/watch/duel/${S.id}/solver">▶ watch the solver's turn 1</a></div>` : '<div>Solver: found no line</div>')
       + (t.method && t.method !== k.method ? `<div><small>Judged under older settings (${esc(t.method)}): not in the tally.</small></div>` : '')
       + `<div><small>All duels under these settings (${esc(k.method || '')}): you survived ${k.you} of ${k.duels}, the solver ${k.solver} of ${k.duels}.`
       + ` The solver's search saw the AI's hand; the kill search sees both hands.</small></div>`;

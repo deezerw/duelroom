@@ -864,6 +864,28 @@ def watch_game(name, enemy, hand, eseed, run):
                   whole=True, me=1 - first)
 
 
+@bp.route("/watch/duel/<int:did>/solver")
+@login_required
+def watch_duel_solver(did):
+    """The solver's turn 1 from your duel hand, the comparison panel's board (duel.compare)."""
+    from ygorl.engine.replay import Replay
+    from ygorl.solver.demo import start_identity
+
+    from skills import duel
+    try:
+        row = duel.get(conn(), did)
+    except KeyError:
+        abort(404)
+    out = duel._compare_file(row).parent / "compare" / "solver" / "out-t1"
+    src = sorted(out.glob("solution*.yrp*")) or sorted(out.glob("best_approach*.yrp*"))
+    if not src:
+        abort(404)
+    rep = Replay.from_yrp(src[0])
+    return _watch(row["user_deck"], f"duel {did} · the solver's turn 1 from your hand",
+                  f"vs {row['ai_deck']} · its defender fired the AI's real hand traps",
+                  start_identity(rep), [r.hex() for r in rep.responses], [], whole=True)
+
+
 _ZONE_WORDS = {"hand": "the hand", "mz": "the field", "sz": "the spell & trap zone",
                "gy": "the GY", "ban": "banishment", "extra": "the Extra Deck"}
 
