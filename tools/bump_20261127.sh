@@ -32,6 +32,5 @@ say "rooted solver = 0002-0020"
 for spec in "Angelechy-Meta first duelpc m26a-pc" "blue_eyes_oct_2026 first server m26a"; do
   set -- $spec
   $P tools/relabel_games.py imported "$1" "$2" "$4" --from "$3" --move-turn1
-  sqlite3 data/duelroom.db "UPDATE bad_games SET device='$4' WHERE enemy='$1' AND first=$([ $2 = first ] && echo 1 || echo 0) AND device='$3'"
 done
 say "2026-11-26a sections relabelled"

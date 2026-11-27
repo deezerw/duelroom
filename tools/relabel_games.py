@@ -6,7 +6,7 @@ already keeps sections apart (/games shows one per device), so the old games
 are relabelled -- readable, never mixed. Done by hand three times on
 2026-11-19 (endgame-t1, brk1x); this is that, once:
 
-  * every game row of the section (game_results, game_used, game_stops)
+  * every game row of the section (game_results, game_used, game_stops, bad_games)
     gets device=LABEL and its line paths point into the label's folder;
   * each game's run folder moves to `games_dir(deck, enemy, first, LABEL)`;
   * turn 1s stay where they are (new games reuse them when the change does
@@ -78,6 +78,8 @@ def relabel(conn, deck, enemy, first, label, src="server", move_turn1=False, dry
         for t in TABLES:
             conn.execute(f"UPDATE {t} SET device=?, line=replace(line, ?, ?) WHERE {where}",
                          (label, old, new, *key))
+        # the quarantine follows its games (2026-11-27): `--eras current` trains on old labels
+        conn.execute(f"UPDATE bad_games SET device=? WHERE {where}", (label, *key))
         cols = [c[1] for c in conn.execute("PRAGMA table_info(game_turn1)")]
         sel = ", ".join("?" if c == "device" else c for c in cols)
         if move_turn1:

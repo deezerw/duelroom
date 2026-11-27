@@ -6650,7 +6650,10 @@ def test_relabel_games_moves_runs_and_keeps_turn1(tmp_path, monkeypatch):
         conn.execute("INSERT INTO game_results (deck_hash, enemy, hand_index, board, enemy_seed, "
                      "first, device, run, outcome, line, created) VALUES "
                      "('d','E',0,0,1000,1,'server',0,'win',?,'now')", (str(run / "line.yrp"),))
+        conn.execute("INSERT INTO bad_games VALUES ('d','E',0,0,1000,1,'server',0,'trap_to_cost','now')")
     assert rl.relabel(conn, "deck", "E", True, "old", say=lambda *a: None) == 1
+    # the quarantine follows (2026-11-27): an old label is still trained on by --eras current
+    assert [r[0] for r in conn.execute("SELECT device FROM bad_games")] == ["old"]
     new = game.games_dir("deck", "E", True, "old")
     line = conn.execute("SELECT line FROM game_results WHERE device='old'").fetchone()[0]
     assert line == str(new / "h0" / "e1000" / "run0" / "line.yrp") and _P(line).exists()
