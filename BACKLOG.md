@@ -113,7 +113,9 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       twin of the rule, a position-level gate (an Ogre held after Requiem tributed itself), the
       kill-check A/B. Bystial
       -> Requiem is NOT this (it banishes from the GY, which the table cannot score as a stop).
-- [ ] **The enemy's turn 2 can end with a free Trap in hand** (play_audit, 2026-11-26 duelpc smoke:
+- [x] **NOT A BUG (2026-11-27):** the audit read turn 2's leftovers at the END of our turn 3, so a
+      Verdict that reached their hand on our turn counted; now read at turn 3's start (d4bc192),
+      all 3 hits of 26a gone. Was: **The enemy's turn 2 can end with a free Trap in hand** (play_audit, 2026-11-26 duelpc smoke:
       Angelechy Verdict in 1 of 44 games, S/T zones free): game.replay's free_set closes only a
       line that stops MID-turn; a line that already passed its End Phase keeps the card. The
       gate (2%) failed on this one game and was OVERRIDDEN for tonight's second run (Claude:
@@ -136,7 +138,9 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       the last look index is where it stopped): full 9, cand 1 12, cand 2-5 6, cand 6 / none 21.
       Its first 17 games: both wins from full (1/1) or cand 1 (1/4); cand 2-5 1/1 killed; cand 6 /
       none 11/11 killed. Cap at 2 would have cut 25 of 48 picks short and lost no win so far.
-- [ ] **Defender gives up a hand trap to a discard cost** (found 2026-11-26 while turning on
+- [x] **LIVE 2026-11-27 (METHOD 27a):** 0020 in the rooted solver; tonight's smoke audits 0 trap-to-a-
+      cost (the audit counts only unforced ones, b1e7acf). The paired kill-check A/B is still unrun.
+      Was: **Defender gives up a hand trap to a discard cost** (found 2026-11-26 while turning on
       RESPOND_ALL): patch 0004's DefenderPick gives up its OWN lowest-ATK card, and hand traps
       are 0 ATK, so a discard cost of a newly listed card (Mind Shuffle's search: "then discard
       1") throws away Ash / Imperm first. The duel's Python defender already keeps them
@@ -193,7 +197,8 @@ Every METHOD bump makes stored games "old data", so these land together, and due
 ### Phase 5 -- low
 - [ ] Untried solver levers: `--options` macros, a per-starter `--adapt` corpus,
       `--ctx-shrink` (`--adapt` already measured useless at equal time).
-- [ ] Patch-stack upkeep: 15 patches on vendored combo-solver. A `tools/patches_check.sh`
+- [x] `tools/patches_check.sh` (2026-11-27): builds 0002..0021 in a throwaway folder; OK. Was:
+      Patch-stack upkeep: 15 patches on vendored combo-solver. A `tools/patches_check.sh`
       that applies 0002..N to a clean upstream checkout and builds, run before any
       upstream bump, so the stack's state is known rather than discovered.
 
