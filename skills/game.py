@@ -663,6 +663,13 @@ def defender_args(respond, cards=None, smart=None, hold_until=1, order="traps",
         keep = [c for c in codes if is_hand_trap(c, cards)]
         if keep and _bin_has("--opp-keep"):
             args += ["--opp-keep", "|".join(map(str, keep))]
+        # patch 0021 (needs the binary): a card whose effect fires as it goes is its first cost
+        flo, flo_field = float_codes(codes)
+        if (flo or flo_field) and _bin_has("--opp-float"):
+            if flo:
+                args += ["--opp-float", "|".join(map(str, flo))]
+            if flo_field:
+                args += ["--opp-float-field", "|".join(map(str, flo_field))]
         if hold and hold_until:
             args += ["--opp-hold", "|".join(map(str, hold))]
             if hold_until != 1:
@@ -1431,6 +1438,19 @@ def live_goal(goal, deck):
     d = Deck.from_ydk(Path(deck))
     dead = {str(c) for c in never_live([*d.main, *d.extra])}
     return [t for t in trainer.split_goal(goal)[0] if str(t).split("@")[0] not in dead]
+
+
+def float_codes(codes):
+    """(anywhere, field only): the cards among `codes` whose own effect fires as they are
+    tributed / sent to the GY (duel._FLOAT, the duel AI's rule) -- the cheapest cost for the
+    games' defender (patch 0021). "sent from the field" ones count only from the field."""
+    from .duel import _FLOAT
+    anywhere, field = [], []
+    for c in sorted(set(codes)):
+        m = _FLOAT.search(card_text(c) or "")
+        if m:
+            (field if "field" in m.group(0) else anywhere).append(c)
+    return anywhere, field
 
 
 def free_sets(deck, cards=None, extra=()):

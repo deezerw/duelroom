@@ -8451,3 +8451,15 @@ def test_quarantine_drops_every_line_and_position_of_a_bad_pairing(tmp_path):
     import pytest
     with pytest.raises(FileNotFoundError):
         quarantine.load(tmp_path / "missing.json")      # never train on everything by accident
+
+
+def test_defender_gives_a_floating_card_to_a_cost_first(monkeypatch):
+    """Patch 0021 (duel 11: Phantom Beast tributed for Heavenly Spheres' cost, not Spheres,
+    whose "If this card is Tributed" summons a Dragon): game.float_codes sorts the defender's
+    cards by duel._FLOAT, and defender_args emits them only once the binary has the flag."""
+    from skills import game
+    texts = {1: "If this card is Tributed: Special Summon 1 Dragon.",
+             2: "If this card is sent from the field to the GY: draw 1 card.",
+             3: "Negate the activation."}
+    monkeypatch.setattr(game, "card_text", lambda c: texts.get(c, ""))
+    assert game.float_codes([3, 2, 1]) == ([1], [2])

@@ -143,6 +143,9 @@ Every METHOD bump makes stored games "old data", so these land together, and due
       Quarantine (d4bc192): play_audit's flagged games -> bad_games; train.sh audits every live
       section and the trainers drop whole bad pairings (user: "dont include any games with bad data").
 
+- [ ] Patch 0021 `--opp-float` BUILT 2026-11-27 (build/combo-solver-0021 = 0002-0021, in
+      build_rooted_solver.sh; game.defender_args emits it once the binary has it, so NOT live):
+      the port of the item below. Goes live with the next METHOD bump (after tonight's runs).
 - [ ] The games' C++ smart defender (patch 0004 DefenderPick) has the cost bug fixed in the duel
       2026-11-27 (`duel._floats`): it gives up its lowest-ATK own card, never the one that floats
       (duel 11: Phantom Beast tributed for Heavenly Spheres, not Spheres itself). Port to the solver

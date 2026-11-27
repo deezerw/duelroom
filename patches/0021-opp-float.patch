@@ -1,0 +1,84 @@
+diff -ruN combo-solver-rooted/solver-patched/main.cpp combo-solver-next/solver-patched/main.cpp
+--- combo-solver-rooted/solver-patched/main.cpp	2026-11-26 18:31:11.215572130 -0500
++++ combo-solver-next/solver-patched/main.cpp	2026-11-27 16:28:51.552980704 -0500
+@@ -1524,6 +1524,8 @@
+ 	std::vector<uint32_t> opp_on_field;
+ 	// --opp-keep <code|code...> (patch 0020).
+ 	std::vector<uint32_t> opp_keep;
++	// --opp-float / --opp-float-field <code|code...> (patch 0021).
++	std::vector<uint32_t> opp_float, opp_float_field;
+ 	// --opp-key <code|code...> (patch 0012).
+ 	std::vector<uint32_t> opp_key;
+ 	// --opp-gy-want <code|code...> (patch 0013).
+@@ -2089,6 +2091,10 @@
+ 				"                     field that is still there face-up (0019)\n"
+ 				"  --opp-keep <c>     the defender gives up these of its own cards (its hand\n"
+ 				"                     traps) only when nothing else can pay a cost (0020)\n"
++				"  --opp-float <c>    the defender gives up these of its own cards FIRST: their\n"
++				"                     effect fires as they are tributed / sent to the GY (0021)\n"
++				"  --opp-float-field <c> as --opp-float, only from the field (\"sent from the\n"
++				"                     field to the GY\") (0021)\n"
+ 				"  --opp-dead <c>     the searcher's cards with no field effect (hand traps):\n"
+ 				"                     no live negate target, least worth taking (0011)\n"
+ 				"  --opp-key <c>      the searcher's kill keys, most important first: the\n"
+@@ -2639,7 +2645,7 @@
+ 				  a == "--no-own-chain" || a == "--opp-hand-root" || a == "--opp-negate" ||
+ 				  a == "--opp-negate-mon" || a == "--opp-dead" || a == "--opp-key" ||
+ 				  a == "--opp-gy-want" || a == "--opp-on-activation" || a == "--opp-on-field" ||
+-				  a == "--opp-keep") {
++				  a == "--opp-keep" || a == "--opp-float" || a == "--opp-float-field") {
+ 			const char* v = next(a.c_str()); if(!v) return false;
+ 			std::vector<uint32_t>& into =
+ 				(a == "--opp-hold") ? o.opp_hold
+@@ -2652,6 +2658,8 @@
+ 				: (a == "--opp-on-activation") ? o.opp_on_activation
+ 				: (a == "--opp-on-field") ? o.opp_on_field
+ 				: (a == "--opp-keep") ? o.opp_keep
++				: (a == "--opp-float") ? o.opp_float
++				: (a == "--opp-float-field") ? o.opp_float_field
+ 				: (a == "--opp-key") ? o.opp_key
+ 				: (a == "--opp-gy-want") ? o.opp_gy_want : o.opp_respond;
+ 			std::string sv(v);
+@@ -4308,6 +4316,8 @@
+ 	cfg.opp_on_activation = opt.opp_on_activation;
+ 	cfg.opp_on_field = opt.opp_on_field;
+ 	cfg.opp_keep = opt.opp_keep;
++	cfg.opp_float = opt.opp_float;
++	cfg.opp_float_field = opt.opp_float_field;
+ 	cfg.opp_key = opt.opp_key;
+ 	cfg.opp_gy_want = opt.opp_gy_want;
+ 
+diff -ruN combo-solver-rooted/solver-patched/search.cpp combo-solver-next/solver-patched/search.cpp
+--- combo-solver-rooted/solver-patched/search.cpp	2026-11-26 18:31:11.216572154 -0500
++++ combo-solver-next/solver-patched/search.cpp	2026-11-27 16:28:51.554980753 -0500
+@@ -1946,6 +1946,18 @@
+ 		   std::find(cfg.opp_keep.begin(), cfg.opp_keep.end(),
+ 					 duel.Db().Canonical(cands[i].code)) != cfg.opp_keep.end())
+ 			val[i] = -(int64_t(1) << 40);
++		// Patch 0021: its own card whose effect fires as it goes (Heavenly Spheres: "If this
++		// card is Tributed" summons a Dragon) is the cheapest cost of all -- the ATK pick gave
++		// up Phantom Beast for Spheres' own cost (duel 11). "Sent from the field" only counts
++		// where it is on the field.
++		if(cands[i].con == prompt_player) {
++			const uint32_t cc = duel.Db().Canonical(cands[i].code);
++			if(std::find(cfg.opp_float.begin(), cfg.opp_float.end(), cc) != cfg.opp_float.end() ||
++			   ((cands[i].loc & LOCATION_ONFIELD) &&
++				std::find(cfg.opp_float_field.begin(), cfg.opp_float_field.end(), cc) !=
++					cfg.opp_float_field.end()))
++				val[i] = 2;
++		}
+ 		// Patch 0012: the attacker's kill keys first, in --opp-key order (its
+ 		// kills hinge on them: Angelechy's Kusanagi used Enlisted as its Tuner in
+ 		// 332 of 340 kills, and the ATK pick took Destrier over it).
+diff -ruN combo-solver-rooted/solver-patched/search.h combo-solver-next/solver-patched/search.h
+--- combo-solver-rooted/solver-patched/search.h	2026-11-26 18:31:11.215572130 -0500
++++ combo-solver-next/solver-patched/search.h	2026-11-27 16:28:51.538980356 -0500
+@@ -2752,6 +2752,8 @@
+ 	std::vector<uint32_t> opp_on_field;
+ 	// --opp-keep <codes> (duelroom patch 0020): see Search::DefenderPick.
+ 	std::vector<uint32_t> opp_keep;
++	// --opp-float / --opp-float-field <codes> (duelroom patch 0021): see Search::DefenderPick.
++	std::vector<uint32_t> opp_float, opp_float_field;
+ 	// --opp-key <codes> (duelroom patch 0012): the searcher's kill keys, most
+ 	// important first; the defender's target pick takes one over any other.
+ 	std::vector<uint32_t> opp_key;

@@ -61,6 +61,9 @@ sed -i "s#/build/combo-solver/#/build/$(basename "$dst")/#g" "$dst/compile.cmds"
 # 0020: --opp-keep, the defender gives up its hand traps (0 ATK) only when nothing else can
 # pay a cost (Mind Shuffle's discard took Ash first once every card could answer).
 (cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0020-opp-keep.patch" >&2)
+# 0021: --opp-float / --opp-float-field, the defender gives up a card whose effect fires as it
+# goes (Heavenly Spheres "If this card is Tributed") first to a cost (duel 11, duel._floats).
+(cd "$dst/solver-patched" && patch -p2 --no-backup-if-mismatch < "$here/patches/0021-opp-float.patch" >&2)
 grep "solver-patched/[a-z_]*\.cpp" "$dst/compile.cmds" | xargs -d '\n' -P "${BUILD_JOBS:-$(nproc)}" -I{} sh -c '{}'
 g++ -o "$dst/bin/combosolver" "$dst"/obj/solver/*.o "$dst"/obj/core/*.o \
     "$dst"/obj/lua/*.o "$dst"/obj/lzma/*.o -lsqlite3 -lpthread -ldl
@@ -72,6 +75,7 @@ grep -q -- "--stop-on-win" <<<"$help" || { echo "built binary lacks --stop-on-wi
 grep -q -- "--opp-smart" <<<"$help" || { echo "built binary lacks --opp-smart" >&2; exit 1; }
 grep -q -- "--opp-on-activation" <<<"$help" || { echo "built binary lacks --opp-on-activation" >&2; exit 1; }
 grep -q -- "--opp-on-field" <<<"$help" || { echo "built binary lacks --opp-on-field" >&2; exit 1; }
+grep -q -- "--opp-float" <<<"$help" || { echo "built binary lacks --opp-float" >&2; exit 1; }
 grep -q -- "--opp-keep" <<<"$help" || { echo "built binary lacks --opp-keep" >&2; exit 1; }
 grep -q -- "--self-hand-root" <<<"$help" || { echo "built binary lacks --self-hand-root" >&2; exit 1; }
 grep -q -- "--opp-branches" <<<"$help" || { echo "built binary lacks --opp-branches" >&2; exit 1; }
